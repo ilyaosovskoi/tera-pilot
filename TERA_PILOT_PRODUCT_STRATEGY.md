@@ -134,7 +134,7 @@ Make Tera Pilot the most understandable and verifiable way to run coding agents 
 
 **Problem:** desire to study and modify the agent runtime without vendor lock-in.
 
-**Need:** Apache-2.0, local run, understandable architecture, extensible providers/tools.
+**Need:** MIT-licensed, local run, understandable architecture, extensible providers/tools.
 
 **Why Tera Pilot fits:** open Python runtime and a wide set of integrations.
 

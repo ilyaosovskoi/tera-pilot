@@ -62,7 +62,7 @@ development is built.
 | T4 | Prompts do not require reading keys; keys live in env/config, not in the repository; `encrypted_prompt.py` (ChaCha20-Poly1305) for enterprise prompts; UI hints "do not paste keys into code" | `agent/encrypted_prompt.py` |
 | T5 | The single network egress point is `web_search_backend.py` (zero-telemetry, only explicit web_search/web_fetch calls); MCP connects explicitly; providers are chosen by the user (BYOK) | `web_search_backend.py`, `mcp_manager.py` |
 | T6 | Activity log (append-only, in memory) + signed export: Ed25519 signature per record + hash chain (SHA-256 prev_hash+payload) — tampering/deletion/reordering is detected; verification: `tera-pilot audit verify` | `activity_log.py`, `audit_signing.py`, `audit_cli.py` |
-| T8 | Dependencies pinned in requirements.txt; local installation from source; Apache-2.0 for code review | `requirements.txt`, `pyproject.toml` |
+| T8 | Dependencies pinned in requirements.txt; local installation from source; MIT license for code review | `requirements.txt`, `pyproject.toml` |
 
 Additionally: **network egress visibility** — the `web` category in the activity log marks
 all external agent calls, so the user sees "the agent left the project".

@@ -12,7 +12,7 @@
 
 <br/>
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)]()
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue?style=for-the-badge&logo=python)](https://www.python.org/)
 [![Textual](https://img.shields.io/badge/TUI-Textual-purple?style=for-the-badge)](https://textual.textualize.io/)
@@ -193,7 +193,7 @@ Tera Pilot is designed first for:
 3. **Teams with sensitive or regulated repositories** that need self-hosting and policy control.
 4. **Small engineering teams** that want CI-based maintenance, review and test workflows.
 5. **Internal AI/platform teams** building controlled agent infrastructure.
-6. **Open-source and self-hosting users** who want an Apache-2.0, vendor-neutral runtime.
+6. **Open-source and self-hosting users** who want an MIT-licensed, vendor-neutral runtime.
 
 Tera Pilot is not primarily an autocomplete product, and it is not yet an enterprise SaaS replacement for GitHub Copilot.
 
@@ -269,4 +269,4 @@ Environment variables are now `TERA_PILOT_*` (e.g. `TERA_PILOT_PROVIDER`, `TERA_
 
 ## License
 
-Apache-2.0 — free to use, modify and integrate.
+MIT — free to use, modify and integrate.

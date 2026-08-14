@@ -4,7 +4,7 @@
   "description": "Tera Pilot — TUI-first, local-first coding agent with multi-provider support, Web UI, and a controlled backend",
   "keywords": ["ai", "ide", "agent", "llm", "tera-pilot", "terminal", "tui"],
   "author": "Tera Pilot Contributors",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/ilyaosovskoi/tera-pilot"
