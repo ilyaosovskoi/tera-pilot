@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "fix-missing-return",
+  "name": "Fix apply_discount missing return",
+  "category": "bug_fix",
+  "prompt": "apply_discount(price, percent) in discount.py computes the discounted value but never returns it, so callers always get None. Fix the function so the tests in test_discount.py pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

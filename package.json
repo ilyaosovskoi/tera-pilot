@@ -1,0 +1,36 @@
+{
+  "name": "tera-pilot",
+  "version": "2.2.4",
+  "description": "Tera Pilot — TUI-first, local-first coding agent with multi-provider support, Web UI, and a controlled backend",
+  "keywords": ["ai", "ide", "agent", "llm", "tera-pilot", "terminal", "tui"],
+  "author": "Tera Pilot Contributors",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ilyaosovskoi/tera-pilot"
+  },
+  "bin": {
+    "tera-pilot": "./bin/tera-pilot.js",
+    "tera-pilot-tui": "./bin/tera-pilot-tui.js",
+    "tera-pilot-daemon": "./bin/tera-pilot-daemon.js",
+    "tera-pilot-acp": "./bin/tera-pilot-acp.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "preuninstall": "node scripts/preuninstall.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "os": ["darwin", "linux", "win32"],
+  "files": [
+    "bin/",
+    "scripts/",
+    "tera_pilot/",
+    "tera_pilot_tui/",
+    "pyproject.toml",
+    "requirements.txt",
+    "LICENSE",
+    "README.md"
+  ]
+}

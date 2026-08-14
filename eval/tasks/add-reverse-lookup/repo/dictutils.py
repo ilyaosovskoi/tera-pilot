@@ -1,0 +1,7 @@
+"""Dict utilities."""
+
+
+def find_key(mapping, value):
+    """Return the first key in ``mapping`` whose value equals ``value``,
+    or None when no key matches."""
+    raise NotImplementedError

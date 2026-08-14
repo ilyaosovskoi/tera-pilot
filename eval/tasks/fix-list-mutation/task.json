@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "fix-list-mutation",
+  "name": "Fix sorted_descending mutating input",
+  "category": "bug_fix",
+  "prompt": "sorted_descending(values) in sorter.py is documented to return a NEW sorted list without modifying the input, but it sorts in place and returns None. Fix it so the tests in test_sorter.py pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

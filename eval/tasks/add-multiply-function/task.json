@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "add-multiply-function",
+  "name": "Add multiply function with tests",
+  "category": "feature",
+  "prompt": "Add a multiply(a, b) function to calc.py that returns a * b, and extend test_calc.py so the new function is covered. The whole test suite must pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "passing",
+  "timeout_secs": 300
+}

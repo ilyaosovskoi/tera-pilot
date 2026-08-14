@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "fix-date-parsing",
+  "name": "Fix parse_date returning strings",
+  "category": "bug_fix",
+  "prompt": "parse_date(text) in dates.py is documented to return a tuple of ints (year, month, day) for input like '2026-08-13', but month and day come back as strings. Fix it so the tests in test_dates.py pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

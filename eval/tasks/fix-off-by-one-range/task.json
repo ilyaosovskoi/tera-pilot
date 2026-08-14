@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "fix-off-by-one-range",
+  "name": "Fix inclusive_range dropping the end value",
+  "category": "bug_fix",
+  "prompt": "inclusive_range(start, end) in ranges.py is supposed to return every integer from start to end, both ends included. It currently drops the end value (an off-by-one bug). Fix the function so both tests in test_ranges.py pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

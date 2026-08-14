@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "add-dedupe-preserving-order",
+  "name": "Implement unique() preserving order",
+  "category": "feature",
+  "prompt": "listutils.py declares unique(items) but it raises NotImplementedError. Implement it: return a new list with duplicates removed, preserving first-seen order. The tests in test_listutils.py must pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

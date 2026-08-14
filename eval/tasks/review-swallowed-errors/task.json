@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "review-swallowed-errors",
+  "name": "Review worker.py for error handling",
+  "category": "code_review",
+  "prompt": "Review worker.py for error-handling issues. Do NOT modify any code — this is a read-only review task. Write your findings to REVIEW.md in this repository. In particular, check what happens when the job fails inside the try block. REVIEW.md must identify the issue by name.",
+  "repo": "repo",
+  "test_command": ["python3", "-c", "import pathlib; t=pathlib.Path('REVIEW.md').read_text(encoding='utf-8').lower(); assert 'swallow' in t, 'REVIEW.md must identify the swallowed-error problem'"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

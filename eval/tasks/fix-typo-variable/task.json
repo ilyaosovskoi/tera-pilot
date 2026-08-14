@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "fix-typo-variable",
+  "name": "Fix NameError from misspelled variable",
+  "category": "bug_fix",
+  "prompt": "format_amount(value) in formatter.py raises NameError because the result is stored in a misspelled variable ('formated') but returned under the correct name ('formatted'). Fix the typo so the tests in test_formatter.py pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

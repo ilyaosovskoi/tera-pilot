@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tera-pilot.local/eval/results/schema-v1.json",
+  "title": "Tera Pilot evaluation result — schema v1",
+  "description": "Machine-readable contract for one evaluation run. Mirrored by eval/schema.py (manual validator used by the runner and tests). status describes the run; metrics.test_passed describes the test execution; metrics.verification_status describes the verification step; workspace.baseline describes the pristine repo state. They are never conflated.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version", "task_id", "task_name", "category", "status",
+    "timestamp", "runner_version", "driver", "provider", "model",
+    "workspace", "prompt", "metrics", "final_output"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "const": "1.0" },
+    "task_id": { "type": "string" },
+    "task_name": { "type": "string" },
+    "category": {
+      "type": "string",
+      "enum": ["bug_fix", "test_repair", "refactor", "feature", "code_review", "documentation"]
+    },
+    "status": { "type": "string", "enum": ["success", "failed", "error", "skipped"] },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "runner_version": { "type": "string" },
+    "driver": { "type": "string", "enum": ["fake", "api"] },
+    "provider": { "type": ["string", "null"] },
+    "model": { "type": ["string", "null"] },
+    "workspace": {
+      "type": "object",
+      "properties": {
+        "commit": { "type": ["string", "null"], "description": "Base commit the task started from, when the fixture is a git repo." },
+        "repo_hash": { "type": "string", "description": "SHA-256 fingerprint of the fixture repo contents." },
+        "baseline": {
+          "type": "object",
+          "description": "Result of running test_command on the pristine repo, before any agent work. Recorded for the fake driver always; for the api driver with --baseline.",
+          "properties": {
+            "test_passed": { "type": ["boolean", "null"] },
+            "test_exit_code": { "type": ["integer", "null"] },
+            "duration_sec": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "prompt": { "type": "string" },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "duration_sec", "iterations", "tokens", "cost_usd", "tools_used",
+        "test_command", "test_passed", "test_exit_code", "test_output",
+        "verification_status"
+      ],
+      "properties": {
+        "duration_sec": { "type": "number", "minimum": 0 },
+        "iterations": { "type": "integer", "minimum": 0 },
+        "tokens": { "type": "integer", "minimum": 0 },
+        "cost_usd": { "type": "number", "minimum": 0 },
+        "tools_used": { "type": "array", "items": { "type": "string" } },
+        "test_command": { "type": ["array", "null"], "items": { "type": "string" } },
+        "test_passed": { "type": ["boolean", "null"] },
+        "test_exit_code": { "type": ["integer", "null"] },
+        "test_output": {
+          "type": "string",
+          "description": "Potentially sensitive — redacted from reports by default."
+        },
+        "verification_status": {
+          "type": "string",
+          "enum": ["ran", "passed", "failed", "unknown", "not_run"]
+        },
+        "tokens_in": { "type": "integer", "minimum": 0, "description": "Optional: input tokens from the provider usage tracker." },
+        "tokens_out": { "type": "integer", "minimum": 0, "description": "Optional: output tokens from the provider usage tracker." },
+        "request_count": { "type": "integer", "minimum": 0, "description": "Optional: number of provider requests this run made." },
+        "cancelled": { "type": "boolean", "description": "Optional: true when the run was cancelled (e.g. user Stop)." }
+      }
+    },
+    "final_output": {
+      "type": "string",
+      "description": "Potentially sensitive — the agent's final answer."
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "write-project-readme",
+  "name": "Write project README documentation",
+  "category": "documentation",
+  "prompt": "README.md is empty. Write a useful README for this small project: what greeter.py does, a quick usage example, and a short installation note. The README must be more than 100 characters.",
+  "repo": "repo",
+  "test_command": ["python3", "-c", "import pathlib; t = pathlib.Path('README.md').read_text(); assert len(t) > 100, 'README too short'"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

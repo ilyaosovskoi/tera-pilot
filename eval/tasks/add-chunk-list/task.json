@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "add-chunk-list",
+  "name": "Implement chunks()",
+  "category": "feature",
+  "prompt": "chunking.py declares chunks(items, size) but it raises NotImplementedError. Implement it as a generator that yields successive size-sized chunks of items (the last chunk may be shorter). The tests in test_chunking.py must pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

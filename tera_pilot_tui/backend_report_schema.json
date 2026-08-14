@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tera-pilot.local/backend-report/schema-v1.json",
+  "title": "Tera Pilot backend report — schema v1",
+  "description": "Machine-readable contract for one backend task run (TUI-backed automation adapter, CI, GitHub workflows, daemon). Produced by tera_pilot_tui.backend_runner.run_task(). Mirrored by the manual validator in tera_pilot_tui/backend_report.py (no jsonschema dependency). Status describes the run; verification.status describes the verification step; ok is the run-level success flag. Tool arguments are intentionally NOT exported — command/MCP payloads can contain secrets. final_output is potentially sensitive and must be treated as such by consumers.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version", "ok", "status", "workspace", "provider", "model",
+    "iterations", "duration_sec", "tools", "verification", "final_output"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "ok": { "type": "boolean", "description": "Run-level success flag." },
+    "status": {
+      "type": "string",
+      "enum": ["success", "failed", "error"],
+      "description": "Outcome of the run itself. success = task completed; failed = task ran but did not succeed; error = the run failed before producing a result (e.g. provider auth error)."
+    },
+    "error": { "type": ["string", "null"], "description": "Human-readable error message, null on success." },
+    "workspace": { "type": "string", "description": "Absolute path of the workspace the agent operated in. Identity, not content." },
+    "provider": { "type": ["string", "null"], "description": "Actual provider id used, not just a config hint." },
+    "model": { "type": ["string", "null"], "description": "Actual model name used, not just a config hint." },
+    "iterations": { "type": "integer", "minimum": 0 },
+    "duration_sec": { "type": "number", "minimum": 0, "description": "Wall-clock duration of the backend run." },
+    "tokens": { "type": "integer", "minimum": 0, "description": "Cumulative session tokens tracked by the usage tracker." },
+    "cost_usd": { "type": "number", "minimum": 0, "description": "Cumulative session cost in USD tracked by the usage tracker." },
+    "tools": {
+      "type": "array",
+      "description": "Tool calls with metadata only — raw arguments are never exported.",
+      "items": {
+        "type": "object",
+        "required": ["tool"],
+        "properties": {
+          "tool": { "type": "string" },
+          "error": { "type": ["string", "null"] },
+          "duration_ms": { "type": "number", "minimum": 0 }
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "required": ["self_verify_called", "status"],
+      "properties": {
+        "self_verify_called": { "type": "boolean" },
+        "status": {
+          "type": "string",
+          "enum": ["not_requested", "ran", "passed", "failed", "unknown"],
+          "description": "What the verification step actually did. An unrun check is never called successful."
+        }
+      }
+    },
+    "test_result": {
+      "type": ["object", "null"],
+      "description": "Present only when the caller ran a test command as part of the task.",
+      "properties": {
+        "command": { "type": ["array", "null"], "items": { "type": "string" } },
+        "passed": { "type": ["boolean", "null"] },
+        "exit_code": { "type": ["integer", "null"] },
+        "output": { "type": "string", "description": "Potentially sensitive — redacted from reports by default." }
+      }
+    },
+    "final_output": {
+      "type": "string",
+      "description": "Potentially sensitive — the agent's final answer. May contain repository code."
+    },
+    "audit_ref": {
+      "type": ["string", "null"],
+      "description": "Optional reference to the signed audit export for this run (e.g. path or export id)."
+    },
+    "metadata": {
+      "type": ["object", "null"],
+      "description": "Optional run metadata. Sanitized to JSON-safe values by the producer."
+    }
+  }
+}

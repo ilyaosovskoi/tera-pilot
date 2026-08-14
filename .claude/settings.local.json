@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(python3 -m py_compile clew/agent/runtime.py clew/agent/agent_runtime.py clew/agent/compaction_v2.py clew/agent/_fallback_compaction.py clew/agent/_fallback_interjection.py clew/agent/interjection.py clew/agent/subagent_v2.py clew/session/subagent_batch.py clew/session/subagent_host.py clew/memory_service.py clew/mcp_manager.py clew/loop/turn_loop.py clew/loop/tool_scheduler.py)"
-    ]
-  }
-}

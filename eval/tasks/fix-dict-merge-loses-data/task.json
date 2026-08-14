@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "fix-dict-merge-loses-data",
+  "name": "Fix deep_merge dropping nested keys",
+  "category": "bug_fix",
+  "prompt": "deep_merge(base, override) in config_merge.py is documented to merge nested dicts recursively, but it replaces nested dicts wholesale, dropping keys that only exist in base. Fix it so the tests in test_config_merge.py pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

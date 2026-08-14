@@ -4,6 +4,8 @@ __pycache__/
 .DS_Store
 *.egg-info/
 clew-native/target/
+tera-pilot-native/target/
 stderr.txt
 .venv/
 venv/
+.pytest_cache/

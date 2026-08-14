@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "refactor-dataclass",
+  "name": "Convert Point to a dataclass",
+  "category": "refactor",
+  "prompt": "Point in point.py is a hand-written class with an __init__ that just stores x and y. Convert it to a proper dataclass (keep the distance_to method and its behavior). The tests in test_point.py verify the refactor.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

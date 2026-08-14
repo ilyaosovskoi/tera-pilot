@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "add-parse-duration",
+  "name": "Implement parse_duration()",
+  "category": "feature",
+  "prompt": "durations.py declares parse_duration(text) but it raises NotImplementedError. Implement it: parse strings like '1h30m' (h=hours, m=minutes, s=seconds) into total seconds, and return None for invalid input. The tests in test_durations.py must pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "repair-test-wrong-expected-value",
+  "name": "Fix wrong expectation in test_bank",
+  "category": "test_repair",
+  "prompt": "The code in bank.py is correct. test_bank.py contains a wrong expectation: balance_after_fee(100, 5) should be 95 (100 minus the 5 fee), not 105. Fix the test so the suite passes — do not change bank.py.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

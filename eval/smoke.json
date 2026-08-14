@@ -1,0 +1,12 @@
+[
+  "fix-config-loader-empty-file",
+  "fix-missing-return",
+  "repair-test-import-path",
+  "repair-test-float-tolerance",
+  "refactor-enum-constants",
+  "add-clamp-function",
+  "add-multiply-function",
+  "review-sql-injection",
+  "write-project-readme",
+  "doc-changelog-from-git"
+]

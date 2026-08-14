@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "repair-test-state-leak",
+  "name": "Make test_cache order-independent",
+  "category": "test_repair",
+  "prompt": "The cache module is correct. test_cache.py has an order-dependency bug: test_second_sees_fresh_state only passes when it runs before test_first_populates_cache, because the first test leaves 'a' cached. Fix the tests so they are order-independent (clear the cache state where needed) — do not change cache.py.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

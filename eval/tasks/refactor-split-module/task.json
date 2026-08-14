@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "refactor-split-module",
+  "name": "Split utils into strings and numbers modules",
+  "category": "refactor",
+  "prompt": "utils.py mixes string and number utilities. Split it into two focused modules: strings.py (with upper_first) and numeric.py (with double). Keep utils.py working for existing callers by re-exporting both functions from it. The tests in test_split.py verify the refactor.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

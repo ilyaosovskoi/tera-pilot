@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "repair-test-broken-fixture",
+  "name": "Fix broken fixture in test_config_read",
+  "category": "test_repair",
+  "prompt": "The code in config_read.py is correct. test_config_read.py claims to read a config file but never creates it, so the test fails. Fix the test's fixture setup (create the file before loading it) — do not change config_read.py.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

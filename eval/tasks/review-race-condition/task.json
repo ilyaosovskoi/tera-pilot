@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "review-race-condition",
+  "name": "Review counter.py for thread safety",
+  "category": "code_review",
+  "prompt": "Review counter.py for thread-safety issues. Do NOT modify any code — this is a read-only review task. Write your findings to REVIEW.md in this repository. In particular, check whether the shared counter is safe under concurrent threads. REVIEW.md must identify the issue by name.",
+  "repo": "repo",
+  "test_command": ["python3", "-c", "import pathlib; t=pathlib.Path('REVIEW.md').read_text(encoding='utf-8').lower(); assert 'race' in t, 'REVIEW.md must identify the race condition'"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

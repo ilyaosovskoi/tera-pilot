@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "doc-usage-examples",
+  "name": "Write runnable usage examples",
+  "category": "documentation",
+  "prompt": "Write EXAMPLES.md in this repository with at least two runnable Python usage examples for temperature.py in doctest format (lines starting with '>>>', with the expected output on the following line). The examples must be correct: they are executed with the doctest module. Example format:\n\n    >>> from temperature import c_to_f\n    >>> c_to_f(100)\n    212.0",
+  "repo": "repo",
+  "test_command": ["python3", "-c", "import doctest; r=doctest.testfile('EXAMPLES.md', module_relative=False); assert r.failed == 0 and r.attempted >= 2, (r.attempted, r.failed)"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

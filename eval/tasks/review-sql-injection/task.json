@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "review-sql-injection",
+  "name": "Review db.py for SQL injection",
+  "category": "code_review",
+  "prompt": "Review db.py for security issues. Do NOT modify any code — this is a read-only review task. Write your findings to REVIEW.md in this repository. In particular, check how the username input reaches the SQL query and whether an injection risk exists. REVIEW.md must identify the vulnerability by name.",
+  "repo": "repo",
+  "test_command": ["python3", "-c", "import pathlib; t=pathlib.Path('REVIEW.md').read_text(encoding='utf-8').lower(); assert 'injection' in t, 'REVIEW.md must identify the injection risk'"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

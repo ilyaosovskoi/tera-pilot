@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "fix-config-loader-empty-file",
+  "name": "Fix config loader crash on empty file",
+  "category": "bug_fix",
+  "prompt": "The load_config function in config_loader.py raises a JSONDecodeError when the config file is empty, and a FileNotFoundError when it is missing. Fix it so an empty or missing file returns an empty dict instead of crashing, then make the test suite pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

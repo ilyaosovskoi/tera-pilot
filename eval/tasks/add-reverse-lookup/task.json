@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "add-reverse-lookup",
+  "name": "Implement find_key() reverse lookup",
+  "category": "feature",
+  "prompt": "dictutils.py declares find_key(mapping, value) but it raises NotImplementedError. Implement it: return the first key in mapping whose value equals value, or None when no key matches. The tests in test_dictutils.py must pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

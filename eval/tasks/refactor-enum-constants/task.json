@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "refactor-enum-constants",
+  "name": "Replace string status constants with an enum",
+  "category": "refactor",
+  "prompt": "order.py models order statuses as bare string constants (STATUS_NEW, STATUS_SHIPPED, STATUS_CANCELLED). Introduce an OrderStatus enum in a new module status.py with members NEW, SHIPPED, CANCELLED (values 'new', 'shipped', 'cancelled') and update order.py to use it in describe(). The tests in test_order.py verify the refactor.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

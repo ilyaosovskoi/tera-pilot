@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "fix-none-handling",
+  "name": "Fix get_user_name crash on missing user",
+  "category": "bug_fix",
+  "prompt": "get_user_name(user) in registry.py is documented to return 'Anonymous' when the user is missing or has no name, but it raises (KeyError / TypeError) instead. Fix it so the tests in test_registry.py pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

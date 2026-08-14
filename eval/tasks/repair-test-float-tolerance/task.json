@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "repair-test-float-tolerance",
+  "name": "Fix fragile float comparison in test_means",
+  "category": "test_repair",
+  "prompt": "The code in means.py is correct. test_means.py compares floating point results for exact equality (mean(0.1, 0.2, 0.3) == 0.2), which fails due to float representation. Fix the test to use pytest.approx for the float case — do not change means.py.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

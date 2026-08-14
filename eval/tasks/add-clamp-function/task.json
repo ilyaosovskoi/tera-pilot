@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "add-clamp-function",
+  "name": "Implement clamp()",
+  "category": "feature",
+  "prompt": "mathutils.py declares clamp(value, low, high) but it raises NotImplementedError. Implement it: return value constrained to the inclusive range [low, high]. The tests in test_mathutils.py must pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

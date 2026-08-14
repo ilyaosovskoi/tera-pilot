@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "tera-pilot-native"
+version = "0.1.0"
+description = "Tera Pilot Rust native acceleration: sandbox checks, circuit breaker, interjection buffer, compaction engine, cancel tokens"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+
+[tool.maturin]
+module-name = "tera_pilot_native"
+bindings = "pyo3"

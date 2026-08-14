@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "fix-division-by-zero",
+  "name": "Fix average crash on empty list",
+  "category": "bug_fix",
+  "prompt": "average(numbers) in stats.py raises ZeroDivisionError for an empty list, but it is documented to return 0. Fix it so the tests in test_stats.py pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

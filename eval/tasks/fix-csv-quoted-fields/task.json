@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "fix-csv-quoted-fields",
+  "name": "Fix parse_csv_line with quoted fields",
+  "category": "bug_fix",
+  "prompt": "parse_csv_line(line) in csvutils.py splits on every comma, so quoted fields that contain commas are broken apart. It is documented to handle double-quoted fields. Fix it (the Python csv module is fine to use) so the tests in test_csvutils.py pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

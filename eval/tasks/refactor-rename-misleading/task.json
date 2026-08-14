@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "refactor-rename-misleading",
+  "name": "Rename calc to total_amount",
+  "category": "refactor",
+  "prompt": "billing.py exposes a function named calc(data) that actually computes a billing total. Rename it to total_amount(items) (with the parameter named items) to make the intent clear, and keep a thin deprecated alias calc(data) so existing callers keep working. The tests in test_billing.py verify the rename.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

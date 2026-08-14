@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "add-slugify",
+  "name": "Implement slugify()",
+  "category": "feature",
+  "prompt": "slugs.py declares slugify(text) but it raises NotImplementedError. Implement it: lowercase the text, replace whitespace runs with single dashes, strip non-alphanumeric characters, and trim leading/trailing dashes. The tests in test_slugs.py must pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

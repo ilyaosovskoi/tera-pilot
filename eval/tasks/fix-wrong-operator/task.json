@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "fix-wrong-operator",
+  "name": "Fix is_valid_email rejecting non-.com domains",
+  "category": "bug_fix",
+  "prompt": "is_valid_email(email) in emails.py is documented to accept any user@host.tld address, but it only accepts .com domains (for example ada@example.org is wrongly rejected). Fix it so the tests in test_emails.py pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

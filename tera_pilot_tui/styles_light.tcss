@@ -1,0 +1,290 @@
+/* styles_light.tcss - Tera Pilot TUI light theme (v2.1.0 Loop 3: Warm, Modern, Content-Forward) */
+
+/* ── Global ─────────────────────────────────────────────────────── */
+Screen {
+    background: #ffffff;
+    color: #24292f;
+}
+
+/* ── Status Bar ─────────────────────────────────────────────────── */
+StatusBar {
+    dock: top;
+    height: 3;
+    background: #f6f8fa;
+    color: #656d76;
+    border-bottom: solid #d0d0d0;
+}
+
+/* ── Chat Log ───────────────────────────────────────────────────── */
+ChatLog {
+    height: 1fr;
+    background: #ffffff;
+    padding: 1 2;
+    scrollbar-size: 1 1;
+}
+
+ChatLog:focus {
+    scrollbar-color: #d77757;
+}
+
+/* ── Input Box (solid border, Claude Code style) ────────────────── */
+InputBox {
+    dock: bottom;
+    height: 3;
+    border: solid #999999;
+    margin: 0 2 1 2;
+    background: #f0f0f0;
+}
+
+InputBox:focus {
+    border: solid #b0b0b0;
+    background: #f0f0f0;
+}
+
+InputBox:focus-within {
+    border: solid #b0b0b0;
+}
+
+/* ── Command Suggestions (inline, above input) ──────────────────── */
+CommandSuggestions {
+    dock: bottom;
+    height: 0;
+    margin: 0 2 0 2;
+    display: none;
+}
+
+CommandSuggestions.visible {
+    display: block;
+    height: auto;
+}
+
+#suggestions-box {
+    height: auto;
+    max-height: 12;
+    background: #f6f8fa;
+    border: solid #d77757;
+    padding: 0 1;
+}
+
+#suggestions-box OptionList {
+    height: auto;
+    max-height: 10;
+}
+
+#suggestions-footer {
+    height: 1;
+    color: #656d76;
+    padding: 0 1;
+    text-style: italic;
+}
+
+/* ── Approval Modal ─────────────────────────────────────────────── */
+ApprovalModal {
+    align: center middle;
+}
+
+#approval-box {
+    width: 70%;
+    max-width: 100;
+    height: auto;
+    padding: 1 2;
+    border: solid #ffc107;
+    background: #f6f8fa;
+}
+
+#approval-title {
+    text-style: bold;
+    color: #ffc107;
+    margin-bottom: 1;
+}
+
+#approval-action {
+    color: #24292f;
+}
+
+#approval-summary {
+    color: #656d76;
+    margin-bottom: 1;
+}
+
+#approval-buttons {
+    height: auto;
+    align: center middle;
+}
+
+#approval-buttons Button {
+    margin: 1 1 0 1;
+    width: 100%;
+}
+
+/* ── Verification Modal (G4) ────────────────────────────────────── */
+VerificationModal {
+    align: center middle;
+}
+
+#verify-box {
+    width: 80%;
+    max-width: 120;
+    height: auto;
+    max-height: 32;
+    padding: 1 2;
+    border: solid #6e7bf5;
+    background: #f6f8fa;
+}
+
+#verify-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#verify-grid {
+    height: auto;
+    margin-bottom: 1;
+}
+
+.verify-cell {
+    width: 1fr;
+    padding: 0 1;
+}
+
+#verify-meta {
+    color: #656d76;
+    margin-bottom: 1;
+}
+
+#verify-summary {
+    color: #24292f;
+    margin-bottom: 1;
+}
+
+#verify-issues {
+    color: #bc4c00;
+    margin-bottom: 1;
+}
+
+#verify-suggestions {
+    color: #6e7bf5;
+    margin-bottom: 1;
+}
+
+#verify-raw {
+    color: #656d76;
+    margin-bottom: 1;
+}
+
+#verify-buttons {
+    height: auto;
+    align: center middle;
+    margin-top: 1;
+}
+
+#verify-buttons Button {
+    margin: 1 1 0 1;
+    width: 100%;
+}
+
+/* ── Command Palette ────────────────────────────────────────────── */
+CommandPalette {
+    align: center bottom;
+}
+
+#palette-container {
+    width: 70%;
+    max-width: 80;
+    height: auto;
+    max-height: 22;
+    background: #f6f8fa;
+    border: solid #d77757;
+    padding: 0;
+    margin-bottom: 4;
+}
+
+#palette-header {
+    background: #d77757 20%;
+    color: #24292f;
+    padding: 0 1;
+    height: 1;
+    text-style: bold;
+}
+
+#palette-filter {
+    height: 3;
+    border: solid #d77757;
+    margin: 0 1;
+    padding: 0;
+}
+
+#palette-list {
+    height: auto;
+    max-height: 16;
+    margin: 0 1;
+}
+
+#palette-list OptionList {
+    height: auto;
+    max-height: 16;
+}
+
+#palette-footer {
+    height: 1;
+    color: #656d76;
+    padding: 0 1;
+    text-style: italic;
+}
+
+/* ── Tool Block Widget ──────────────────────────────────────────── */
+ToolBlock {
+    height: auto;
+    margin: 0 2;
+    padding: 0 1;
+    border: solid #d0458a;
+    background: #ffffff;
+}
+
+ToolBlock .tool-header {
+    color: #d0458a;
+    text-style: bold;
+}
+
+ToolBlock .tool-content {
+    color: #24292f;
+}
+
+/* ── Thinking Indicator ─────────────────────────────────────────── */
+ThinkingIndicator {
+    height: 1;
+    color: #d77757;
+    padding: 0 2;
+    text-style: bold;
+}
+
+/* ── Task Canvas View (G19a) ───────────────────────────────────── */
+TaskCanvasView {
+    dock: bottom;
+    height: auto;
+    max-height: 8;
+    margin: 0 2 0 2;
+    padding: 0 1;
+    background: #ffffff;
+    border-top: solid #d0d0d0;
+    color: #656d76;
+}
+
+/* ── Separator ──────────────────────────────────────────────────── */
+.separator {
+    color: #d0d0d0;
+}
+
+/* ── Diff colors ────────────────────────────────────────────────── */
+.diff-added {
+    background: #d4ffd9;
+}
+
+.diff-removed {
+    background: #ffd9dd;
+}
+
+/* ── Auto-accept mode ───────────────────────────────────────────── */
+.auto-accept {
+    color: #7c5ce0;
+}

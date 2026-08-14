@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "doc-function-docstrings",
+  "name": "Add docstrings to mathlib functions",
+  "category": "documentation",
+  "prompt": "Every public function in mathlib.py is missing a docstring. Add a concise docstring to square and cube describing what each returns (the code itself is correct — do not change behavior). The verification script checks that every public function has a non-empty docstring.",
+  "repo": "repo",
+  "test_command": ["python3", "-c", "import inspect, mathlib; missing=[n for n in dir(mathlib) if not n.startswith('_') and callable(getattr(mathlib, n)) and not inspect.getdoc(getattr(mathlib, n))]; assert not missing, f'missing docstrings: {missing}'"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

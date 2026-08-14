@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "doc-api-reference",
+  "name": "Write API.md reference for library",
+  "category": "documentation",
+  "prompt": "Write API.md in this repository documenting every public function of library.py (greet, add, version): what each takes and returns. The verification script checks that API.md mentions every public function by name.",
+  "repo": "repo",
+  "test_command": ["python3", "-c", "import library, pathlib; names=sorted(n for n in dir(library) if not n.startswith('_')); t=pathlib.Path('API.md').read_text(encoding='utf-8'); missing=[n for n in names if n not in t]; assert not missing, f'API.md missing: {missing}'"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

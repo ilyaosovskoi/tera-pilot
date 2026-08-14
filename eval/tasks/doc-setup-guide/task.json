@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "doc-setup-guide",
+  "name": "Write SETUP.md guide",
+  "category": "documentation",
+  "prompt": "Write SETUP.md in this repository: a short setup guide for the hello.py CLI project with an install step (pip install) and a run step (python hello.py --name ...). The verification script checks that SETUP.md contains 'pip install' and 'python'.",
+  "repo": "repo",
+  "test_command": ["python3", "-c", "import pathlib; t=pathlib.Path('SETUP.md').read_text(encoding='utf-8'); assert 'pip install' in t and 'python' in t, 'SETUP.md must include install and run instructions'"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

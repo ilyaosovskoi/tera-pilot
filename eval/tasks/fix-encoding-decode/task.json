@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "fix-encoding-decode",
+  "name": "Fix decode_payload using ASCII",
+  "category": "bug_fix",
+  "prompt": "decode_payload(data) in payload.py decodes bytes as ASCII, so any non-ASCII UTF-8 payload raises UnicodeDecodeError. It is documented to decode UTF-8. Fix it so the tests in test_payload.py pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

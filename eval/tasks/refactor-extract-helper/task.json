@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "refactor-extract-helper",
+  "name": "Extract duplicated CSV parsing into helpers.parse_parts",
+  "category": "refactor",
+  "prompt": "parse_home and parse_work in address_parser.py duplicate the same 'name, city' parsing. Extract that parsing into a new module helpers.py with a function parse_parts(raw) that returns a (name, city) tuple with whitespace stripped, and make both functions use it. Public behavior of parse_home and parse_work must stay identical. The tests in test_address_parser.py verify the refactor.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "review-unbounded-recursion",
+  "name": "Review tree.py for unbounded recursion",
+  "category": "code_review",
+  "prompt": "Review tree.py for correctness issues. Do NOT modify any code — this is a read-only review task. Write your findings to REVIEW.md in this repository. In particular, check whether the recursion has a base case. REVIEW.md must identify the issue by name.",
+  "repo": "repo",
+  "test_command": ["python3", "-c", "import pathlib; t=pathlib.Path('REVIEW.md').read_text(encoding='utf-8').lower(); assert 'recursion' in t, 'REVIEW.md must identify the recursion problem'"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

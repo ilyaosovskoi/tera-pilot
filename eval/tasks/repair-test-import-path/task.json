@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "repair-test-import-path",
+  "name": "Fix broken import in test_tools",
+  "category": "test_repair",
+  "prompt": "The module is tools.py (it provides reverse). test_tools.py imports from a non-existent module 'toolsx', so the suite fails with ModuleNotFoundError. Fix the import in the test — do not change tools.py.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

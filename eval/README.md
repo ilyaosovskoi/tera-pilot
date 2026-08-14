@@ -1,0 +1,178 @@
+# Evaluation Harness — reproducible evaluation contour (P0.1)
+
+> From `TERA_PILOT_PRODUCT_READINESS.md`, P0.1: "Reproducible evaluation
+> harness". Status: **implemented** — runner with a baseline mode,
+> machine-readable result schema, 43 tasks in 6 categories,
+> a smoke set for CI and quality-gate tests. Baseline runs (metrics on
+> real providers) are the next step.
+
+## Why
+
+The strategy forbids claiming superiority without reproducible data.
+This contour lets you:
+
+- run a task in a **clean copy** of the repository (the original fixture is
+  never changed, the temporary workspace is removed after the run);
+- record the input (prompt, base repo snapshot, git commit) and the output
+  (status, duration, tokens, cost, tools, test results);
+- record a **baseline** — the result of `test_command` on the *untouched*
+  repo, i.e. "tests fail before the agent did anything";
+- keep `status` (about the run), `metrics.test_passed` (about tests),
+  `metrics.verification_status` (about the verification step) and
+  `workspace.baseline` (about the pristine repo) separate — they are
+  **never conflated**;
+- run a smoke set without a network (the `fake` driver) in CI.
+
+## Structure
+
+```
+eval/
+  README.md            this document
+  runner.py            CLI: run / check / smoke / report
+  schema.py            manual result validator (mirror of schema.json)
+  smoke.json           task ids for the CI smoke set
+  tasks/
+    <task_id>/
+      task.json        task manifest
+      repo/            repository fixture (copied into a clean environment)
+      gold/            reference solution — the test applies it and checks
+                       that test_command passes (proves solvability)
+  results/
+    schema.json        JSON Schema v1 (machine-readable artifact)
+    *.json             run results
+```
+
+## Task format (`task.json`)
+
+```json
+{
+  "schema_version": "1.0",
+  "id": "fix-config-loader-empty-file",
+  "name": "Fix config loader crash on empty file",
+  "category": "bug_fix",
+  "prompt": "...task description for the agent...",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}
+```
+
+- `category` — one of: `bug_fix`, `test_repair`, `refactor`, `feature`,
+  `code_review`, `documentation`.
+- `repo` — subdirectory with the fixture; the runner copies it into a
+  temporary directory and runs `test_command` inside the copy.
+- `test_command` is optional; without it `verification_status =
+  not_run`.
+- `baseline_status` — what `test_command` returns on the **pristine**
+  repo: `failing` (tests fail before the agent works — typical for
+  bug_fix), `passing` (tests already pass — e.g. a feature task where the
+  new test does not yet exercise the new function), `unknown`. Verified
+  by the `smoke` command and quality-gate tests.
+- `gold/` — reference solution (only changed files). The test
+  `tests/test_eval_tasks.py` applies it to a clean copy and checks that
+  `test_command` passes: every task is solvable and verifiable.
+
+### Requirements for new tasks
+
+1. The fixture is small (2–5 files), self-contained, using the Python
+   standard library + pytest.
+2. `test_command` checks **behavior**, not line counts.
+3. For bug_fix/test_repair the baseline must fail; for refactor/feature
+   tests check the new structure/function (also usually failing before
+   the agent works).
+4. `gold/` must pass `test_command` — this is the CI guarantee of
+   solvability.
+5. Code documentation is in English (project policy); the prompt can be
+   in any language.
+
+## Commands
+
+```bash
+# One task, deterministic run without a network (CI / schema check).
+# The fake driver does not call an LLM and also records the baseline.
+python3 -m eval.runner run eval/tasks/fix-config-loader-empty-file --driver fake
+
+# Real run through a running Tera Pilot (SSE /api/agent/stream).
+# Tokens/cost come from the server usage tracker (GET /api/usage/get)
+# when available; otherwise token events are counted.
+# Record the baseline (tests on the pristine repo before the agent): --baseline.
+python3 -m eval.runner run eval/tasks/fix-config-loader-empty-file \
+    --driver api --api-base http://127.0.0.1:18732 --api-token <token> --baseline
+
+# Structural check of all tasks (fast, no runs) — CI gate.
+python3 -m eval.runner check
+
+# Smoke set (eval/smoke.json) on the fake driver + baseline_status check — CI gate.
+python3 -m eval.runner smoke
+
+# Summary over a results folder (human-readable or --json).
+python3 -m eval.runner report --dir eval/results
+python3 -m eval.runner report --dir eval/results --json
+
+# Harness version.
+python3 -m eval.runner --version
+```
+
+Useful `run` flags: `--keep-workspace` (do not remove the temporary
+workspace for debugging), `--out <dir>` (where to write the result,
+default `eval/results`), `--baseline` (for the api driver; always on
+for fake).
+
+Every run writes `eval/results/<task_id>_<timestamp>_<rand>.json` and
+validates it against schema v1 **before** writing — a bad result is not
+written.
+
+## Result schema (v1)
+
+Key fields (`eval/results/schema.json` — the complete JSON Schema):
+
+- `schema_version`, `task_id`, `category`, `timestamp`, `runner_version`;
+- `status` — `success | failed | error | skipped` (about the **run** status);
+- `driver` — `fake | api`;
+- `provider`, `model` — actual, not just hints from config;
+- `workspace.repo_hash` — SHA-256 snapshot of the base repository (without
+  `.git`/`__pycache__`);
+- `workspace.commit` — git HEAD commit, if the fixture is a git repository;
+- `workspace.baseline` — result of `test_command` on the pristine repo
+  (`test_passed`, `test_exit_code`, `duration_sec`);
+- `metrics.duration_sec`, `iterations`, `tokens`, `cost_usd`, `tools_used`;
+- `metrics.tokens_in/tokens_out/request_count/cancelled` — optional,
+  from provider usage metadata;
+- `metrics.test_passed`, `test_exit_code`, `test_output`;
+- `metrics.verification_status` — `ran | passed | failed | unknown | not_run`;
+- `final_output` — **potentially sensitive** field (the agent's answer).
+
+Fairness rules (claims discipline):
+
+- `test_output` and `final_output` may contain sensitive data — do not
+  publish in reports by default;
+- tool-call count and answer length are **not** quality metrics;
+- `verification_status` never calls an unrun check successful;
+- the schema is backward-compatible: new fields are optional, the required
+  set has not changed since the first v1.
+
+## CI
+
+Minimal CI set (all without a network, deterministic):
+
+```bash
+python3 -m pytest tests/test_evaluation_schema.py tests/test_eval_tasks.py -q
+python3 -m eval.runner check
+python3 -m eval.runner smoke
+```
+
+`tests/test_eval_tasks.py` is the quality gate: for every task it checks
+the manifest, that `baseline_status` matches the real state of the
+pristine repo, and that `test_command` passes with the reference
+solution from `gold/`.
+
+## Baseline run (next step)
+
+1. Start Tera Pilot (Web UI / daemon), configure a provider.
+2. Run the set: `python3 -m eval.runner run <task> --driver api
+   --api-base <url> --api-token <token> --baseline` for each task
+   (or in a loop).
+3. Aggregate the report: `python3 -m eval.runner report --dir eval/results`.
+4. Publish only measured claims in the README (task success rate,
+   test pass rate, cost, latency) with the methodology and run date.

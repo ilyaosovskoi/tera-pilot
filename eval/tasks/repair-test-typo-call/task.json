@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "repair-test-typo-call",
+  "name": "Fix typo'd function call in test_name_service",
+  "category": "test_repair",
+  "prompt": "The module is name_service.py (it provides full_name). test_name_service.py calls a function 'fullname' that does not exist — a typo for full_name. Fix the test so the suite passes — do not change name_service.py.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "add-word-count",
+  "name": "Implement word_count()",
+  "category": "feature",
+  "prompt": "textstats.py declares word_count(text) but it raises NotImplementedError. Implement it: return the number of whitespace-separated words in text (an empty string has 0 words; multiple spaces collapse). The tests in test_textstats.py must pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

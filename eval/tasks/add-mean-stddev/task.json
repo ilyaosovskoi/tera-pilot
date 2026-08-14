@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "add-mean-stddev",
+  "name": "Implement mean() and stddev()",
+  "category": "feature",
+  "prompt": "statistics_extra.py declares mean(values) and stddev(values) but both raise NotImplementedError. Implement them: mean returns the arithmetic mean (0 for an empty list); stddev returns the population standard deviation (0 for an empty list). The tests in test_statistics_extra.py must pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

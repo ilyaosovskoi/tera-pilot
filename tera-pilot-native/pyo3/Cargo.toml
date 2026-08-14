@@ -1,0 +1,13 @@
+[package]
+name = "tera-pilot-native-pyo3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Tera Pilot Rust native acceleration (PyO3): sandbox checks, circuit breaker, interjection buffer, compaction engine, cancel tokens"
+
+[lib]
+name = "tera_pilot_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"] }
