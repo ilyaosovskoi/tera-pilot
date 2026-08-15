@@ -49,6 +49,126 @@
 
   .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
 
+  /* ---------- Dynamic background ---------- */
+  .bg-orbs { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+  .orb { position: absolute; border-radius: 50%; will-change: transform; }
+  .orb-1 {
+    width: 640px; height: 640px; top: -180px; left: -140px;
+    background: radial-gradient(circle at 30% 30%, rgba(40,200,64,0.30), transparent 65%);
+    filter: blur(90px); animation: drift1 26s ease-in-out infinite alternate;
+  }
+  .orb-2 {
+    width: 540px; height: 540px; top: 28%; right: -180px;
+    background: radial-gradient(circle at 60% 40%, rgba(96,165,250,0.24), transparent 65%);
+    filter: blur(90px); animation: drift2 32s ease-in-out infinite alternate;
+  }
+  .orb-3 {
+    width: 500px; height: 500px; bottom: -160px; left: 28%;
+    background: radial-gradient(circle at 40% 60%, rgba(254,188,46,0.16), transparent 60%);
+    filter: blur(100px); animation: drift3 38s ease-in-out infinite alternate;
+  }
+  @keyframes drift1 { to { transform: translate(130px, 90px) scale(1.15); } }
+  @keyframes drift2 { to { transform: translate(-150px, -70px) scale(1.1); } }
+  @keyframes drift3 { to { transform: translate(90px, -130px) scale(1.2); } }
+
+  body::before {
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.028) 1px, transparent 1px);
+    background-size: 56px 56px;
+    -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000 35%, transparent 78%);
+    mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000 35%, transparent 78%);
+  }
+
+  /* ---------- Scroll progress ---------- */
+  .scroll-progress {
+    position: fixed; top: 0; left: 0; height: 2px; width: 0;
+    background: linear-gradient(90deg, var(--green), var(--blue));
+    z-index: 70; transition: width 0.1s linear;
+  }
+
+  /* ---------- Entrance & reveal ---------- */
+  .hero-anim { opacity: 0; animation: fade-up 0.7s cubic-bezier(.22,.61,.36,1) forwards; }
+  .hero-anim.d1 { animation-delay: 0.08s; } .hero-anim.d2 { animation-delay: 0.16s; }
+  .hero-anim.d3 { animation-delay: 0.24s; } .hero-anim.d4 { animation-delay: 0.34s; }
+  .hero-anim.d5 { animation-delay: 0.46s; }
+  @keyframes fade-up { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+
+  .reveal {
+    opacity: 0; transform: translateY(22px);
+    transition: opacity 0.6s cubic-bezier(.22,.61,.36,1), transform 0.6s cubic-bezier(.22,.61,.36,1);
+    transition-delay: var(--d, 0s);
+  }
+  .reveal.visible { opacity: 1; transform: none; }
+
+  /* ---------- Accent shimmer ---------- */
+  .hero h1 .accent {
+    background: linear-gradient(90deg, #28c840, #8fe89b, #28c840);
+    background-size: 200% 100%;
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+    animation: shine 6s linear infinite;
+  }
+  @keyframes shine { to { background-position: 200% 0; } }
+
+  /* ---------- Terminal effects ---------- */
+  .terminal {
+    box-shadow: 0 24px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(40,200,64,0.07), 0 0 60px rgba(40,200,64,0.06);
+    animation: floaty 7s ease-in-out infinite;
+  }
+  @keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+  .terminal-body .line-fade { opacity: 0; transform: translateY(4px); transition: opacity 0.45s ease, transform 0.45s ease; }
+  .terminal-body .lf1 { transition-delay: 0.12s; }
+  .terminal-body .lf2 { transition-delay: 0.24s; }
+  .terminal-body .lf3 { transition-delay: 0.36s; }
+  .terminal-body .lf4 { transition-delay: 0.48s; }
+  .terminal-body .lf5 { transition-delay: 0.60s; }
+  .terminal-body .lf6 { transition-delay: 0.72s; }
+  .terminal-body .lf7 { transition-delay: 0.84s; }
+  .terminal-body .lf8 { transition-delay: 0.96s; }
+  .terminal-body.typed-done .line-fade { opacity: 1; transform: none; }
+
+  /* ---------- Hover effects ---------- */
+  .card { transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease; }
+  .card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(40,200,64,0.35);
+    box-shadow: 0 14px 36px rgba(0,0,0,0.45), 0 0 0 1px rgba(40,200,64,0.10), 0 0 38px rgba(40,200,64,0.07);
+  }
+  .card .icon { transition: transform 0.25s ease; }
+  .card:hover .icon { transform: scale(1.1) rotate(-4deg); }
+
+  .btn-primary { position: relative; overflow: hidden; }
+  .btn-primary::after {
+    content: ""; position: absolute; top: 0; left: -80%; width: 45%; height: 100%;
+    background: linear-gradient(100deg, transparent, rgba(255,255,255,0.4), transparent);
+    transform: skewX(-20deg); transition: left 0.5s ease;
+  }
+  .btn-primary:hover::after { left: 135%; }
+
+  .flow-step .num { animation: pulse-soft 3.2s ease-in-out infinite; }
+  @keyframes pulse-soft {
+    0%,100% { box-shadow: 0 0 0 0 rgba(40,200,64,0.35); }
+    50% { box-shadow: 0 0 0 8px rgba(40,200,64,0); }
+  }
+
+  .provider { transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease; }
+  .provider:hover { transform: translateX(4px); border-color: rgba(40,200,64,0.30); background: var(--card-hover); }
+
+  .chip { transition: border-color 0.2s ease, transform 0.2s ease, color 0.2s ease; }
+  .chip:hover { border-color: rgba(40,200,64,0.4); color: var(--text); transform: translateY(-2px); }
+
+  .faq-item summary { transition: color 0.2s ease; }
+  .faq-item summary:hover { color: var(--green); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.001s !important; animation-iteration-count: 1 !important; transition-duration: 0.001s !important; }
+    .hero-anim { opacity: 1 !important; transform: none !important; }
+    .reveal { opacity: 1 !important; transform: none !important; }
+    .bg-orbs, .orb { display: none; }
+  }
+
   /* ---------- Nav ---------- */
   nav {
     position: sticky; top: 0; z-index: 50;
@@ -140,7 +260,7 @@
 
   /* ---------- Sections ---------- */
   section { padding: 84px 0; }
-  section.alt { background: var(--bg-soft); border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
+  section.alt { background: rgba(12,12,15,0.72); border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
 
   .sec-head { text-align: center; max-width: 720px; margin: 0 auto 52px; }
   .sec-head h2 { font-size: clamp(28px, 4vw, 40px); font-weight: 800; letter-spacing: -0.02em; margin-bottom: 14px; }
@@ -312,6 +432,13 @@
 </head>
 <body>
 
+<div class="bg-orbs" aria-hidden="true">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+</div>
+<div class="scroll-progress" id="scrollProgress" aria-hidden="true"></div>
+
 <nav>
   <div class="container nav-inner">
     <a class="brand" href="#">
@@ -337,29 +464,29 @@
 <!-- HERO -->
 <header class="hero">
   <div class="container">
-    <div class="hero-badge"><span class="dot"></span> Local-first · BYOK · 16 providers · MIT license</div>
-    <h1>Private, vendor-neutral<br>coding agents <span class="accent">— built to be verified.</span></h1>
-    <p class="sub">A self-hosted coding agent for private repositories, local models, CI, and verifiable automation. Textual TUI first, Web UI, HTTP daemon, MCP/ACP — or fully offline with Ollama and LM Studio.</p>
-    <div class="hero-cta">
+    <div class="hero-badge hero-anim d1"><span class="dot"></span> Local-first · BYOK · 16 providers · MIT license</div>
+    <h1 class="hero-anim d2">Private, vendor-neutral<br>coding agents <span class="accent">— built to be verified.</span></h1>
+    <p class="sub hero-anim d3">A self-hosted coding agent for private repositories, local models, CI, and verifiable automation. Textual TUI first, Web UI, HTTP daemon, MCP/ACP — or fully offline with Ollama and LM Studio.</p>
+    <div class="hero-cta hero-anim d4">
       <a class="btn btn-primary" href="#install">Get started — it&rsquo;s free</a>
       <a class="btn btn-ghost" href="https://github.com/ilyaosovskoi/tera-pilot">GitHub repo →</a>
     </div>
 
-    <div class="terminal">
+    <div class="terminal hero-anim d5">
       <div class="terminal-bar">
         <span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span>
         <span class="title">zsh — tera-pilot</span>
       </div>
       <div class="terminal-body">
-        <div><span class="cmd">npm install -g tera-pilot</span></div>
-        <div class="out">added 1 package in 6s</div>
-        <div class="out">[tera-pilot] creating Python virtualenv at ~/.tera_pilot/venv …</div>
-        <div class="ok">[tera-pilot] done — run: tera-pilot / tera-pilot-tui</div>
-        <div>&nbsp;</div>
-        <div><span class="cmd">tera-pilot-tui</span> <span class="comment"># full-screen terminal UI</span></div>
-        <div><span class="cmd">tera-pilot doctor</span> <span class="comment"># environment readiness check</span></div>
-        <div><span class="cmd">tera-pilot audit export --out audit.json</span> <span class="comment"># signed audit trail</span></div>
-        <div>&nbsp;<span class="cursor"></span></div>
+        <div><span class="cmd" id="typedCmd">npm install -g tera-pilot</span></div>
+        <div class="out line-fade lf1">added 1 package in 6s</div>
+        <div class="out line-fade lf2">[tera-pilot] creating Python virtualenv at ~/.tera_pilot/venv …</div>
+        <div class="ok line-fade lf3">[tera-pilot] done — run: tera-pilot / tera-pilot-tui</div>
+        <div class="line-fade lf4">&nbsp;</div>
+        <div class="line-fade lf5"><span class="cmd">tera-pilot-tui</span> <span class="comment"># full-screen terminal UI</span></div>
+        <div class="line-fade lf6"><span class="cmd">tera-pilot doctor</span> <span class="comment"># environment readiness check</span></div>
+        <div class="line-fade lf7"><span class="cmd">tera-pilot audit export --out audit.json</span> <span class="comment"># signed audit trail</span></div>
+        <div class="line-fade lf8">&nbsp;<span class="cursor"></span></div>
       </div>
     </div>
 
@@ -802,6 +929,48 @@
   document.getElementById('navBurger').addEventListener('click', function () {
     document.getElementById('navLinks').classList.toggle('open');
   });
+
+  // Scroll progress bar
+  var progress = document.getElementById('scrollProgress');
+  window.addEventListener('scroll', function () {
+    var h = document.documentElement;
+    var max = h.scrollHeight - h.clientHeight;
+    progress.style.width = (max > 0 ? (h.scrollTop / max) * 100 : 0) + '%';
+  }, { passive: true });
+
+  // Reveal on scroll
+  var revealEls = document.querySelectorAll('.sec-head, .card, .provider, .why-item, .faq-item, .install-block');
+  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduceMotion) {
+    revealEls.forEach(function (el) { el.classList.add('visible'); });
+  } else {
+    revealEls.forEach(function (el, i) {
+      el.classList.add('reveal');
+      el.style.setProperty('--d', ((i % 5) * 70) + 'ms');
+    });
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) { entry.target.classList.add('visible'); io.unobserve(entry.target); }
+      });
+    }, { threshold: 0.12 });
+    revealEls.forEach(function (el) { io.observe(el); });
+  }
+
+  // Terminal typewriter
+  var typed = document.getElementById('typedCmd');
+  var termBody = document.querySelector('.terminal-body');
+  if (typed) {
+    var full = typed.textContent;
+    if (reduceMotion) { termBody.classList.add('typed-done'); }
+    else {
+      typed.textContent = '';
+      var i = 0;
+      var typeIv = setInterval(function () {
+        typed.textContent = full.slice(0, ++i);
+        if (i >= full.length) { clearInterval(typeIv); termBody.classList.add('typed-done'); }
+      }, 48);
+    }
+  }
 
   // Copy install command
   function copyCmd(btn) {
