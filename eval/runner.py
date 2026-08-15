@@ -122,6 +122,12 @@ def make_clean_workspace(task):
     """Copy the fixture repo into a fresh temp dir; return the repo copy,
     its fingerprint and (when the fixture is a git repo) its base commit.
 
+    Git fixtures are stored as ``git bundle`` files (``git_bundle`` in the
+    manifest): a nested ``.git`` directory cannot be committed to this repo
+    itself, so without the bundle the fixture would have no history and no
+    tags on fresh checkouts / CI. The bundle is cloned at run time, giving
+    the agent real history + tags on any machine.
+
     The fingerprint/commit are computed on the pristine copy BEFORE any
     agent runs, so ``workspace.repo_hash`` / ``workspace.commit`` always
     describe the state the task started from (never post-agent
@@ -130,7 +136,23 @@ def make_clean_workspace(task):
     """
     ws = Path(tempfile.mkdtemp(prefix="tp_eval_"))
     repo = ws / "repo"
-    shutil.copytree(task["_repo_dir"], repo)
+    bundle = task.get("git_bundle")
+    if bundle:
+        bundle_path = Path(task["_dir"]) / bundle
+        try:
+            subprocess.run(
+                ["git", "clone", "-q", str(bundle_path), str(repo)],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError(
+                f"failed to materialize git fixture from {bundle_path}: {exc}"
+            )
+    else:
+        shutil.copytree(task["_repo_dir"], repo)
     return repo, repo_fingerprint(repo), repo_base_commit(repo)
 
 
@@ -481,6 +503,10 @@ def _check_one_task(manifest, task_dir):
     timeout = manifest.get("timeout_secs")
     if timeout is not None and (not isinstance(timeout, (int, float)) or timeout <= 0):
         problems.append("timeout_secs must be a positive number")
+    bundle = manifest.get("git_bundle")
+    if bundle is not None:
+        if not isinstance(bundle, str) or not (Path(task_dir) / bundle).is_file():
+            problems.append("git_bundle must reference an existing bundle file in the task dir")
     return problems
 
 

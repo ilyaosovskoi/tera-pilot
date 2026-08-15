@@ -5,6 +5,7 @@
   "category": "documentation",
   "prompt": "This repository has a git history with two tagged releases (v1.0.0 and v1.1.0). Read the git history (e.g. git log --oneline --decorate) and write a CHANGELOG.md that lists the released versions and a one-line summary of what each release contained. Do not modify source files. The verification script checks that CHANGELOG.md mentions both released versions.",
   "repo": "repo",
+  "git_bundle": "doc-changelog-from-git.bundle",
   "test_command": ["python3", "-c", "import pathlib; t=pathlib.Path('CHANGELOG.md').read_text(encoding='utf-8'); assert '1.0.0' in t and '1.1.0' in t, 'CHANGELOG.md must mention released versions 1.0.0 and 1.1.0'"],
   "baseline_status": "failing",
   "timeout_secs": 300
