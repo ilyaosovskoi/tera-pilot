@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tera Pilot — Private, Vendor-Neutral Coding Agents</title>
+<meta name="description" content="Self-hosted, vendor-neutral coding agent for private repos and local models. TUI-first, BYOK across 16 providers or fully offline with Ollama/LM Studio. Every agent action is sandboxed, logged, and signed — built to be verified, not just trusted.">
+<link rel="icon" href="./tera_pilot.png" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg-soft: #0c0c0f;
+    --card: #101013;
+    --card-hover: #141418;
+    --border: #1f1f24;
+    --border-soft: #19191d;
+    --text: #f5f5f4;
+    --text-muted: #a1a1aa;
+    --text-dim: #71717a;
+    --green: #28c840;
+    --green-dim: #1a7a2e;
+    --green-bg: rgba(40, 200, 64, 0.08);
+    --blue: #60a5fa;
+    --yellow: #febc2e;
+    --red: #ef4444;
+    --radius: 16px;
+    --radius-sm: 10px;
+    --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- Nav ---------- */
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(10, 10, 10, 0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .nav-inner {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 64px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; color: var(--text); }
+  .brand img { width: 30px; height: 30px; border-radius: 8px; }
+  .nav-links { display: flex; align-items: center; gap: 26px; font-size: 14px; color: var(--text-muted); }
+  .nav-links a { color: var(--text-muted); }
+  .nav-links a:hover { color: var(--text); text-decoration: none; }
+  .nav-cta { display: flex; align-items: center; gap: 14px; }
+  .nav-burger { display: none; background: none; border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 10px; font-size: 16px; cursor: pointer; }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--font-sans); font-size: 14px; font-weight: 600;
+    border-radius: 10px; padding: 11px 18px; cursor: pointer;
+    border: 1px solid transparent; transition: all .15s ease;
+    white-space: nowrap;
+  }
+  .btn-primary { background: var(--green); color: #04170a; }
+  .btn-primary:hover { background: #34d553; text-decoration: none; }
+  .btn-ghost { background: transparent; color: var(--text); border-color: var(--border); }
+  .btn-ghost:hover { border-color: #33333a; background: var(--card-hover); text-decoration: none; }
+  .btn-sm { padding: 8px 13px; font-size: 13px; }
+
+  /* ---------- Hero ---------- */
+  .hero { padding: 88px 0 72px; text-align: center; position: relative; }
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    border: 1px solid var(--border); background: var(--bg-soft);
+    color: var(--text-muted); font-size: 13px;
+    padding: 6px 14px; border-radius: 999px; margin-bottom: 28px;
+  }
+  .hero-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); }
+  .hero h1 {
+    font-size: clamp(38px, 6vw, 62px); font-weight: 800; letter-spacing: -0.03em;
+    line-height: 1.08; margin-bottom: 20px;
+  }
+  .hero h1 .accent { color: var(--green); }
+  .hero p.sub {
+    max-width: 680px; margin: 0 auto 34px;
+    color: var(--text-muted); font-size: clamp(16px, 2vw, 19px);
+  }
+  .hero-cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-bottom: 48px; }
+
+  /* Terminal window */
+  .terminal {
+    max-width: 680px; margin: 0 auto; text-align: left;
+    background: var(--bg-soft); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+  }
+  .terminal-bar {
+    display: flex; align-items: center; gap: 7px;
+    padding: 12px 16px; border-bottom: 1px solid var(--border-soft);
+    background: #0e0e11;
+  }
+  .terminal-bar .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot-red { background: #ff5f57; } .dot-yellow { background: #febc2e; } .dot-green { background: #28c840; }
+  .terminal-bar .title { margin-left: 10px; color: var(--text-dim); font-family: var(--font-mono); font-size: 12px; }
+  .terminal-body { padding: 20px 22px; font-family: var(--font-mono); font-size: 13.5px; line-height: 1.85; }
+  .terminal-body .cmd { color: var(--text); }
+  .terminal-body .cmd::before { content: "$ "; color: var(--green); font-weight: 500; }
+  .terminal-body .out { color: var(--text-dim); }
+  .terminal-body .ok { color: var(--green); }
+  .terminal-body .comment { color: var(--text-dim); }
+  .cursor { display: inline-block; width: 8px; height: 15px; background: var(--green); vertical-align: middle; animation: blink 1.1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* Badge strip under hero */
+  .badge-strip {
+    display: flex; justify-content: center; flex-wrap: wrap; gap: 10px;
+    margin-top: 44px;
+  }
+  .chip {
+    font-size: 13px; color: var(--text-muted);
+    border: 1px solid var(--border); background: var(--bg-soft);
+    padding: 6px 14px; border-radius: 999px;
+  }
+  .chip b { color: var(--text); font-weight: 600; }
+
+  /* ---------- Sections ---------- */
+  section { padding: 84px 0; }
+  section.alt { background: var(--bg-soft); border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
+
+  .sec-head { text-align: center; max-width: 720px; margin: 0 auto 52px; }
+  .sec-head h2 { font-size: clamp(28px, 4vw, 40px); font-weight: 800; letter-spacing: -0.02em; margin-bottom: 14px; }
+  .sec-head p { color: var(--text-muted); font-size: 16px; }
+  .sec-head .kicker {
+    font-family: var(--font-mono); font-size: 12.5px; text-transform: uppercase;
+    letter-spacing: 0.14em; color: var(--green); margin-bottom: 12px;
+  }
+
+  /* ---------- Cards / grids ---------- */
+  .grid { display: grid; gap: 16px; }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .grid-2 { grid-template-columns: repeat(2, 1fr); }
+
+  .card {
+    background: var(--card); border: 1px solid var(--border-soft);
+    border-radius: var(--radius); padding: 24px;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .card:hover { border-color: #2a2a30; background: var(--card-hover); }
+  .card .icon {
+    width: 38px; height: 38px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; margin-bottom: 16px;
+    background: var(--green-bg); border: 1px solid rgba(40,200,64,0.25);
+  }
+  .card h3 { font-size: 16.5px; font-weight: 700; margin-bottom: 8px; }
+  .card p { color: var(--text-muted); font-size: 14px; }
+
+  /* Why list */
+  .why-grid { grid-template-columns: repeat(2, 1fr); }
+  .why-item { display: flex; gap: 14px; }
+  .why-item .check {
+    flex-shrink: 0; width: 24px; height: 24px; margin-top: 2px;
+    border-radius: 7px; background: var(--green-bg); border: 1px solid rgba(40,200,64,0.3);
+    display: flex; align-items: center; justify-content: center; font-size: 13px; color: var(--green);
+  }
+  .why-item b { display: block; font-size: 15px; margin-bottom: 4px; }
+  .why-item span { color: var(--text-muted); font-size: 14px; }
+
+  /* Interface cards with commands */
+  .iface-card { display: flex; flex-direction: column; }
+  .iface-card .cmd-line {
+    margin-top: auto; padding-top: 14px;
+    font-family: var(--font-mono); font-size: 12.5px; color: var(--text-dim);
+    border-top: 1px dashed var(--border);
+  }
+  .iface-card .cmd-line::before { content: "$ "; color: var(--green); }
+  .tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 6px; margin-bottom: 12px; }
+  .tag-green { background: var(--green-bg); color: var(--green); border: 1px solid rgba(40,200,64,0.3); }
+  .tag-blue { background: rgba(96,165,250,0.1); color: var(--blue); border: 1px solid rgba(96,165,250,0.3); }
+  .tag-yellow { background: rgba(254,188,46,0.1); color: var(--yellow); border: 1px solid rgba(254,188,46,0.3); }
+
+  /* ReAct flow */
+  .flow { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 40px; }
+  .flow-step {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--card); border: 1px solid var(--border-soft);
+    border-radius: 999px; padding: 10px 18px; font-size: 14px; font-weight: 600;
+  }
+  .flow-step .num {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: var(--green); color: #04170a;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12.5px; font-weight: 700;
+  }
+  .flow-arrow { color: var(--text-dim); font-size: 18px; align-self: center; }
+
+  /* Tool groups */
+  .tool-group { margin-bottom: 14px; }
+  .tool-group .label { font-family: var(--font-mono); font-size: 12px; color: var(--green); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+  .tool-group .tools { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tool-chip {
+    font-family: var(--font-mono); font-size: 12.5px;
+    color: var(--text); background: var(--bg-soft);
+    border: 1px solid var(--border); border-radius: 7px; padding: 4px 10px;
+  }
+
+  /* Providers */
+  .provider {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 13px 18px; border-radius: var(--radius-sm);
+    background: var(--bg-soft); border: 1px solid var(--border-soft);
+    font-size: 14px; font-weight: 500;
+  }
+  .provider .kind { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 5px; }
+  .kind-local { background: var(--green-bg); color: var(--green); border: 1px solid rgba(40,200,64,0.3); }
+  .kind-cloud { background: rgba(96,165,250,0.1); color: var(--blue); border: 1px solid rgba(96,165,250,0.3); }
+  .kind-aggregator { background: rgba(254,188,46,0.1); color: var(--yellow); border: 1px solid rgba(254,188,46,0.3); }
+
+  /* Install */
+  .install-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; align-items: start; }
+  .install-block h3 { font-size: 16.5px; margin-bottom: 14px; }
+  .code-block {
+    background: var(--bg-soft); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 16px 18px;
+    font-family: var(--font-mono); font-size: 13px; line-height: 1.8;
+    position: relative; overflow-x: auto;
+  }
+  .code-block .copy {
+    position: absolute; top: 10px; right: 10px;
+    background: var(--card); border: 1px solid var(--border);
+    color: var(--text-muted); border-radius: 7px;
+    font-size: 12px; padding: 4px 10px; cursor: pointer;
+  }
+  .code-block .copy:hover { color: var(--text); border-color: #33333a; }
+  .code-block .c-green { color: var(--green); }
+  .code-block .c-dim { color: var(--text-dim); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; color: var(--text-muted); font-weight: 600; font-size: 13px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  td { padding: 12px 14px; border-bottom: 1px solid var(--border-soft); color: var(--text); vertical-align: top; }
+  td .mono { font-family: var(--font-mono); font-size: 12.5px; color: var(--green); }
+  tr:last-child td { border-bottom: none; }
+
+  /* FAQ */
+  .faq-item { margin-bottom: 14px; }
+  .faq-item details {
+    background: var(--card); border: 1px solid var(--border-soft);
+    border-radius: var(--radius-sm); padding: 4px 20px;
+  }
+  .faq-item summary {
+    cursor: pointer; font-weight: 600; font-size: 15px;
+    padding: 14px 0; list-style: none; display: flex; justify-content: space-between; align-items: center;
+  }
+  .faq-item summary::after { content: "+"; color: var(--green); font-size: 18px; }
+  .faq-item details[open] summary::after { content: "–"; }
+  .faq-item details p { color: var(--text-muted); font-size: 14.5px; padding: 0 0 16px; }
+
+  /* Footer */
+  footer { border-top: 1px solid var(--border-soft); padding: 56px 0 40px; }
+  .footer-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 32px; }
+  .footer-grid h4 { font-size: 13px; color: var(--text-muted); margin-bottom: 14px; font-weight: 600; }
+  .footer-grid a { display: block; color: var(--text-muted); font-size: 13.5px; margin-bottom: 9px; }
+  .footer-grid a:hover { color: var(--text); text-decoration: none; }
+  .footer-brand p { color: var(--text-dim); font-size: 13.5px; margin-top: 10px; max-width: 280px; }
+  .footer-bottom {
+    margin-top: 44px; padding-top: 22px;
+    border-top: 1px solid var(--border-soft);
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    color: var(--text-dim); font-size: 13px;
+  }
+
+  .logo-inline { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; color: var(--text); }
+  .logo-inline img { width: 26px; height: 26px; border-radius: 7px; }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 900px) {
+    .grid-3, .grid-4 { grid-template-columns: repeat(2, 1fr); }
+    .why-grid, .install-grid { grid-template-columns: 1fr; }
+    .footer-grid { grid-template-columns: 1fr 1fr; }
+    .nav-links { display: none; }
+    .nav-burger { display: block; }
+    .nav-links.open {
+      display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+      position: absolute; top: 64px; left: 0; right: 0;
+      background: var(--bg); border-bottom: 1px solid var(--border);
+      padding: 16px 24px 20px;
+    }
+  }
+  @media (max-width: 560px) {
+    .grid-3, .grid-4, .grid-2, .why-grid { grid-template-columns: 1fr; }
+    .hero { padding: 60px 0 48px; }
+    section { padding: 60px 0; }
+    .flow-arrow { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <a class="brand" href="#">
+      <img src="./tera_pilot.png" alt="Tera Pilot logo">
+      Tera Pilot
+    </a>
+    <div class="nav-links" id="navLinks">
+      <a href="#why">Why</a>
+      <a href="#interfaces">Interfaces</a>
+      <a href="#runtime">Runtime</a>
+      <a href="#providers">Providers</a>
+      <a href="#trust">Trust</a>
+      <a href="#install">Install</a>
+      <a href="#faq">FAQ</a>
+    </div>
+    <div class="nav-cta">
+      <a class="btn btn-primary btn-sm" href="https://github.com/ilyaosovskoi/tera-pilot">View on GitHub</a>
+      <button class="nav-burger" id="navBurger" aria-label="Menu">☰</button>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<header class="hero">
+  <div class="container">
+    <div class="hero-badge"><span class="dot"></span> Local-first · BYOK · 16 providers · MIT license</div>
+    <h1>Private, vendor-neutral<br>coding agents <span class="accent">— built to be verified.</span></h1>
+    <p class="sub">A self-hosted coding agent for private repositories, local models, CI, and verifiable automation. Textual TUI first, Web UI, HTTP daemon, MCP/ACP — or fully offline with Ollama and LM Studio.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="#install">Get started — it&rsquo;s free</a>
+      <a class="btn btn-ghost" href="https://github.com/ilyaosovskoi/tera-pilot">GitHub repo →</a>
+    </div>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span>
+        <span class="title">zsh — tera-pilot</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="cmd">npm install -g tera-pilot</span></div>
+        <div class="out">added 1 package in 6s</div>
+        <div class="out">[tera-pilot] creating Python virtualenv at ~/.tera_pilot/venv …</div>
+        <div class="ok">[tera-pilot] done — run: tera-pilot / tera-pilot-tui</div>
+        <div>&nbsp;</div>
+        <div><span class="cmd">tera-pilot-tui</span> <span class="comment"># full-screen terminal UI</span></div>
+        <div><span class="cmd">tera-pilot doctor</span> <span class="comment"># environment readiness check</span></div>
+        <div><span class="cmd">tera-pilot audit export --out audit.json</span> <span class="comment"># signed audit trail</span></div>
+        <div>&nbsp;<span class="cursor"></span></div>
+      </div>
+    </div>
+
+    <div class="badge-strip">
+      <span class="chip"><b>MIT</b> license</span>
+      <span class="chip"><b>Python 3.11+</b></span>
+      <span class="chip"><b>Textual</b> TUI</span>
+      <span class="chip"><b>macOS · Linux · Windows</b></span>
+      <span class="chip"><b>Ollama / LM Studio</b> offline</span>
+      <span class="chip"><b>Ed25519</b> signed audit</span>
+    </div>
+  </div>
+</header>
+
+<!-- WHY -->
+<section id="why">
+  <div class="container">
+    <div class="sec-head">
+      <div class="kicker">Why Tera Pilot</div>
+      <h2>Trust, control, and evidence — not just generation quality</h2>
+      <p>AI coding agents can edit repositories, run commands, call external tools, and finish multi-step tasks. The hard part is no longer only quality — it is trust, control, and evidence.</p>
+    </div>
+    <div class="grid why-grid">
+      <div class="why-item">
+        <div class="check">✓</div>
+        <div><b>Keep code local</b><span>Use Ollama or LM Studio — repository content never leaves your machine.</span></div>
+      </div>
+      <div class="why-item">
+        <div class="check">✓</div>
+        <div><b>Bring your own keys</b><span>Choose among 16 providers and switch models without lock-in to a vendor.</span></div>
+      </div>
+      <div class="why-item">
+        <div class="check">✓</div>
+        <div><b>Run it anywhere</b><span>Terminal, TUI, browser, daemon, or a CI job — the same backend everywhere.</span></div>
+      </div>
+      <div class="why-item">
+        <div class="check">✓</div>
+        <div><b>Review and restrict actions</b><span>Sandbox file, command, Git, and MCP operations with explicit policies.</span></div>
+      </div>
+      <div class="why-item">
+        <div class="check">✓</div>
+        <div><b>Keep an activity &amp; audit trail</b><span>Every tool call is recorded — export it signed with Ed25519 and a hash chain.</span></div>
+      </div>
+      <div class="why-item">
+        <div class="check">✓</div>
+        <div><b>Verify instead of trust</b><span>Re-read touched files, run tests, request a reviewer — evidence over answers.</span></div>
+      </div>
+      <div class="why-item">
+        <div class="check">✓</div>
+        <div><b>Avoid lock-in</b><span>No single model vendor or hosted IDE required to use the product.</span></div>
+      </div>
+      <div class="why-item">
+        <div class="check">✓</div>
+        <div><b>Free &amp; open source</b><span>MIT-licensed and self-hostable — you own the whole stack.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- INTERFACES -->
+<section class="alt" id="interfaces">
+  <div class="container">
+    <div class="sec-head">
+      <div class="kicker">Interfaces</div>
+      <h2>One backend, six ways to drive it</h2>
+      <p>The TUI is the primary interactive product; the same controlled backend powers the browser, daemon, and automation.</p>
+    </div>
+    <div class="grid grid-3">
+      <div class="card iface-card">
+        <span class="tag tag-green">Primary app</span>
+        <h3>Textual TUI</h3>
+        <p>Full-screen terminal UI: chat surface, activity stream, task canvas, provider controls, command palette, approval dialogs and verification feedback.</p>
+        <div class="cmd-line">tera-pilot-tui</div>
+      </div>
+      <div class="card iface-card">
+        <span class="tag tag-blue">Browser</span>
+        <h3>Web UI</h3>
+        <p>Browser chat, project browsing, provider settings and activity — served by a plain HTTP server, no legacy desktop stack.</p>
+        <div class="cmd-line">tera-pilot</div>
+      </div>
+      <div class="card iface-card">
+        <span class="tag tag-yellow">Backend</span>
+        <h3>HTTP daemon</h3>
+        <p>REST + SSE task execution, queues and notifications for integrations that embed the backend directly.</p>
+        <div class="cmd-line">tera-pilot-daemon --help</div>
+      </div>
+      <div class="card iface-card">
+        <span class="tag tag-blue">Integration</span>
+        <h3>ACP / MCP server</h3>
+        <p>Expose Tera Pilot tools to editors and other agents — read-only by default, writes only when you opt in.</p>
+        <div class="cmd-line">tera-pilot-acp --mcp-server</div>
+      </div>
+      <div class="card iface-card">
+        <span class="tag tag-green">Onboarding</span>
+        <h3>Environment doctor</h3>
+        <p>One command checks Python, dependencies, provider keys, local model servers, Rust acceleration and the workspace.</p>
+        <div class="cmd-line">tera-pilot doctor --json</div>
+      </div>
+      <div class="card iface-card">
+        <span class="tag tag-yellow">Evidence</span>
+        <h3>Signed audit</h3>
+        <p>Export the activity log with Ed25519 signatures and a SHA-256 hash chain, then verify it even on another machine.</p>
+        <div class="cmd-line">tera-pilot audit verify audit.json</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- RUNTIME -->
+<section id="runtime">
+  <div class="container">
+    <div class="sec-head">
+      <div class="kicker">Core Agent Runtime</div>
+      <h2>A ReAct loop with verification built in</h2>
+      <p>Every task moves through the same five stages — and ends with evidence, not just an answer.</p>
+    </div>
+
+    <div class="flow">
+      <div class="flow-step"><span class="num">1</span> Plan</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-step"><span class="num">2</span> Explore</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-step"><span class="num">3</span> Act</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-step"><span class="num">4</span> Verify</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-step"><span class="num">5</span> Report</div>
+    </div>
+
+    <div class="card">
+      <div class="grid grid-3" style="margin-bottom: 8px;">
+        <div>
+          <div class="tool-group">
+            <div class="label">Files</div>
+            <div class="tools"><span class="tool-chip">read_file</span><span class="tool-chip">write_file</span><span class="tool-chip">str_replace</span><span class="tool-chip">apply_diff</span><span class="tool-chip">delete_file</span><span class="tool-chip">rename_file</span></div>
+          </div>
+          <div class="tool-group">
+            <div class="label">Search</div>
+            <div class="tools"><span class="tool-chip">search_project</span><span class="tool-chip">grep</span><span class="tool-chip">glob</span><span class="tool-chip">list_files</span><span class="tool-chip">get_project_structure</span></div>
+          </div>
+        </div>
+        <div>
+          <div class="tool-group">
+            <div class="label">Execution</div>
+            <div class="tools"><span class="tool-chip">execute_command</span><span class="tool-chip">run_code</span></div>
+          </div>
+          <div class="tool-group">
+            <div class="label">Git</div>
+            <div class="tools"><span class="tool-chip">status</span><span class="tool-chip">diff</span><span class="tool-chip">stage</span><span class="tool-chip">commit</span><span class="tool-chip">checkpoints</span><span class="tool-chip">undo</span></div>
+          </div>
+          <div class="tool-group">
+            <div class="label">Web</div>
+            <div class="tools"><span class="tool-chip">web_search</span><span class="tool-chip">web_fetch</span></div>
+          </div>
+        </div>
+        <div>
+          <div class="tool-group">
+            <div class="label">MCP</div>
+            <div class="tools"><span class="tool-chip">external tools</span><span class="tool-chip">typed discovery</span></div>
+          </div>
+          <div class="tool-group">
+            <div class="label">Agents</div>
+            <div class="tools"><span class="tool-chip">subagents</span><span class="tool-chip">parallel tasks</span><span class="tool-chip">watchdog</span><span class="tool-chip">task decomposition</span></div>
+          </div>
+          <div class="tool-group">
+            <div class="label">Verification · Office</div>
+            <div class="tools"><span class="tool-chip">self_verify</span><span class="tool-chip">tests</span><span class="tool-chip">reviewer</span><span class="tool-chip">.docx / .xlsx / .pptx</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PROVIDERS -->
+<section class="alt" id="providers">
+  <div class="container">
+    <div class="sec-head">
+      <div class="kicker">Providers</div>
+      <h2>Vendor-neutral by design</h2>
+      <p>Bring your own key to any cloud provider — or go fully offline with a local model. Configure provider, model, workspace and autonomy in the TUI.</p>
+    </div>
+    <div class="grid grid-4">
+      <div class="provider">Anthropic <span class="kind kind-cloud">cloud</span></div>
+      <div class="provider">OpenAI <span class="kind kind-cloud">cloud</span></div>
+      <div class="provider">Google Gemini <span class="kind kind-cloud">cloud</span></div>
+      <div class="provider">DeepSeek <span class="kind kind-cloud">cloud</span></div>
+      <div class="provider">Groq <span class="kind kind-cloud">cloud</span></div>
+      <div class="provider">xAI <span class="kind kind-cloud">cloud</span></div>
+      <div class="provider">z.ai <span class="kind kind-cloud">cloud</span></div>
+      <div class="provider">Mistral <span class="kind kind-cloud">cloud</span></div>
+      <div class="provider">Cerebras <span class="kind kind-cloud">cloud</span></div>
+      <div class="provider">Together <span class="kind kind-cloud">cloud</span></div>
+      <div class="provider">Fireworks <span class="kind kind-cloud">cloud</span></div>
+      <div class="provider">SambaNova <span class="kind kind-cloud">cloud</span></div>
+      <div class="provider">Nvidia NIM <span class="kind kind-cloud">cloud</span></div>
+      <div class="provider">OpenRouter <span class="kind kind-aggregator">aggregator</span></div>
+      <div class="provider">Ollama <span class="kind kind-local">local</span></div>
+      <div class="provider">LM Studio <span class="kind kind-local">local</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- TRUST -->
+<section id="trust">
+  <div class="container">
+    <div class="sec-head">
+      <div class="kicker">Trust &amp; Control</div>
+      <h2>Autonomy as a policy decision, not a label</h2>
+      <p>Every layer of the agent loop is sandboxed, logged, and reversible — control and evidence by default.</p>
+    </div>
+    <div class="grid grid-3">
+      <div class="card">
+        <div class="icon">🔒</div>
+        <h3>Workspace sandbox</h3>
+        <p>File operations are limited to the selected project root.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🛡️</div>
+        <h3>Command policy</h3>
+        <p>Allowed and denied commands are controlled explicitly.</p>
+      </div>
+      <div class="card">
+        <div class="icon">✅</div>
+        <h3>Project approvals</h3>
+        <p>A repository cannot silently widen its own permissions.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🎚️</div>
+        <h3>Autonomy levels</h3>
+        <p><span style="font-family:var(--font-mono);font-size:13px;color:var(--green)">always_ask · new_files_only · never_ask</span></p>
+      </div>
+      <div class="card">
+        <div class="icon">👁️</div>
+        <h3>Diff review</h3>
+        <p>Writes can pause for human approval before they land.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🧠</div>
+        <h3>Guardian</h3>
+        <p>Assesses risky tool calls — approve, reject, or modify them.</p>
+      </div>
+      <div class="card">
+        <div class="icon">↩️</div>
+        <h3>Checkpoints &amp; undo</h3>
+        <p>Recovery paths for every file change along the way.</p>
+      </div>
+      <div class="card">
+        <div class="icon">📜</div>
+        <h3>Activity &amp; audit logs</h3>
+        <p>Tool execution and agent identity are recorded by default.</p>
+      </div>
+      <div class="card">
+        <div class="icon">✍️</div>
+        <h3>Signed audit export</h3>
+        <p>Ed25519 signatures + SHA-256 hash chaining for exported records — verify on any machine.</p>
+      </div>
+    </div>
+    <p style="text-align:center;color:var(--text-dim);font-size:13.5px;margin-top:28px;">
+      These mechanisms provide control and evidence — they are not a claim of SOC 2, ISO 27001, or vulnerability-free code. See
+      <a href="TERA_PILOT_PRODUCT_STRATEGY.md">product strategy</a> and <a href="THREAT_MODEL.md">threat model</a>.
+    </p>
+  </div>
+</section>
+
+<!-- INSTALL -->
+<section class="alt" id="install">
+  <div class="container">
+    <div class="sec-head">
+      <div class="kicker">Install</div>
+      <h2>One command, no git clone, no manual pip</h2>
+      <p>Python 3.11+ is the only system prerequisite. The npm install boots an isolated virtualenv for you.</p>
+    </div>
+    <div class="install-grid">
+      <div class="install-block">
+        <h3>Quick start (npm)</h3>
+        <div class="code-block">
+          <button class="copy" onclick="copyCmd(this)">copy</button>
+          <span class="c-green">npm install -g tera-pilot</span>
+        </div>
+        <p style="color:var(--text-muted);font-size:14px;margin:14px 0;">Everything works out of the box after install:</p>
+        <div class="code-block">
+          <span class="c-dim"># Web UI</span><br>
+          <span class="c-green">tera-pilot</span><br>
+          <span class="c-dim"># Full-screen terminal UI (primary app)</span><br>
+          <span class="c-green">tera-pilot-tui</span><br>
+          <span class="c-dim"># REST API + SSE daemon / ACP server</span><br>
+          <span class="c-green">tera-pilot-daemon --help</span><br>
+          <span class="c-green">tera-pilot-acp --help</span><br>
+          <span class="c-dim"># Environment doctor / signed audit</span><br>
+          <span class="c-green">tera-pilot doctor</span><br>
+          <span class="c-green">tera-pilot audit</span>
+        </div>
+      </div>
+      <div class="install-block">
+        <h3>Environment knobs (optional)</h3>
+        <div class="card" style="padding:0;overflow:hidden;">
+          <table>
+            <tr><th>Variable</th><th>Effect</th></tr>
+            <tr><td class="mono">TERA_PILOT_PYTHON</td><td>Python interpreter (default <span class="mono">python3</span>)</td></tr>
+            <tr><td class="mono">TERA_PILOT_VENV</td><td>venv location (default <span class="mono">~/.tera_pilot/venv</span>)</td></tr>
+            <tr><td class="mono">TERA_PILOT_SKIP_PIP=1</td><td>install without running pip (offline / custom)</td></tr>
+          </table>
+        </div>
+        <h3 style="margin-top:24px;">Install from source</h3>
+        <div class="code-block">
+          <span class="c-green">git clone</span> https://github.com/ilyaosovskoi/tera-pilot.git<br>
+          <span class="c-green">cd</span> tera-pilot<br>
+          <span class="c-green">python3 -m venv</span> .venv<br>
+          <span class="c-green">source</span> .venv/bin/activate<br>
+          <span class="c-green">pip install -e</span> .
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- MCP / ACP -->
+<section id="mcp">
+  <div class="container">
+    <div class="sec-head">
+      <div class="kicker">MCP &amp; ACP</div>
+      <h2>Connect Tera Pilot to your editors and agents</h2>
+      <p>Tera Pilot both consumes external MCP tools and exposes its own tools through an MCP/ACP server. Write-capable external tools should be trusted and approved deliberately.</p>
+    </div>
+    <div class="grid grid-2">
+      <div class="card">
+        <h3>Read-only by default</h3>
+        <div class="code-block" style="margin-top:14px;">
+          <span class="c-dim"># Expose read-only Tera Pilot tools from a workspace</span><br>
+          <span class="c-green">tera-pilot-acp --mcp-server --workspace</span> /path/to/project
+        </div>
+      </div>
+      <div class="card">
+        <h3>Opt into writes</h3>
+        <div class="code-block" style="margin-top:14px;">
+          <span class="c-dim"># Enable writes only when you explicitly need them</span><br>
+          <span class="c-green">tera-pilot-acp --mcp-server --workspace</span> /path/to/project <span class="c-green">--allow-writes</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="alt" id="faq">
+  <div class="container">
+    <div class="sec-head">
+      <div class="kicker">FAQ</div>
+      <h2>Questions, answered</h2>
+    </div>
+    <div style="max-width:760px;margin:0 auto;">
+      <div class="faq-item">
+        <details>
+          <summary>Is this a replacement for Cursor autocomplete or GitHub Copilot?</summary>
+          <p>No. Tera Pilot is not positioned as an autocomplete product. Its focus is controlled, private, vendor-neutral <em>agent execution</em>: plan, edit, run, verify and report inside a sandbox with an audit trail.</p>
+        </details>
+      </div>
+      <div class="faq-item">
+        <details>
+          <summary>Does "local-first" mean always offline?</summary>
+          <p>No. Cloud providers and remote MCP servers still send data outside the machine by design — local-first is not the same as always-offline. With Ollama or LM Studio the repository content stays on your machine.</p>
+        </details>
+      </div>
+      <div class="faq-item">
+        <details>
+          <summary>What are the system requirements?</summary>
+          <p>Python 3.11+ and a terminal. The npm install is the only prerequisite — it creates an isolated virtualenv at <span style="font-family:var(--font-mono);font-size:13px">~/.tera_pilot/venv</span> automatically. Optional Rust acceleration is detected by the doctor.</p>
+        </details>
+      </div>
+      <div class="faq-item">
+        <details>
+          <summary>How much does it cost?</summary>
+          <p>Nothing for the software — MIT licensed, free to use, modify and integrate. You only pay for the model providers you choose to bring your own keys to (or nothing at all with local models).</p>
+        </details>
+      </div>
+      <div class="faq-item">
+        <details>
+          <summary>Can the audit trail be verified on another machine?</summary>
+          <p>Yes. Export with <span style="font-family:var(--font-mono);font-size:13px">tera-pilot audit export</span>, then run <span style="font-family:var(--font-mono);font-size:13px">tera-pilot audit verify</span> anywhere using the public key from <span style="font-family:var(--font-mono);font-size:13px">~/.tera_pilot/audit_key.pub</span>. Exit code 0 means the chain is intact.</p>
+        </details>
+      </div>
+      <div class="faq-item">
+        <details>
+          <summary>What about enterprise features like SSO, RBAC, compliance?</summary>
+          <p>They are roadmap work. The current focus is reproducible evaluation, machine-readable evidence, transparent sandboxing, and a smooth local/BYOK onboarding path — see the <a href="TERA_PILOT_PRODUCT_STRATEGY.md">product strategy</a>.</p>
+        </details>
+      </div>
+      <div class="faq-item">
+        <details>
+          <summary>How good are the results?</summary>
+          <p>Quality depends on the selected model, provider configuration and the repository's tests. That is exactly why the runtime verifies: re-reads touched files, runs tests, and can request a reviewer before reporting.</p>
+        </details>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <div class="logo-inline"><img src="./tera_pilot.png" alt="Tera Pilot logo"> Tera Pilot</div>
+        <p>Private, vendor-neutral coding agents for private repositories, local models, CI, and verifiable automation.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <a href="#interfaces">Interfaces</a>
+        <a href="#runtime">Agent runtime</a>
+        <a href="#providers">Providers</a>
+        <a href="#trust">Trust &amp; control</a>
+        <a href="#install">Install</a>
+      </div>
+      <div>
+        <h4>Documentation</h4>
+        <a href="README.md">README</a>
+        <a href="TERA_PILOT_PRODUCT_STRATEGY.md">Product strategy</a>
+        <a href="THREAT_MODEL.md">Threat model</a>
+        <a href="P0_IMPLEMENTATION.md">P0 implementation</a>
+        <a href="SECURITY.md">Security</a>
+      </div>
+      <div>
+        <h4>Community</h4>
+        <a href="https://github.com/ilyaosovskoi/tera-pilot">GitHub</a>
+        <a href="https://github.com/ilyaosovskoi/tera-pilot/issues">Issues</a>
+        <a href="https://github.com/ilyaosovskoi/tera-pilot/blob/main/CONTRIBUTING.md">Contributing</a>
+        <a href="LICENSE">License (MIT)</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 Tera Pilot Contributors · MIT License</span>
+      <span>Self-hosted · BYOK · TUI-first</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Mobile nav
+  document.getElementById('navBurger').addEventListener('click', function () {
+    document.getElementById('navLinks').classList.toggle('open');
+  });
+
+  // Copy install command
+  function copyCmd(btn) {
+    const text = btn.parentElement.textContent.replace('copy', '').trim();
+    navigator.clipboard.writeText(text).then(function () {
+      btn.textContent = 'copied ✓';
+      setTimeout(function () { btn.textContent = 'copy'; }, 1500);
+    });
+  }
+</script>
+
+</body>
+</html>
