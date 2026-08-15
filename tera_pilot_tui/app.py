@@ -2463,8 +2463,6 @@ class TeraPilotTUIApp(App):
     def _on_turn_done(self, result: Any) -> None:
         chat = self.query_one(ChatLog)
         was_streaming = chat._streaming_active
-        if was_streaming:
-            chat.end_streaming()
 
         # v2.4.0-fix: the agent thread may have moved on (or the run ended)
         # while an approval dialog was still open — close the stale dialog.
@@ -2483,10 +2481,18 @@ class TeraPilotTUIApp(App):
         output = getattr(result, "output", "") or ""
         success = getattr(result, "success", True)
         if success:
-            if not was_streaming:
-                chat.add_final(output)
+            # v2.3.1-fix: always render the final answer via add_final().
+            # When streaming was active, add_final() rolls the live
+            # streaming entry back and replaces it with the Markdown-
+            # rendered answer. Previously the final answer was dropped
+            # entirely on streamed turns (end_streaming() discarded the
+            # buffer and add_final was skipped), so streamed responses
+            # stayed as raw plain text and never rendered Markdown.
+            chat.add_final(output)
         else:
             err = getattr(result, "error", None) or output or "task failed"
+            if was_streaming:
+                chat.abort_streaming()
             chat.add_error(str(err))
         self._turn_running = False
         self._refresh_status("idle")
@@ -2530,8 +2536,10 @@ class TeraPilotTUIApp(App):
 
     def _on_turn_error(self, message: str) -> None:
         chat = self.query_one(ChatLog)
+        # v2.3.1-fix: discard any partial streamed text instead of leaving
+        # half-written plain text above the error message.
         if chat._streaming_active:
-            chat.end_streaming()
+            chat.abort_streaming()
         # v2.4.0-fix: a run that crashed must not leave a stale approval
         # dialog on screen.
         self._close_stale_approval()
@@ -2548,6 +2556,15 @@ class TeraPilotTUIApp(App):
                 model=status.get("model", "unknown"),
                 provider=status.get("provider", "unknown"),
             )
+        except Exception:
+            pass
+        # v2.3.1: mark the input box with the "working" class while the
+        # agent is running so its border glows with the accent color.
+        try:
+            box = self.query_one(InputBox)
+            working = state in ("thinking", "running")
+            if working != box.has_class("working"):
+                box.set_class(working, "working")
         except Exception:
             pass
 

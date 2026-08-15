@@ -1,24 +1,27 @@
-/* styles_light.tcss - Tera Pilot TUI light theme (v2.1.0 Loop 3: Warm, Modern, Content-Forward) */
+/* styles_light.tcss - Tera Pilot TUI light theme
+   v2.3.1: Minimalism — clean white surfaces, hairline
+   borders, one warm accent (#d77757) used sparingly, smooth CSS
+   transitions and entrance animations. */
 
 /* ── Global ─────────────────────────────────────────────────────── */
 Screen {
-    background: #ffffff;
-    color: #24292f;
+    background: #fafafa;
+    color: #1a1a1e;
 }
 
 /* ── Status Bar ─────────────────────────────────────────────────── */
 StatusBar {
     dock: top;
     height: 3;
-    background: #f6f8fa;
-    color: #656d76;
-    border-bottom: solid #d0d0d0;
+    background: #fafafa;
+    color: #6e6e76;
+    border-bottom: solid #e4e4e7;
 }
 
 /* ── Chat Log ───────────────────────────────────────────────────── */
 ChatLog {
     height: 1fr;
-    background: #ffffff;
+    background: #fafafa;
     padding: 1 2;
     scrollbar-size: 1 1;
 }
@@ -27,22 +30,27 @@ ChatLog:focus {
     scrollbar-color: #d77757;
 }
 
-/* ── Input Box (solid border, Claude Code style) ────────────────── */
+/* ── Input Box (hairline border) ─────────────────── */
 InputBox {
     dock: bottom;
     height: 3;
-    border: solid #999999;
+    border: solid #d4d4d8;
     margin: 0 2 1 2;
-    background: #f0f0f0;
+    background: #ffffff;
 }
 
 InputBox:focus {
-    border: solid #b0b0b0;
-    background: #f0f0f0;
+    border: solid #a1a1aa;
+    background: #ffffff;
 }
 
 InputBox:focus-within {
-    border: solid #b0b0b0;
+    border: solid #a1a1aa;
+}
+
+/* Working state — the agent is running; a single warm accent line. */
+InputBox.working {
+    border: solid #d77757;
 }
 
 /* ── Command Suggestions (inline, above input) ──────────────────── */
@@ -61,8 +69,8 @@ CommandSuggestions.visible {
 #suggestions-box {
     height: auto;
     max-height: 12;
-    background: #f6f8fa;
-    border: solid #d77757;
+    background: #ffffff;
+    border: solid #d4d4d8;
     padding: 0 1;
 }
 
@@ -73,7 +81,7 @@ CommandSuggestions.visible {
 
 #suggestions-footer {
     height: 1;
-    color: #656d76;
+    color: #6e6e76;
     padding: 0 1;
     text-style: italic;
 }
@@ -88,22 +96,22 @@ ApprovalModal {
     max-width: 100;
     height: auto;
     padding: 1 2;
-    border: solid #ffc107;
-    background: #f6f8fa;
+    border: solid #d9a21b;
+    background: #ffffff;
 }
 
 #approval-title {
     text-style: bold;
-    color: #ffc107;
+    color: #9a6a00;
     margin-bottom: 1;
 }
 
 #approval-action {
-    color: #24292f;
+    color: #1a1a1e;
 }
 
 #approval-summary {
-    color: #656d76;
+    color: #6e6e76;
     margin-bottom: 1;
 }
 
@@ -113,6 +121,63 @@ ApprovalModal {
 }
 
 #approval-buttons Button {
+    margin: 1 1 0 1;
+    width: 100%;
+}
+
+/* ── Guardian Modal ─────────────────────────────────────────────── */
+GuardianModal {
+    align: center middle;
+}
+
+#guardian-box {
+    width: 76%;
+    max-width: 110;
+    height: auto;
+    padding: 1 2;
+    border: solid #7c3aed;
+    background: #ffffff;
+}
+
+#guardian-title {
+    text-style: bold;
+    color: #6d28d9;
+    margin-bottom: 1;
+}
+
+#guardian-action {
+    color: #1a1a1e;
+}
+
+#guardian-summary {
+    color: #6e6e76;
+    margin-bottom: 1;
+}
+
+#guardian-rationale {
+    color: #9a6a00;
+    margin-bottom: 1;
+}
+
+#guardian-fix-label {
+    color: #15803d;
+    margin-bottom: 0;
+}
+
+#guardian-fix-text {
+    height: auto;
+    max-height: 10;
+    margin-bottom: 1;
+    border: solid #d4d4d8;
+    background: #f6f6f7;
+}
+
+#guardian-buttons {
+    height: auto;
+    align: center middle;
+}
+
+#guardian-buttons Button {
     margin: 1 1 0 1;
     width: 100%;
 }
@@ -128,8 +193,8 @@ VerificationModal {
     height: auto;
     max-height: 32;
     padding: 1 2;
-    border: solid #6e7bf5;
-    background: #f6f8fa;
+    border: solid #6d7cf5;
+    background: #ffffff;
 }
 
 #verify-title {
@@ -148,27 +213,27 @@ VerificationModal {
 }
 
 #verify-meta {
-    color: #656d76;
+    color: #6e6e76;
     margin-bottom: 1;
 }
 
 #verify-summary {
-    color: #24292f;
+    color: #1a1a1e;
     margin-bottom: 1;
 }
 
 #verify-issues {
-    color: #bc4c00;
+    color: #9a6a00;
     margin-bottom: 1;
 }
 
 #verify-suggestions {
-    color: #6e7bf5;
+    color: #4f46e5;
     margin-bottom: 1;
 }
 
 #verify-raw {
-    color: #656d76;
+    color: #6e6e76;
     margin-bottom: 1;
 }
 
@@ -193,15 +258,15 @@ CommandPalette {
     max-width: 80;
     height: auto;
     max-height: 22;
-    background: #f6f8fa;
-    border: solid #d77757;
+    background: #ffffff;
+    border: solid #d4d4d8;
     padding: 0;
     margin-bottom: 4;
 }
 
 #palette-header {
     background: #d77757 20%;
-    color: #24292f;
+    color: #1a1a1e;
     padding: 0 1;
     height: 1;
     text-style: bold;
@@ -209,7 +274,7 @@ CommandPalette {
 
 #palette-filter {
     height: 3;
-    border: solid #d77757;
+    border: solid #d4d4d8;
     margin: 0 1;
     padding: 0;
 }
@@ -227,7 +292,7 @@ CommandPalette {
 
 #palette-footer {
     height: 1;
-    color: #656d76;
+    color: #6e6e76;
     padding: 0 1;
     text-style: italic;
 }
@@ -237,17 +302,17 @@ ToolBlock {
     height: auto;
     margin: 0 2;
     padding: 0 1;
-    border: solid #d0458a;
+    border: solid #e8d5e2;
     background: #ffffff;
 }
 
 ToolBlock .tool-header {
-    color: #d0458a;
+    color: #c026d3;
     text-style: bold;
 }
 
 ToolBlock .tool-content {
-    color: #24292f;
+    color: #1a1a1e;
 }
 
 /* ── Thinking Indicator ─────────────────────────────────────────── */
@@ -265,26 +330,26 @@ TaskCanvasView {
     max-height: 8;
     margin: 0 2 0 2;
     padding: 0 1;
-    background: #ffffff;
-    border-top: solid #d0d0d0;
-    color: #656d76;
+    background: #fafafa;
+    border-top: solid #e4e4e7;
+    color: #6e6e76;
 }
 
 /* ── Separator ──────────────────────────────────────────────────── */
 .separator {
-    color: #d0d0d0;
+    color: #e4e4e7;
 }
 
 /* ── Diff colors ────────────────────────────────────────────────── */
 .diff-added {
-    background: #d4ffd9;
+    background: #dcfce7;
 }
 
 .diff-removed {
-    background: #ffd9dd;
+    background: #fee2e2;
 }
 
 /* ── Auto-accept mode ───────────────────────────────────────────── */
 .auto-accept {
-    color: #7c5ce0;
+    color: #6d28d9;
 }

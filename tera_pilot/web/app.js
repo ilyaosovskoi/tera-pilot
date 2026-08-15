@@ -1052,7 +1052,7 @@ function showContextStatus(status){
     lines.push('- Total: ' + (pc.total_chars || 0) + ' chars');
   } else {
     lines.push('- No TERA_PILOT.md found. Create one at the project root to add persistent project rules.');
-    lines.push('  (CLAUDE.md is also accepted as a fallback for Claude Code users.)');
+    lines.push('  (CLAUDE.md is also accepted for compatibility.)');
   }
   lines.push('');
   // v1.1.4-fix (bug 4.2): auto-attached project files (ContextManager)
@@ -1092,7 +1092,7 @@ function showSlashHelp(){
     '- `/unpin <path>` — stop always-attaching a file\n' +
     '- `/help` — show this help\n\n' +
     '*Project instructions file: `TERA_PILOT.md` at the project root.*\n' +
-    '*Fallback: `CLAUDE.md` (for Claude Code users migrating to Tera Pilot).*\n\n' +
+    '*Fallback: `CLAUDE.md` for compatibility with existing memory files.*\n\n' +
     '*Any other `/xxx` is sent to the agent as a normal message.*';
   appendMessage('assistant', help);
 }
@@ -3024,16 +3024,16 @@ async function renderAgentTab(body){
 function renderAppearanceTab(body){
   const current=document.documentElement.getAttribute('data-theme')||'dark';
   const themes=[
-    {id:'spacex',label:'SpaceX',desc:'Black launch-pad minimalism — hairline edges, mono readouts, one white accent. Tesla/SpaceX DNA.',preview:'tc-preview-spacex',bar:'tc-bar-spacex',dot:'tc-bar-dot-spacex'},
+    {id:'noir',label:'Noir',desc:'Black launch-pad minimalism — hairline edges, mono readouts, one white accent.',preview:'tc-preview-noir',bar:'tc-bar-noir',dot:'tc-bar-dot-noir'},
     {id:'ember',label:'Ember',desc:'Warm charcoal dark with a soft clay accent. Quiet and neutral.',preview:'tc-preview-ember',bar:'tc-bar-ember',dot:'tc-bar-dot-ember'},
     {id:'dark',label:'Dark',desc:'Easy on the eyes. For late-night sessions.',preview:'tc-preview-dark',bar:'tc-bar-dark',dot:'tc-bar-dot-dark'},
     {id:'light',label:'Light',desc:'Clean and bright. For daytime work.',preview:'tc-preview-light',bar:'tc-bar-light',dot:'tc-bar-dot-light'},
     {id:'espresso',label:'Espresso',desc:'Warm dark with a terracotta accent. Cozy and focused.',preview:'tc-preview-espresso',bar:'tc-bar-espresso',dot:'tc-bar-dot-espresso'},
     {id:'aurora',label:'Aurora',desc:'Vivid gradients and glass. A bold, modern look.',preview:'tc-preview-aurora',bar:'tc-bar-aurora',dot:'tc-bar-dot-aurora'},
-    {id:'graphite',label:'Graphite',desc:'Soft dark neutral with a cool blue accent. Cursor-inspired.',preview:'tc-preview-graphite',bar:'tc-bar-graphite',dot:'tc-bar-dot-graphite'},
+    {id:'graphite',label:'Graphite',desc:'Soft dark neutral with a cool blue accent.',preview:'tc-preview-graphite',bar:'tc-bar-graphite',dot:'tc-bar-dot-graphite'},
     {id:'clay',label:'Clay',desc:'Warm cream and terracotta. A cozy daytime palette.',preview:'tc-preview-clay',bar:'tc-bar-clay',dot:'tc-bar-dot-clay'},
     {id:'linen',label:'Linen',desc:'Airy cream glass with a soft teal-gold glow and a confident blue accent. Frosted, daylight, alive.',preview:'tc-preview-linen',bar:'tc-bar-linen',dot:'tc-bar-dot-linen'},
-    {id:'cursor',label:'Cursor',desc:'Dark and flat, no blur or gradients anywhere. A single quiet accent, modest corners, calm empty space.',preview:'tc-preview-cursor',bar:'tc-bar-cursor',dot:'tc-bar-dot-cursor'},
+    {id:'flat',label:'Flat',desc:'Dark and flat, no blur or gradients anywhere. A single quiet accent, modest corners, calm empty space.',preview:'tc-preview-flat',bar:'tc-bar-flat',dot:'tc-bar-dot-flat'},
     {id:'auto',label:'System',desc:'Follows your OS preference.',preview:'tc-preview-auto',bar:'tc-bar-dark',dot:'tc-bar-dot-dark'},
   ];
   let html='<div class="settings-section"><div class="settings-section-title">Theme</div><div class="theme-grid">';
@@ -3047,7 +3047,7 @@ function renderAppearanceTab(body){
     </div>`;
   }
   html+='</div></div>';
-  // Text size (Cursor/Apple-style segmented control)
+  // Text size (segmented control)
   const curSize=document.documentElement.getAttribute('data-textsize')||'medium';
   const sizes=[{id:'small',label:'Small'},{id:'medium',label:'Medium'},{id:'large',label:'Large'}];
   html+=`<div class="settings-section"><div class="settings-section-title">Text size</div>
@@ -3108,7 +3108,7 @@ function setTheme(id){
   if(isBackendAvailable())callBridge('save_settings',{ui:{theme:id}}).catch(function(){});
 }
 
-// v1.2: Text size — Small / Medium / Large (Cursor/Apple-style segmented control)
+// v1.2: Text size — Small / Medium / Large (segmented control)
 function setTextSize(id){
   if(id==='medium')document.documentElement.removeAttribute('data-textsize');
   else document.documentElement.setAttribute('data-textsize',id);
@@ -3118,11 +3118,17 @@ function setTextSize(id){
 
 // Restore theme on load
 (function(){
-  const saved=localStorage.getItem('tera_pilot:theme');
-  // v2.3.0: SpaceX is the flagship default theme — applied whenever no
+  let saved=localStorage.getItem('tera_pilot:theme');
+  // v2.3.1: theme ids were renamed to drop third-party brand names
+  // (old ids 'spacex'/'cursor' -> 'noir'/'flat'). Migrate any
+  // previously-saved id so existing users keep their theme instead of
+  // falling back.
+  if(saved==='spacex'){saved='noir';localStorage.setItem('tera_pilot:theme','noir')}
+  else if(saved==='cursor'){saved='flat';localStorage.setItem('tera_pilot:theme','flat')}
+  // v2.3.0: Noir is the flagship default theme — applied whenever no
   // theme has been saved yet (fresh installs and users who never touched
   // Appearance). Previously-saved themes are always respected.
-  if(saved)setTheme(saved); else setTheme('spacex');
+  if(saved)setTheme(saved); else setTheme('noir');
   const savedSize=localStorage.getItem('tera_pilot:textsize');
   if(savedSize&&savedSize!=='medium')document.documentElement.setAttribute('data-textsize',savedSize);
   const neuralSaved=localStorage.getItem('tera_pilot:neuralBg');
@@ -4888,9 +4894,9 @@ window.finalizeMessage = function(result) {
   };
 })();
 /* ===================================================================
-   v1.2 — CLAUDE.md EDITOR (Collective Memory)
+   v1.2 — MEMORY FILE EDITOR (Collective Memory)
    =================================================================== */
-// ===== CLAUDE.md Editor =====
+// ===== Memory File Editor =====
 (function(){
   var openBtn = document.getElementById('openClaudeMdBtn');
   var backdrop = document.getElementById('claudeMdBackdrop');
@@ -4989,7 +4995,7 @@ window.finalizeMessage = function(result) {
     if(isBackendAvailable()){
       callBridge('append_claude_lesson', title, body).then(function(res){
         if(res && res.ok){
-          toast('Lesson added to ' + (res.path || 'CLAUDE.md'));
+          toast('Lesson added to ' + (res.path || 'memory file'));
           lessonTitle.value = '';
           lessonBody.value = '';
           lessonForm.style.display = 'none';

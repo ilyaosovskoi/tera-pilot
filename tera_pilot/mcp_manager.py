@@ -555,7 +555,7 @@ class MCPManager:
         The catalog is capped at ``max_tools`` entries (default 50)
         to avoid blowing the context window. If there are more tools,
         the prompt notes that ``list_mcp_tools`` can be used to
-        discover the rest on demand (lazy loading, like Claude Code
+        discover the rest on demand (lazy loading)
         v2.1.7+).
         """
         catalog = self.tool_catalog()

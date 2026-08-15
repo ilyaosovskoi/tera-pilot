@@ -22,6 +22,7 @@ from textual.widget import Widget
 from textual.widgets import OptionList, Static
 
 from .command_palette import CommandEntry, BUILTIN_COMMANDS
+from .motion import fade_in
 
 
 @dataclass
@@ -124,6 +125,11 @@ class CommandSuggestions(Widget):
 
         if self._items:
             self.set_class(True, "visible")
+            # v2.3.1: fade the suggestion bar in instead of popping it.
+            try:
+                fade_in(self.query_one("#suggestions-box"))
+            except Exception:
+                pass
         else:
             self.set_class(False, "visible")
 

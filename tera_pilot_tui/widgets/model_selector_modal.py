@@ -1,4 +1,4 @@
-"""model_selector_modal.py — Beautiful model selection modal (Claude Code style)."""
+"""model_selector_modal.py — Beautiful model selection modal."""
 
 from typing import Any, Callable, List, Dict, Optional
 
@@ -9,9 +9,11 @@ from textual.widgets import Static, Input, OptionList
 from textual.screen import ModalScreen
 from textual.binding import Binding
 
+from .motion import entrance
+
 
 class ModelSelectorModal(ModalScreen):
-    """Beautiful modal for selecting a model/provider (Claude Code style)."""
+    """Beautiful modal for selecting a model/provider."""
 
     BINDINGS = [
         Binding("escape", "dismiss", "Cancel", show=False),
@@ -29,13 +31,14 @@ class ModelSelectorModal(ModalScreen):
         width: 80;
         height: auto;
         max-height: 30;
-        border: solid #505050;
-        background: $surface;
+        border: solid #2e2e33;
+        background: #111114;
         padding: 1 2;
     }
 
+    
     #selector-title {
-        color: white;
+        color: #f5f5f7;
         text-style: bold;
         margin-bottom: 1;
     }
@@ -43,7 +46,7 @@ class ModelSelectorModal(ModalScreen):
     #selector-filter {
         margin-bottom: 1;
         height: 3;
-        border: solid #666666;
+        border: solid #2e2e33;
     }
 
     #selector-list {
@@ -59,7 +62,7 @@ class ModelSelectorModal(ModalScreen):
 
     #selector-footer {
         height: 1;
-        color: #888888;
+        color: #86868b;
         text-style: italic;
     }
     """
@@ -91,6 +94,8 @@ class ModelSelectorModal(ModalScreen):
 
     def on_mount(self) -> None:
         self._render_list()
+        # v2.3.1: entrance animation — fade + slight rise.
+        entrance(self.query_one("#selector-box"))
         self.query_one("#selector-filter", Input).focus()
 
     def _render_list(self) -> None:

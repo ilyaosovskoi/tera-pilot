@@ -623,6 +623,10 @@ class ServerContext:
         # The agent loop polls is_agent_cancelled() between iterations
         # and before each tool call.
         self._agent_cancel_event = threading.Event()
+        # v2.3.1: dedicated chat-stream cancel flag. The chat stream used to
+        # poll `_stop_event`, which is ALSO the server-shutdown event — so a
+        # Stop pressed in the GUI would have shut the whole server down.
+        self._chat_cancel_event = threading.Event()
 
     def get_agent_runtime(self, workspace: Optional[str]) -> AgentRuntime:
         """Lazily create (or reuse) the AgentRuntime, pointed at `workspace`.
@@ -711,6 +715,24 @@ class ServerContext:
     def is_agent_cancelled(self) -> bool:
         """Cancel-check callable passed to agent.set_cancel_check()."""
         return self._agent_cancel_event.is_set()
+
+    # ── v2.3.1: Chat-stream cancellation (HTTP path) ─────────────
+    # /api/chat/stop sets a flag polled by the SSE chat stream between
+    # tokens. This is intentionally SEPARATE from _stop_event (server
+    # shutdown) and _agent_cancel_event (agent loop) so stopping a chat
+    # generation never kills the server or a concurrently-running agent.
+
+    def reset_chat_cancel(self) -> None:
+        """Clear the chat-stream cancel flag. Called at stream start."""
+        self._chat_cancel_event.clear()
+
+    def cancel_chat(self) -> None:
+        """Set the chat-stream cancel flag. Called by POST /api/chat/stop."""
+        self._chat_cancel_event.set()
+        logger.info("[api] chat generation cancel requested via /api/chat/stop")
+
+    def is_chat_cancelled(self) -> bool:
+        return self._chat_cancel_event.is_set()
 
     # ── Auth helpers (v1.0.5-security) ────────────────────────────
 
@@ -1277,6 +1299,7 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
         stream_done = threading.Event()  # signals handle() to stop looping
 
         def stream_thread():
+            ctx.reset_chat_cancel()
             _routed_pid: Optional[str] = None
             try:
                 # v1.1.4-fix (bug C-API-6): AutoRouter existed and was fully
@@ -1359,7 +1382,7 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                 start = time.time()
 
                 for chunk in provider.stream(messages, skill=skill_text):
-                    if ctx._stop_event.is_set():
+                    if ctx._stop_event.is_set() or ctx._chat_cancel_event.is_set():
                         handler._sse({'type': 'step', 'label': 'Cancelled', 'detail': 'result'})
                         break
                     if time.time() - start > 300:

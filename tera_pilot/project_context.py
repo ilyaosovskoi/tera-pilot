@@ -1,7 +1,7 @@
 """
 Tera Pilot v1.0.9 — Project Context (CLAUDE.md support).
 
-Implements the Claude Code model of project-level persistent instructions:
+Implements the long-lived instruction-file model of project-level persistent instructions:
 
   CLAUDE.md    — read automatically when a project is opened. Contains
                  project rules, conventions, architecture notes that
@@ -19,7 +19,7 @@ and exposes:
   - reload()       → force re-read from disk (after CLAUDE.md is edited)
   - status()       → dict for the /context command
 
-This mirrors how Claude Code uses CLAUDE.md as "long-lived instructions
+This mirrors the "long-lived instructions
 that reduce repetitive explanations in chat and save context tokens".
 """
 
@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # in .tera_pilot/ (or .claude/ for backward compat) are concatenated after.
 #
 # v1.0.10: TERA_PILOT.md is now the PRIMARY name. CLAUDE.md is kept as a
-# secondary fallback for users migrating from Claude Code, but TERA_PILOT.md
+# secondary fallback for users migrating from other tools, but TERA_PILOT.md
 # takes priority — if both exist, TERA_PILOT.md wins.
 _PROJECT_INSTRUCTION_FILES = (
     "TERA_PILOT.md",          # ← PRIMARY: Tera Pilot-native name (v1.0.10+)
@@ -63,7 +63,7 @@ class ProjectContext:
 
     v1.0.10: TERA_PILOT.md is the primary project instructions file. CLAUDE.md
     is kept as a backward-compat fallback for users migrating from
-    Claude Code. If both exist, TERA_PILOT.md takes priority.
+    other tools. If both exist, TERA_PILOT.md takes priority.
 
     The cache is keyed by project root — opening a different project
     re-reads its TERA_PILOT.md. Call reload() after editing TERA_PILOT.md to

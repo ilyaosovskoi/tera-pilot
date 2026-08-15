@@ -17,6 +17,8 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Label, Static, Input, TextArea
 
+from .motion import entrance
+
 
 class ApprovalModal(ModalScreen[Optional[bool]]):
     """Legacy confirm modal (Approve/Deny). Returns True/False."""
@@ -39,6 +41,13 @@ class ApprovalModal(ModalScreen[Optional[bool]]):
             with Vertical(id="approval-buttons"):
                 yield Button("Approve (y)", variant="success", id="approve")
                 yield Button("Deny (n)", variant="error", id="deny")
+
+    def on_mount(self) -> None:
+        """v2.3.1: entrance animation — fade + slight rise."""
+        try:
+            entrance(self.query_one("#approval-box"))
+        except Exception:
+            pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "approve")
@@ -85,6 +94,13 @@ class GuardianModal(ModalScreen[str]):
                 yield Button("Approve (a)", variant="success", id="approve")
                 yield Button("Use Fix (u)", variant="primary", id="use_fix")
                 yield Button("Reject (r)", variant="error", id="reject")
+
+    def on_mount(self) -> None:
+        """v2.3.1: entrance animation — fade + slight rise."""
+        try:
+            entrance(self.query_one("#guardian-box"))
+        except Exception:
+            pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id)

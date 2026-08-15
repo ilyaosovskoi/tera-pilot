@@ -49,7 +49,7 @@ class ToolName(Enum):
     # and gives a deterministic verification: either old_str is found
     # (patch applies cleanly) or it is not (model hallucinated context).
     STR_REPLACE = "str_replace"
-    # v1.0.11: git tools — direct project access like Claude Code.
+    # v1.0.11: git tools — direct project access.
     # The agent can check git status, see diffs, stage files, and
     # commit. This makes Tera Pilot closer to an autonomous dev assistant
     # than a chat bot — the user says "commit my changes" and the
@@ -114,7 +114,7 @@ class ToolName(Enum):
     WATCHDOG_CHECK = "watchdog_check"
     # v1.2.1-fix (review §4.4): agentic-search tools — model-driven
     # grep/glob over the workspace, complementing the heuristic file
-    # auto-attach in ContextManager. Inspired by Claude Code's
+    # auto-attach in ContextManager. Inspired by other coding agents'
     # "agentic search instead of pre-loading" pattern.
     GREP = "grep"
     GLOB = "glob"

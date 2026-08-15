@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tera Pilot v2.2.4 — Web UI</title>
+<title>Tera Pilot v2.3.1 — Web UI</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Lora:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
 <!-- v2.2.0: QWebChannel removed — the browser now talks to the backend
      exclusively via the HTTP REST API + SSE on tera_pilot.web_server. -->
 <link rel="stylesheet" href="style.css">
-<link rel="stylesheet" href="apple-design.css">
+<link rel="stylesheet" href="design-polish.css">
 </head>
 <body>
 
@@ -49,7 +49,7 @@
         </div>
       </div>
       <div class="brand-name">Tera Pilot</div>
-      <div class="brand-version">v2.2.1</div>
+      <div class="brand-version">v2.3.1</div>
     </div>
     <!-- v2.2.1: Unified Tools sidebar — replaces the old 3-section switcher.
          All capabilities (General / Heavy Code / Office / Hooks / Checkpoints /
@@ -817,12 +817,12 @@
   </div>
 </div>
 
-<!-- CLAUDE.md Editor Modal -->
+<!-- Memory File Editor Modal -->
 <div class="modal-backdrop" id="claudeMdBackdrop"></div>
 <div class="modal" id="claudeMdModal" style="max-width:min(720px,92vw)">
   <div class="modal-header">
     <div>
-      <div class="modal-title">CLAUDE.md — Collective Memory</div>
+      <div class="modal-title">Memory File — Collective Memory</div>
       <div class="drawer-subtitle" id="claudeMdPath" style="font-size:11px;color:var(--text-muted);margin-top:2px">No project open</div>
     </div>
     <button class="modal-close" id="claudeMdClose"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
@@ -835,7 +835,7 @@
     </button>
   </div>
   <div class="modal-body" style="padding:0;flex:1;overflow:hidden;display:flex;flex-direction:column">
-    <textarea id="claudeMdEditor" style="width:100%;flex:1;border:none;resize:none;background:var(--bg-primary);color:var(--text-primary);font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.7;padding:16px 24px;outline:none;box-sizing:border-box" placeholder="# CLAUDE.md — Collective Memory&#10;&#10;This file is read at the start of every agent session.&#10;Keep it lean (~2500 tokens). Record errors and fixes here.&#10;&#10;## Code Style&#10;- Use 4-space indentation&#10;&#10;## Anti-patterns&#10;- Don't use mutable default arguments"></textarea>
+    <textarea id="claudeMdEditor" style="width:100%;flex:1;border:none;resize:none;background:var(--bg-primary);color:var(--text-primary);font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.7;padding:16px 24px;outline:none;box-sizing:border-box" placeholder="# TERA_PILOT.md — Collective Memory&#10;&#10;This file is read at the start of every agent session.&#10;Keep it lean (~2500 tokens). Record errors and fixes here.&#10;&#10;## Code Style&#10;- Use 4-space indentation&#10;&#10;## Anti-patterns&#10;- Don't use mutable default arguments"></textarea>
   </div>
   <!-- Add Lesson form (hidden by default) -->
   <div id="claudeMdLessonForm" style="display:none;padding:0 24px 12px;border-top:1px solid var(--border);padding-top:12px">

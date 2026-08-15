@@ -177,7 +177,7 @@ ACP/MCP surfaces are intended to connect Tera Pilot to other agents and editor i
 | Interface | Best for |
 |---|---|
 | Textual TUI | Primary interactive app: full-screen chat, activity, approvals, task canvas and provider controls |
-| `tera-pilot` | Web UI: browser chat, project browsing, provider settings and activity |
+| `tera-pilot` | Web UI: browser chat, project browsing, provider settings and activity (since v2.3.1 every control is wired to the backend — slash commands, memory file editor, file tree, snippets, stop/undo, diff review) |
 | `tera-pilot-daemon` | Backend service for REST/SSE task execution, queues and notifications |
 | `tera-pilot-acp` | Backend integration for MCP/ACP-compatible editors and agents |
 | `tera-pilot doctor` | Environment doctor: one-command onboarding and readiness check |
@@ -204,9 +204,13 @@ tera_pilot/
 ├── agent_runtime/       ReAct runtime, tools, memory, parser and verification
 ├── agent/               Guardian, sandbox, checkpoints and agent support
 ├── providers/           Provider registry, cloud/local adapters and routing
-├── web/                 Browser UI
+├── web/                 Browser UI (index.html + app.js + bridge_shim.js)
+├── web_server.py        Static file server + API delegation for the Web UI
+├── api_server.py        REST/SSE API server (chat, agent stream, diff review)
+├── api_extended.py      Extended REST endpoints mirroring the TUI bridge
 ├── web_bridge/          UI/runtime bridge and persistence helpers
 ├── session/             Subagent hosting and SQLite persistence
+├── swarm/               Multi-agent swarm collaboration
 ├── mcp_client.py        External MCP client
 ├── mcp_server.py        Tera Pilot-as-MCP server mode
 ├── audit_signing.py     Signed audit export and verification
@@ -216,6 +220,8 @@ tera_pilot_tui/
 ├── app.py               Textual application
 ├── bridge.py            TUI bridge to the runtime
 ├── backend_runner.py    TUI-backed automation adapter
+├── styles_dark.tcss     Minimal dark theme (Noir)
+├── styles_light.tcss    Minimal light theme
 └── widgets/             Chat, tool, approval and activity widgets
 ```
 
@@ -233,7 +239,9 @@ The strategic focus is not feature count. It is measurable, trustworthy executio
 
 Read the complete goals, audience segmentation, ICP, competitive framing and roadmap in [`TERA_PILOT_PRODUCT_STRATEGY.md`](TERA_PILOT_PRODUCT_STRATEGY.md).
 
-What has already been implemented from the P0 roadmap — environment doctor, signed audit export/verification, threat model, Rust native acceleration (circuit breaker ~43x faster, sandbox checks ~3.3x faster), the evaluation harness skeleton (`eval/`), and the v2.3.0 GUI (SpaceX/Tesla theme + Basic/Advanced UI modes) — is documented in [`P0_IMPLEMENTATION.md`](P0_IMPLEMENTATION.md).
+What has already been implemented from the P0 roadmap — environment doctor, signed audit export/verification, threat model, Rust native acceleration (circuit breaker ~43x faster, sandbox checks ~3.3x faster), the evaluation harness skeleton (`eval/`), and the v2.3.0 GUI (Noir minimal theme + Basic/Advanced UI modes) — is documented in [`P0_IMPLEMENTATION.md`](P0_IMPLEMENTATION.md).
+
+The **v2.3.1** release completes the browser GUI: chat streaming renders a single live entry (no more duplicated lines), every control talks to the backend (no more silent 404s), all themes are brand-neutral (Noir/Flat), and the TUI gained smooth modal/scroll motion in a minimal dark theme.
 
 ## Audit Export & Verification
 

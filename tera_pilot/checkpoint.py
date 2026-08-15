@@ -55,6 +55,37 @@ MAX_CHECKPOINTS_PER_SESSION = 200
 MAX_BACKUP_FILE_SIZE = 10 * 1024 * 1024  # 10 MB — skip backing up huge files
 
 
+def _workspace_rel_path(workspace: Path, raw_path: str) -> Optional[Path]:
+    """Resolve *raw_path* to a workspace-relative Path, or ``None`` if it
+    escapes the workspace.
+
+    v2.3.1-security: ``rewind()`` restores and DELETES files from the
+    manifest, so every path must be re-validated against the workspace
+    at use time (defense-in-depth: manifests are also loaded from disk,
+    where a hand-edited JSON could contain absolute paths or ``..``
+    segments). ``Path / <absolute>`` silently REPLACES the base, so an
+    absolute path must never reach ``shutil.copy2`` / ``unlink``.
+    """
+    try:
+        candidate = (workspace / raw_path).resolve()
+    except Exception:
+        return None
+    try:
+        candidate.relative_to(workspace.resolve())
+    except ValueError:
+        return None
+    return candidate
+
+
+def _inside_dir(path: Path, base: Path) -> bool:
+    """True iff *path* resolves inside *base* (defense-in-depth check)."""
+    try:
+        path.resolve().relative_to(base.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
 def _tera_pilot_home() -> Path:
     p = Path.home() / ".tera_pilot"
     p.mkdir(parents=True, exist_ok=True)
@@ -232,7 +263,12 @@ class CheckpointManager:
             backup_dir.mkdir(parents=True, exist_ok=True)
 
             for rel_path in touched_files:
-                abs_path = self._workspace / rel_path
+                # v2.3.1-security: never back up a path that escapes the
+                # workspace (absolute paths or `..` segments).
+                abs_path = _workspace_rel_path(self._workspace, rel_path)
+                if abs_path is None:
+                    logger.warning("[checkpoint] skipping path outside workspace: %s", rel_path)
+                    continue
                 if not abs_path.exists():
                     continue
                 if abs_path.stat().st_size > MAX_BACKUP_FILE_SIZE:
@@ -345,9 +381,19 @@ class CheckpointManager:
             # were added in later checkpoints (if they didn't exist at target_cp).
 
             # Strategy: restore all files from target checkpoint's backups.
+            checkpoints_root = (_tera_pilot_home() / "checkpoints").resolve()
             for entry in target_cp.file_manifest:
-                abs_path = self._workspace / entry.path
+                # v2.3.1-security: never restore (or delete) a path that
+                # escapes the workspace, and never copy from a backup that
+                # lives outside the checkpoints directory.
+                abs_path = _workspace_rel_path(self._workspace, entry.path)
+                if abs_path is None:
+                    errors.append(f"Skipped path outside workspace: {entry.path}")
+                    continue
                 backup_path = Path(entry.backup_path)
+                if not _inside_dir(backup_path, checkpoints_root):
+                    errors.append(f"Skipped backup outside checkpoints dir: {entry.backup_path}")
+                    continue
                 if backup_path.exists():
                     try:
                         abs_path.parent.mkdir(parents=True, exist_ok=True)
@@ -367,14 +413,19 @@ class CheckpointManager:
                     later_paths.add(entry.path)
             target_paths = {e.path for e in target_cp.file_manifest}
             new_files = later_paths - target_paths
-            for path in new_files:
-                abs_path = self._workspace / path
+            for raw_path in new_files:
+                # v2.3.1-security: deletion is destructive — only touch
+                # paths that are guaranteed to be inside the workspace.
+                abs_path = _workspace_rel_path(self._workspace, raw_path)
+                if abs_path is None:
+                    errors.append(f"Skipped delete outside workspace: {raw_path}")
+                    continue
                 if abs_path.exists():
                     try:
                         abs_path.unlink()
-                        files_restored.append(f"[deleted] {path}")
+                        files_restored.append(f"[deleted] {raw_path}")
                     except Exception as e:
-                        errors.append(f"Failed to delete {path}: {e}")
+                        errors.append(f"Failed to delete {raw_path}: {e}")
 
             # Remove checkpoints after target
             removed_cps = self._checkpoints[target_index + 1:]

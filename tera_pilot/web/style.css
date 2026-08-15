@@ -149,7 +149,7 @@
 .tc-bar-dot-aurora{background:#9E7BFF;opacity:0.7}
 
 /* ===================================================================
-   GRAPHITE THEME — Cursor-inspired dark neutral, softer than pure black
+   GRAPHITE THEME — soft dark neutral, softer than pure black
    =================================================================== */
 [data-theme="graphite"]{
   --bg-primary:#1C1C1E; --bg-secondary:#232326; --bg-floating:#2A2A2D; --bg-hover:#323235;
@@ -290,10 +290,10 @@
 }
 
 /* ===================================================================
-   SPACEX THEME — black launch-pad minimalism. Hairline edges, mono
-   readouts, one white accent. Tesla/SpaceX design DNA.
+   NOIR THEME — black launch-pad minimalism. Hairline edges, mono
+   readouts, one white accent. design DNA.
    =================================================================== */
-[data-theme="spacex"]{
+[data-theme="noir"]{
   --bg-primary:#050506; --bg-secondary:#0A0A0C; --bg-floating:#0F0F12; --bg-hover:#16161A;
   --text-primary:#F5F5F4; --text-secondary:#9E9EA6; --text-muted:#55555E;
   --border:rgba(255,255,255,0.07); --border-strong:rgba(255,255,255,0.14);
@@ -303,23 +303,23 @@
   --card-shadow:0 1px 2px rgba(0,0,0,0.4),0 8px 24px -12px rgba(0,0,0,0.7);
   --card-shadow-hover:0 4px 12px rgba(0,0,0,0.5),0 16px 40px -14px rgba(0,0,0,0.85);
 }
-[data-theme="spacex"] body{background:linear-gradient(180deg,#060607 0%,#050506 100%)}
-[data-theme="spacex"] .neural-bg{opacity:0.06!important}
-[data-theme="spacex"] .neural-pixel{opacity:0.5!important}
-[data-theme="spacex"] .vignette{background:radial-gradient(ellipse 90% 70% at 50% 0%,rgba(255,255,255,0.035) 0%,transparent 60%)}
-[data-theme="spacex"] .vignette::after{opacity:0.28}
-[data-theme="spacex"] .brand-mark{background:linear-gradient(135deg,#FFFFFF 0%,#8E8E93 100%);border-radius:6px}
-[data-theme="spacex"] .brand-mark::after{background:var(--bg-primary)}
-[data-theme="spacex"] .brand-mark::before{background:linear-gradient(135deg,#FFFFFF 0%,#8E8E93 100%)}
-[data-theme="spacex"] .msg-body.user{background:var(--bg-secondary);border-color:var(--border-strong)}
-[data-theme="spacex"] .send-btn{background:#FFFFFF;color:#050506}
-[data-theme="spacex"] .modal{box-shadow:0 24px 80px rgba(0,0,0,0.6)}
-[data-theme="spacex"] .provider-menu{box-shadow:0 8px 32px rgba(0,0,0,0.5)}
-[data-theme="spacex"] .toast{box-shadow:0 8px 32px rgba(0,0,0,0.5)}
-[data-theme="spacex"] .drawer{box-shadow:0 -8px 32px rgba(0,0,0,0.5)}
-.tc-preview-spacex{background:linear-gradient(160deg,#0B0B0D 0%,#17171B 100%)}
-.tc-bar-spacex{background:#101013}
-.tc-bar-dot-spacex{background:#FFFFFF;opacity:0.75}
+[data-theme="noir"] body{background:linear-gradient(180deg,#060607 0%,#050506 100%)}
+[data-theme="noir"] .neural-bg{opacity:0.06!important}
+[data-theme="noir"] .neural-pixel{opacity:0.5!important}
+[data-theme="noir"] .vignette{background:radial-gradient(ellipse 90% 70% at 50% 0%,rgba(255,255,255,0.035) 0%,transparent 60%)}
+[data-theme="noir"] .vignette::after{opacity:0.28}
+[data-theme="noir"] .brand-mark{background:linear-gradient(135deg,#FFFFFF 0%,#8E8E93 100%);border-radius:6px}
+[data-theme="noir"] .brand-mark::after{background:var(--bg-primary)}
+[data-theme="noir"] .brand-mark::before{background:linear-gradient(135deg,#FFFFFF 0%,#8E8E93 100%)}
+[data-theme="noir"] .msg-body.user{background:var(--bg-secondary);border-color:var(--border-strong)}
+[data-theme="noir"] .send-btn{background:#FFFFFF;color:#050506}
+[data-theme="noir"] .modal{box-shadow:0 24px 80px rgba(0,0,0,0.6)}
+[data-theme="noir"] .provider-menu{box-shadow:0 8px 32px rgba(0,0,0,0.5)}
+[data-theme="noir"] .toast{box-shadow:0 8px 32px rgba(0,0,0,0.5)}
+[data-theme="noir"] .drawer{box-shadow:0 -8px 32px rgba(0,0,0,0.5)}
+.tc-preview-noir{background:linear-gradient(160deg,#0B0B0D 0%,#17171B 100%)}
+.tc-bar-noir{background:#101013}
+.tc-bar-dot-noir{background:#FFFFFF;opacity:0.75}
 
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden}
@@ -366,7 +366,7 @@ input,textarea{font-family:inherit;border:none;outline:none;background:none;colo
 .app{transition:grid-template-columns var(--m-slow) var(--ease)}
 .sidebar{transition:width var(--m-slow) var(--ease),padding var(--m-slow) var(--ease),opacity var(--m-slow) var(--ease)}
 
-/* ── Collapsed = icon rail (VS Code / Slack / Cursor style), not fully hidden ── */
+/* ── Collapsed = icon rail (icon rail), not fully hidden ── */
 .app.sidebar-collapsed .sidebar{
   width:var(--rail-w);padding:var(--s-24) 0;align-items:center;overflow:visible;
   opacity:1;pointer-events:auto;border-right:1px solid var(--border);
@@ -4460,3 +4460,89 @@ body.tools-panel-open {
 .qs-theme-btn:hover{border-color:var(--accent)}
 .qs-theme-btn.active{border-color:var(--accent);background:var(--accent-glow);color:var(--text-primary)}
 @media(max-width:480px){.qs-provider-grid{grid-template-columns:repeat(2,1fr)}}
+
+/* ════════════════════════════════════════════════════════════════
+   v2.3.1 — MOTION: minimal micro-interactions
+   Fast, quiet, decelerating. Everything respects reduced motion.
+   ════════════════════════════════════════════════════════════════ */
+
+/* Press feedback — the UI "gives" a hair when anything clickable is pressed */
+.send-btn:active, .icon-btn:active, .nav-item:active, .new-chat-btn:active,
+.catalog-trigger:active, .chat-item:active, .es-chip:active,
+.btn-primary:active, .btn-secondary:active, .provider-trigger:active,
+.model-selector-chip:active, .composer-plus-btn:active, .cpm-item:active,
+.gb-btn:active, .cv-action:active, .ftp-action:active, .hc-suggestion:active,
+.office-suggestion:active, .qs-provider-btn:active, .qs-theme-btn:active,
+.modal-tab:active, .all-chats-btn:active, .sidebar-toggle:active,
+.ui-mode-toggle:active, .profile:active, .chat-search-input:active{
+  transform:scale(0.97);
+}
+
+/* Shared transition — merged with the properties each control already
+   animates so nothing regresses (this rule loads last and wins). */
+.send-btn, .icon-btn, .nav-item, .new-chat-btn, .catalog-trigger, .chat-item,
+.es-chip, .btn-primary, .btn-secondary, .provider-trigger, .model-selector-chip,
+.composer-plus-btn, .cpm-item, .gb-btn, .cv-action, .ftp-action,
+.hc-suggestion, .office-suggestion, .qs-provider-btn, .qs-theme-btn,
+.modal-tab, .all-chats-btn, .sidebar-toggle, .ui-mode-toggle{
+  transition:transform var(--m-fast) var(--ease), opacity var(--m-fast) var(--ease),
+    background var(--m-fast) var(--ease), border-color var(--m-fast) var(--ease),
+    box-shadow var(--m-fast) var(--ease), color var(--m-fast) var(--ease);
+}
+
+/* Agent step cards — glide in one after another as the run progresses */
+.agent-step{
+  animation:stepIn 0.24s var(--ease) both;
+}
+.agent-step:nth-child(2){animation-delay:0.04s}
+.agent-step:nth-child(3){animation-delay:0.08s}
+.agent-step:nth-child(4){animation-delay:0.12s}
+@keyframes stepIn{
+  from{opacity:0;transform:translateY(4px)}
+  to{opacity:1;transform:translateY(0)}
+}
+
+/* Activity panel rows — quiet fade as they appear */
+.activity-step{
+  animation:fadeIn var(--m-med) var(--ease) both;
+}
+
+/* Message hover — a hair of lift on top of the existing shadow */
+.msg-body{
+  transition:transform var(--m-fast) var(--ease), border-color var(--m-fast) var(--ease),
+    box-shadow var(--m-fast) var(--ease), background var(--m-fast) var(--ease);
+}
+.msg:hover .msg-body{transform:translateY(-1px)}
+
+/* Empty-state suggestion chips — staggered arrival */
+.empty-state-suggestions .es-chip{animation:fadeUp 0.35s var(--ease) both}
+.empty-state-suggestions .es-chip:nth-child(2){animation-delay:0.06s}
+.empty-state-suggestions .es-chip:nth-child(3){animation-delay:0.12s}
+.empty-state-suggestions .es-chip:nth-child(4){animation-delay:0.18s}
+
+/* Settings modal body — soft fade once the shell has settled */
+.modal-body{animation:fadeIn var(--m-slow) var(--ease) both}
+
+/* Brand status dot — warm glow while generating */
+.brand-status-dot.generating{
+  box-shadow:0 0 8px rgba(252,211,77,0.65);
+  transition:background var(--m-med) var(--ease), box-shadow var(--m-med) var(--ease);
+}
+
+/* Provider menu items — slight slide as the menu opens */
+.provider-menu-item{transition:transform var(--m-fast) var(--ease), background var(--m-fast) var(--ease)}
+.provider-menu-item:hover{transform:translateX(2px)}
+
+/* Send button — the primary action breathes while generating */
+.send-btn.stop{transform:scale(1);animation:glowPulse 1.5s ease-in-out infinite}
+
+/* Respect users who prefer less motion */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:0.001s !important;
+    animation-delay:0s !important;
+    transition-duration:0.001s !important;
+    transition-delay:0s !important;
+    animation-iteration-count:1 !important;
+  }
+}

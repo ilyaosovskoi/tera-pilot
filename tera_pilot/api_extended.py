@@ -60,6 +60,8 @@ Design rules
 from __future__ import annotations
 
 import logging
+import os
+import threading
 from pathlib import Path
 from typing import Any, Callable, Dict
 
@@ -1977,6 +1979,715 @@ def _section_set(handler, body=None):
         return _ok(_bridge().set_section(body.get("section", "general")))
     except Exception as e:
         return _err(str(e))
+
+
+# ════════════════════════════════════════════════════════════════════
+# Context management — /context, /clear, /compact, /reload, /pin, /unpin
+# (mirrors the TUI's native slash commands over HTTP)
+# ════════════════════════════════════════════════════════════════════
+
+
+def _runtime(handler):
+    """Return the API server's SHARED AgentRuntime — the same instance that
+    serves /api/agent/stream — so context operations here affect the exact
+    conversation the GUI is streaming (not a second, orphaned runtime)."""
+    if handler is None:
+        return None
+    ws = (handler.ctx.config.get("project_root") or "") or None
+    return handler.ctx.get_agent_runtime(ws)
+
+
+def _workspace_root(handler) -> "Path | None":
+    ws = (handler.ctx.config.get("project_root") or "") if handler else ""
+    return Path(ws).resolve() if ws else None
+
+
+@_get_route("/api/context/status")
+def _context_status(handler, body=None):
+    try:
+        rt = _runtime(handler)
+        if rt is None:
+            return _err("backend not ready")
+        return _ok(rt.context_status())
+    except Exception as e:
+        logger.warning("[api_ext] context/status failed: %s", e)
+        return _err(str(e))
+
+
+@_post_route("/api/context/clear")
+def _context_clear(handler, body=None):
+    try:
+        rt = _runtime(handler)
+        if rt is None:
+            return _err("backend not ready")
+        return rt.clear_context()
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/context/compact")
+def _context_compact(handler, body=None):
+    try:
+        rt = _runtime(handler)
+        if rt is None:
+            return _err("backend not ready")
+        return rt.compact_context()
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/context/reload")
+def _context_reload(handler, body=None):
+    try:
+        rt = _runtime(handler)
+        if rt is None:
+            return _err("backend not ready")
+        pc = rt._project_context
+        pc.reload()
+        pc.instructions()  # force re-read from disk
+        status = pc.status() or {}
+        return _ok({
+            "sources": status.get("sources", []),
+            "total_chars": status.get("total_chars", 0),
+        })
+    except Exception as e:
+        return _err(str(e))
+
+
+@_get_route("/api/context/pin")
+def _context_pin(handler, body=None):
+    path = (handler._query("path") or "").strip() if handler else ""
+    if not path:
+        return _err("path is required")
+    try:
+        rt = _runtime(handler)
+        if rt is None:
+            return _err("backend not ready")
+        rt._context_manager.pin_file(path)
+        return _ok({"path": path})
+    except Exception as e:
+        return _err(str(e))
+
+
+@_get_route("/api/context/unpin")
+def _context_unpin(handler, body=None):
+    path = (handler._query("path") or "").strip() if handler else ""
+    if not path:
+        return _err("path is required")
+    try:
+        rt = _runtime(handler)
+        if rt is None:
+            return _err("backend not ready")
+        rt._context_manager.unpin_file(path)
+        return _ok({"path": path})
+    except Exception as e:
+        return _err(str(e))
+
+
+# ════════════════════════════════════════════════════════════════════
+# Project memory file editor — TERA_PILOT.md primary, CLAUDE.md fallback
+# ════════════════════════════════════════════════════════════════════
+
+_MEMORY_FILE_NAMES = (
+    "TERA_PILOT.md", "tera_pilot.md", ".tera_pilot.md",
+    "CLAUDE.md", "claude.md", ".claude.md",
+)
+
+
+def _memory_file_target(handler, preferred: str = "") -> Path:
+    """Resolve the memory file to read/write.
+
+    Priority: an existing project file (any accepted name), then a fresh
+    project ``TERA_PILOT.md``, then the global ``~/.tera_pilot/TERA_PILOT.md``.
+    A client-supplied ``preferred`` path is honoured only when it resolves
+    inside the workspace (or inside the global memory dir) — so a
+    compromised/buggy client can never redirect the write elsewhere.
+    """
+    base = _workspace_root(handler)
+    candidates: list = []
+    if base is not None:
+        candidates = [base / n for n in _MEMORY_FILE_NAMES]
+        if preferred:
+            pref = Path(preferred)
+            try:
+                if pref.is_absolute():
+                    pref_r = pref.resolve()
+                    if str(pref_r).startswith(str(base) + os.sep):
+                        candidates.insert(0, pref_r)
+                else:
+                    candidates.insert(0, base / pref)
+            except Exception:
+                pass
+    else:
+        gdir = Path.home() / ".tera_pilot"
+        candidates = [gdir / n for n in _MEMORY_FILE_NAMES]
+        if preferred:
+            try:
+                pref_r = Path(preferred).resolve()
+                if str(pref_r).startswith(str(gdir.resolve()) + os.sep):
+                    candidates.insert(0, pref_r)
+            except Exception:
+                pass
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[0]
+
+
+@_get_route("/api/memory/read")
+def _memory_read(handler, body=None):
+    try:
+        target = _memory_file_target(handler)
+        content = ""
+        if target.exists():
+            content = target.read_text(encoding="utf-8", errors="replace")
+        source = "none"
+        if target.exists():
+            base = _workspace_root(handler)
+            source = "project" if base and str(target.resolve()).startswith(str(base) + os.sep) else "global"
+        return _ok({"content": content, "path": str(target), "source": source})
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/memory/write")
+def _memory_write(handler, body=None):
+    body = body or {}
+    try:
+        target = _memory_file_target(handler, preferred=str(body.get("path") or ""))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(str(body.get("content") or ""), encoding="utf-8")
+        return _ok({"path": str(target)})
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/memory/append_lesson")
+def _memory_append_lesson(handler, body=None):
+    body = body or {}
+    title = (body.get("title") or "").strip()
+    body_text = (body.get("body") or "").strip()
+    if not title or not body_text:
+        return _err("Both title and body are required")
+    try:
+        target = _memory_file_target(handler)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        with open(target, "a", encoding="utf-8") as f:
+            f.write(f"\n## Lesson: {title} ({ts})\n\n{body_text}\n")
+        return _ok({"path": str(target)})
+    except Exception as e:
+        return _err(str(e))
+
+
+# ════════════════════════════════════════════════════════════════════
+# Project file access — read / write / list (safe, workspace-scoped)
+# ════════════════════════════════════════════════════════════════════
+
+
+def _code_viewer(handler):
+    from .code_viewer import CodeViewerService
+    base = _workspace_root(handler)
+    return CodeViewerService(root=str(base) if base else None)
+
+
+@_post_route("/api/files/read")
+def _files_read(handler, body=None):
+    body = body or {}
+    raw = body.get("path") or (body.get("args") or [None])[0]
+    raw = str(raw or "").strip()
+    if not raw:
+        return _err("path is required")
+    try:
+        return _ok(_code_viewer(handler).read_file(raw))
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/files/write")
+def _files_write(handler, body=None):
+    body = body or {}
+    raw = str(body.get("path") or "").strip()
+    content = str(body.get("content") or "")
+    if not raw:
+        return _err("path is required")
+    base = _workspace_root(handler)
+    if base is None:
+        return _err("No project open — open a project folder first.")
+    try:
+        p = (base / raw).resolve()
+        if p != base and not str(p).startswith(str(base) + os.sep):
+            return _err("Path escapes the project root.")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        return _ok({"path": str(p)})
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/files/list")
+def _files_list(handler, body=None):
+    try:
+        return _code_viewer(handler).list_files()
+    except Exception as e:
+        return _err(str(e))
+
+
+# ════════════════════════════════════════════════════════════════════
+# Settings & agent controls
+# ════════════════════════════════════════════════════════════════════
+
+
+@_post_route("/api/settings/save")
+def _settings_save(handler, body=None):
+    body = body or {}
+    try:
+        return handler._save_settings(body)
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/chat/stop")
+def _chat_stop(handler, body=None):
+    try:
+        handler.ctx.cancel_chat()
+        return _ok({"message": "Generation stopped"})
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/agent/undo")
+def _agent_undo(handler, body=None):
+    """Undo the most recent agent changes via the checkpoint system."""
+    try:
+        from .checkpoint import CheckpointManager
+        base = _workspace_root(handler)
+        cm = CheckpointManager(session_id="gui", workspace=str(base) if base else None)
+        result = cm.rewind(n=1)
+        if result.get("ok"):
+            return _ok({"method": "rewind", "restored": result.get("restored", [])})
+        return _err(result.get("error") or "Nothing to revert")
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/agent/autonomy")
+def _agent_autonomy(handler, body=None):
+    body = body or {}
+    level = body.get("level") or (body.get("args") or [None])[0]
+    level = str(level or "").strip()
+    if not level:
+        return _err("level is required")
+    try:
+        return handler._save_advanced_agent_settings({"agent": {"autonomy": level}})
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/agent/guardian")
+def _agent_guardian(handler, body=None):
+    body = body or {}
+    level = body.get("level") or (body.get("args") or [None])[0]
+    level = str(level or "").strip()
+    valid = {"off", "dangerous_only", "all"}
+    if level not in valid:
+        return _err(f"Invalid level: {level}. Valid: {', '.join(sorted(valid))}")
+    try:
+        with handler.ctx._config_lock:
+            handler.ctx.config["guardian_level"] = level
+            from .api_server import _save_config
+            _save_config(handler.ctx.config)
+        return _ok({"level": level})
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/agent/advanced_settings/save")
+def _agent_advanced_save(handler, body=None):
+    body = body or {}
+    try:
+        return handler._save_advanced_agent_settings(body)
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/diff/respond")
+def _diff_respond(handler, body=None):
+    """Respond to a pending diff-review request.
+
+    The modern HTTP flow always sends ``review_id`` (routed to the exact
+    agent thread). The legacy Qt-bridge flow sent no id — fall back to
+    the most recently created pending review.
+    """
+    body = body or {}
+    accepted = bool(body.get("accepted", False))
+    review_id = str(body.get("review_id") or "")
+    try:
+        ctx = handler.ctx
+        with ctx._diff_review_lock:
+            entry = None
+            if review_id:
+                entry = ctx._diff_review_pending.get(review_id)
+            else:
+                newest = None
+                for rid, e in ctx._diff_review_pending.items():
+                    if newest is None or e.get("ts", 0) >= newest.get("ts", 0):
+                        newest = e
+                        review_id = rid
+                entry = newest
+            if entry is None:
+                return _err("no pending diff review for that review_id")
+            entry["accepted"] = bool(accepted)
+            entry["event"].set()
+        logger.info("[api_ext] diff/respond: review_id=%s accepted=%s", review_id, accepted)
+        return _ok({"accepted": bool(accepted), "review_id": review_id})
+    except Exception as e:
+        return _err(str(e))
+
+
+# ════════════════════════════════════════════════════════════════════
+# Queue / updates / provider health / pricing
+# ════════════════════════════════════════════════════════════════════
+
+
+@_get_route("/api/queue/stats")
+def _queue_stats(handler, body=None):
+    try:
+        from .request_queue import get_queue_registry
+        return _ok({"stats": get_queue_registry().stats()})
+    except Exception as e:
+        return _err(str(e))
+
+
+@_get_route("/api/updates/check")
+def _updates_check(handler, body=None):
+    try:
+        from .auto_updater import AutoUpdater, get_current_version
+        from .api_server import _tera_pilot_home
+        updater = AutoUpdater(current_version=get_current_version())
+        repo = (handler.ctx.config.get("update_repo") or "") if handler else ""
+        updater.set_repo(repo or None)
+        updater.check_for_updates(get_current_version())
+        return _ok({"update_available": False, "checked": True})
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/providers/health")
+def _providers_health(handler, body=None):
+    """Synchronous provider health probe (mirrors the SSE test endpoint)."""
+    body = body or {}
+    pid = str(body.get("provider_id") or (body.get("args") or [None])[0] or "").strip()
+    if not pid:
+        return _err("provider_id is required")
+    try:
+        from .providers.types import ProviderMessage, ProviderConfig
+        cfg = handler.ctx.config.get("providers", {}).get(pid, {})
+        prov_cfg = ProviderConfig(
+            provider_id=pid,
+            model=cfg.get("model", ""),
+            api_key=cfg.get("api_key") or None,
+            api_base=cfg.get("api_base") or None,
+            temperature=0.2,
+            max_tokens=100,
+        )
+        import time as _time
+        start = _time.time()
+        try:
+            resp = handler.ctx.registry.get(pid).generate([
+                ProviderMessage(role="user", content="Say hello in one sentence."),
+            ])
+            latency_ms = int((_time.time() - start) * 1000)
+            return _ok({"latency_ms": latency_ms, "key_valid": True, "provider_id": pid})
+        except Exception as exc:
+            msg = str(exc).lower()
+            return {
+                "ok": False,
+                "provider_id": pid,
+                "rate_limited": "429" in msg or "rate" in msg,
+                "key_valid": "401" not in msg and "invalid" not in msg and "api key" not in msg,
+                "error": str(exc),
+            }
+    except Exception as e:
+        return _err(str(e))
+
+
+@_get_route("/api/pricing/table")
+def _pricing_table(handler, body=None):
+    try:
+        costs = {
+            "openai": 0.00003, "anthropic": 0.000015, "deepseek": 0.00001,
+            "gemini": 0.00003, "groq": 0.00008, "mistral": 0.00003,
+            "openrouter": 0.00003, "together": 0.00004, "zai": 0.00002,
+        }
+        providers = []
+        if handler is not None:
+            for p in handler.ctx.registry.list_providers():
+                providers.append({
+                    "id": p.get("id"),
+                    "label": p.get("label", p.get("id")),
+                    "model": p.get("model", ""),
+                    "usd_per_1k_tokens": costs.get(p.get("id", ""), 0.03),
+                })
+        return _ok({"live": False, "fetched_at": None, "providers": providers})
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/pricing/fetch")
+def _pricing_fetch(handler, body=None):
+    """Live pricing requires a network pricing source; we ship a bundled
+    snapshot, so report that honestly instead of pretending to refresh."""
+    return _err("Live pricing source not configured — using bundled snapshot", count=0)
+
+
+# ════════════════════════════════════════════════════════════════════
+# Snippets (stored in config)
+# ════════════════════════════════════════════════════════════════════
+
+
+@_get_route("/api/snippets")
+def _snippets_list(handler, body=None):
+    try:
+        return _ok({"snippets": handler.ctx.config.get("snippets", [])})
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/snippets/save")
+def _snippets_save(handler, body=None):
+    body = body or {}
+    name = str(body.get("name") or (body.get("args") or [None, None, None])[0] or "").strip()
+    content = str(body.get("content") or (body.get("args") or [None, None, None])[1] or "")
+    lang = str(body.get("language") or (body.get("args") or [None, None, None])[2] or "text")
+    if not name or not content:
+        return _err("name and content are required")
+    try:
+        cfg = handler.ctx.config
+        with handler.ctx._config_lock:
+            snippets = [s for s in cfg.get("snippets", []) if s.get("name") != name]
+            snippets.append({"name": name, "content": content, "language": lang})
+            cfg["snippets"] = snippets
+            from .api_server import _save_config
+            _save_config(cfg)
+        return _ok({"name": name})
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/snippets/delete")
+def _snippets_delete(handler, body=None):
+    body = body or {}
+    name = str(body.get("name") or (body.get("args") or [None])[0] or "").strip()
+    if not name:
+        return _err("name is required")
+    try:
+        cfg = handler.ctx.config
+        with handler.ctx._config_lock:
+            cfg["snippets"] = [s for s in cfg.get("snippets", []) if s.get("name") != name]
+            from .api_server import _save_config
+            _save_config(cfg)
+        return _ok({"name": name})
+    except Exception as e:
+        return _err(str(e))
+
+
+# ════════════════════════════════════════════════════════════════════
+# Auto-router toggle + prompt classification
+# ════════════════════════════════════════════════════════════════════
+
+
+@_post_route("/api/router/toggle")
+def _router_toggle(handler, body=None):
+    body = body or {}
+    enabled = bool(body.get("enabled") if body.get("enabled") is not None else (body.get("args") or [True])[0])
+    try:
+        cfg = handler.ctx.config
+        with handler.ctx._config_lock:
+            cfg["auto_route"] = enabled
+            from .api_server import _save_config
+            _save_config(cfg)
+        return _ok({"enabled": enabled})
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/router/classify")
+def _router_classify(handler, body=None):
+    body = body or {}
+    text = str(body.get("text") or (body.get("args") or [None])[0] or "").strip()
+    if not text:
+        return _err("text is required")
+    try:
+        from .auto_router import get_auto_router
+        return _ok(get_auto_router().classify_explain(text))
+    except Exception as e:
+        return _err(str(e))
+
+
+# ════════════════════════════════════════════════════════════════════
+# Cross-chat memory save / RAG search / chat title / external open
+# ════════════════════════════════════════════════════════════════════
+
+
+@_post_route("/api/memory/save")
+def _memory_save(handler, body=None):
+    body = body or {}
+    session_id = str(body.get("chat_id") or (body.get("args") or [None])[0] or "session")
+    title = str(body.get("title") or (body.get("args") or [None, None])[1] or "")
+    summary = str(body.get("summary") or (body.get("args") or [None, None, None])[2] or "")
+    if not summary:
+        return _err("summary is required")
+    try:
+        from .memory_service import MemoryService
+        from .api_server import _tera_pilot_home
+        base = _workspace_root(handler)
+        mem = MemoryService(persist_path=str(_tera_pilot_home() / "cross_chat_memory.md"))
+        result = mem.save_context(
+            session_id=session_id,
+            title=title or session_id,
+            content=summary,
+            project_root=str(base) if base else None,
+            chat_id=session_id,
+        )
+        return result
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/rag/search")
+def _rag_search(handler, body=None):
+    """Grep-based project search — returns a flat result array, matching
+    the legacy Qt-bridge contract app.js expects (results.length, r.path,
+    r.line, r.text, r.source)."""
+    body = body or {}
+    text = str(body.get("text") or (body.get("args") or [None])[0] or "").strip()
+    if not text:
+        return []
+    try:
+        results = _code_viewer(handler).search(text, max_results=50)
+        for r in results:
+            r["source"] = "grep"
+        return results
+    except Exception as e:
+        logger.warning("[api_ext] rag/search failed: %s", e)
+        return []
+
+
+@_post_route("/api/oneshot/enhance")
+def _oneshot_enhance(handler, body=None):
+    """Legacy Qt-bridge alias for the prompt-enhancer (SSE)."""
+    body = body or {}
+    args = body.get("args") or []
+    request_id = str(body.get("request_id") or (args[0] if len(args) > 0 else "") or "")
+    text = str(body.get("text") or (args[1] if len(args) > 1 else "") or "").strip()
+    if not text:
+        return _err("text is required")
+    return handler._handle_oneshot({
+        "request_id": request_id,
+        "max_tokens": 800,
+        "messages": [
+            {"role": "system", "content": "You are a prompt engineer. Rewrite the user's request as a structured prompt with these sections: [INTENT], [CONTEXT], [CONSTRAINTS], [DELIVERABLES]. Be concise. Output only the structured prompt, nothing else."},
+            {"role": "user", "content": text},
+        ],
+    })
+
+
+@_post_route("/api/chat/generate_title")
+def _chat_generate_title(handler, body=None):
+    """Derive a chat title from its first user message (no LLM round-trip)."""
+    body = body or {}
+    chat_id = str(body.get("chat_id") or (body.get("args") or [None])[0] or "")
+    if not chat_id:
+        return _err("chat_id is required")
+    try:
+        from .api_server import _load_chat, _save_chat
+        chat = _load_chat(chat_id)
+        if not chat:
+            return _err("chat not found")
+        first_user = ""
+        for m in chat.get("messages", []):
+            if m.get("role") == "user":
+                first_user = m.get("content", "")
+                break
+        title = " ".join(first_user.split())[:60] or "New chat"
+        chat["title"] = title
+        _save_chat(chat)
+        return _ok({"title": title, "chat_id": chat_id})
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/external/open")
+def _external_open(handler, body=None):
+    """Open a URL in the user's default browser (server runs locally)."""
+    body = body or {}
+    url = str(body.get("url") or (body.get("args") or [None])[0] or "").strip()
+    if not url:
+        return _err("url is required")
+    if not url.startswith(("http://", "https://")):
+        return _err("Only http/https URLs can be opened")
+    try:
+        import webbrowser
+        webbrowser.open(url, new=2)
+        return _ok({"url": url})
+    except Exception as e:
+        return _err(str(e))
+
+
+# ════════════════════════════════════════════════════════════════════
+# Swarm agents — lightweight in-memory registry (spawn/list/remove/cleanup)
+# ════════════════════════════════════════════════════════════════════
+
+_SWARM_AGENTS: dict = {}
+_SWARM_LOCK = threading.Lock()
+_SWARM_COUNTER = [0]
+
+
+@_post_route("/api/swarm/spawn")
+def _swarm_spawn(handler, body=None):
+    body = body or {}
+    args = body.get("args") or []
+    name = str(body.get("name") or (args[0] if len(args) > 0 else "") or "").strip()
+    goal = str(body.get("goal") or (args[1] if len(args) > 1 else "") or "").strip()
+    role = str(body.get("role") or (args[2] if len(args) > 2 else "") or "researcher").strip()
+    if not goal:
+        return _err("goal is required")
+    with _SWARM_LOCK:
+        _SWARM_COUNTER[0] += 1
+        aid = f"agent-{_SWARM_COUNTER[0]:04d}"
+        _SWARM_AGENTS[aid] = {
+            "id": aid,
+            "name": name or f"Agent #{_SWARM_COUNTER[0]}",
+            "role": role,
+            "goal": goal,
+            "status": "idle",
+            "created_at": None,
+        }
+    return _ok({"id": aid})
+
+
+@_get_route("/api/swarm/list")
+def _swarm_list(handler, body=None):
+    with _SWARM_LOCK:
+        return _ok({"agents": list(_SWARM_AGENTS.values())})
+
+
+@_post_route("/api/swarm/remove")
+def _swarm_remove(handler, body=None):
+    body = body or {}
+    aid = str(body.get("id") or (body.get("args") or [None])[0] or "")
+    with _SWARM_LOCK:
+        _SWARM_AGENTS.pop(aid, None)
+    return _ok({"id": aid})
+
+
+@_post_route("/api/swarm/cleanup")
+def _swarm_cleanup(handler, body=None):
+    with _SWARM_LOCK:
+        _SWARM_AGENTS.clear()
+    return _ok({})
 
 
 # ════════════════════════════════════════════════════════════════════

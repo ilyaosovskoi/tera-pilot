@@ -1,7 +1,7 @@
 """input_box.py — bottom input line with command history and slash trigger.
 
 v2.1.0 (Loop 3): Warm, Modern, Content-Forward redesign.
-  - Dashed ASCII border (Claude Code style)
+  - Dashed ASCII border (terminal style)
   - `> ` prefix for user messages
   - Surface background (#373737)
   - Muted border (#888888) with shimmer (#a6a6a6)

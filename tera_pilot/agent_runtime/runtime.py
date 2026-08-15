@@ -1152,7 +1152,7 @@ class AgentRuntime:
         # tool still works (its schema is still in TOOL_SCHEMA, and
         # _dispatch still routes it). The typed path gives the model
         # better-typed args and avoids the (server, tool, args) tuple
-        # indirection — same pattern Claude Code v2.1.7+ uses.
+        # indirection — same lazy-loading pattern mature coding agents use.
         try:
             from .mcp_manager import get_mcp_manager
             manager = get_mcp_manager()

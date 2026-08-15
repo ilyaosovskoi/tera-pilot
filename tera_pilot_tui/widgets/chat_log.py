@@ -2,7 +2,7 @@
 
 v2.1.0 (Loop 3): Warm, Modern, Content-Forward redesign.
   - AI responses: pure white, no border/box
-  - User messages: in dashed ASCII box (Claude Code style)
+  - User messages: in dashed ASCII box
   - Separators: thin #505050 between messages
   - Tool blocks: colored Unicode borders (hot pink)
   - Streaming support: append chunks to last AI message
@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional
 from rich.markdown import Markdown
 from rich.syntax import Syntax
 from rich.text import Text
+from textual.geometry import Size
 from textual.widgets import RichLog
 
 # Tools that involve code editing
@@ -46,23 +47,33 @@ class ChatLog(RichLog):
         super().__init__(highlight=True, markup=True, wrap=True, **kwargs)
         self._streaming_text: str = ""
         self._streaming_active: bool = False
+        # v2.3.1-fix: line count before the in-progress streaming entry was
+        # written. Used to roll the entry back and re-render it in place so
+        # token chunks never pile up as N duplicate log entries (the old
+        # code poked RichLog._children which does not exist on Textual 8.x,
+        # so every chunk fell through to a fresh self.write() — a stream of
+        # N chunks produced N progressively-longer duplicate lines).
+        self._stream_baseline: Optional[int] = None
+        self._stream_write_scheduled: bool = False
 
     # ---- user / system ------------------------------------------------------
 
     def add_user(self, text: str) -> None:
-        """Display a user message (no box, just text like Claude Code)."""
+        """Display a user message (no box, plain text)."""
         # Use Text to avoid markup injection from user content
-        self.write(Text(f"> {text}", style="white"))
+        # v2.3.1: animate=True gives new messages a smooth scroll glide
+        # instead of an instant jump (minimal motion language).
+        self.write(Text(f"> {text}", style="white"), animate=True)
         self.write(Text(""))
 
     def add_system(self, text: str) -> None:
         """Display a system/info message with Rich markup support."""
-        self.write(text)
+        self.write(text, animate=True)
 
     def add_plan(self, plan: str) -> None:
         """Display a plan proposal."""
-        self.write(Text("[plan]", style="bold #888888"))
-        self.write(Markdown(plan))
+        self.write(Text("[plan]", style="bold #888888"), animate=True)
+        self.write(Markdown(plan), animate=True)
         self.write(Text(""))
 
     # ---- separators (Loop 3) ────────────────────────────────────────────
@@ -85,51 +96,91 @@ class ChatLog(RichLog):
     def append_token_delta(self, chunk: str) -> None:
         """Append a streaming token chunk to the live assistant response.
 
-        v2.2.4-fix: Instead of writing each chunk as a separate RichLog
-        entry (which creates duplicates when add_final() adds Markdown),
-        we now only accumulate the text. The final rendering happens in
-        add_final() which replaces the streamed text with Markdown.
+        v2.3.1-fix: only ONE live entry exists in the log at any moment.
+        The first chunk records the line count before the entry (the
+        "baseline") and writes it; every later chunk rolls the entry back
+        to the baseline and re-writes the accumulated text, so a stream of
+        N chunks renders as a single growing line instead of N duplicates.
+
+        If the log width is not known yet (writes are deferred until the
+        first resize), we only accumulate the text — the final rendering
+        happens in add_final(), which replaces the streamed text with the
+        Markdown-rendered answer.
         """
         if not self._streaming_active:
             self._streaming_active = True
             self._streaming_text = chunk
+            if self._size_known:
+                self._stream_baseline = len(self.lines)
+                self.write(Text(self._streaming_text, style="white"))
         else:
             self._streaming_text += chunk
-        # v2.2.4-fix: Do NOT write intermediate entries to the RichLog.
-        # Instead, we update the LAST written entry in-place if it exists,
-        # to avoid creating N duplicate progressively-longer entries.
-        try:
-            # Try to update the last entry rather than appending a new one
-            if self._children and len(self._children) > 0:
-                # Replace the last child with updated text
-                self._children[-1] = Text(self._streaming_text, style="white")
-                self.refresh()
-            else:
-                # First chunk — write initial entry
+            if self._size_known:
+                self._rollback_stream_entry()
                 self.write(Text(self._streaming_text, style="white"))
+
+    def _rollback_stream_entry(self) -> None:
+        """Remove the in-progress streaming entry from the log.
+
+        Truncates ``self.lines`` back to the recorded baseline so the next
+        write re-renders the streamed text in place. Safe no-op when no
+        streaming entry was written (e.g. writes were deferred because the
+        widget size was unknown).
+        """
+        if self._stream_baseline is None:
+            return
+        try:
+            del self.lines[self._stream_baseline:]
         except Exception:
-            # Fallback: just write (slightly duplicative but at least visible)
-            self.write(Text(self._streaming_text, style="white"))
+            return
+        self._start_line = min(self._start_line, len(self.lines))
+        self._line_cache.clear()
+        self.virtual_size = Size(self._widest_line_width, len(self.lines))
+        self.refresh()
 
     def end_streaming(self) -> str:
-        """Stop accumulating and return the buffered text."""
+        """Stop accumulating and return the buffered text.
+
+        The streamed entry (if any) is left in the log as plain text — use
+        ``add_final()`` to replace it with the Markdown-rendered answer, or
+        ``abort_streaming()`` to discard it on error/interrupt.
+        """
         text = self._streaming_text
         self._streaming_active = False
         self._streaming_text = ""
+        self._stream_baseline = None
         return text
+
+    def abort_streaming(self) -> str:
+        """Discard any partial streamed text (error / interrupt paths).
+
+        Rolls the in-progress streaming entry out of the log so a failed or
+        interrupted run does not leave half-written plain text above the
+        error message. Returns the discarded text for callers that want it.
+        """
+        if not self._streaming_active:
+            return ""
+        self._rollback_stream_entry()
+        return self.end_streaming()
 
     def add_final(self, text: str) -> None:
         """Display the final assistant response.
 
         v2.1.0 (Loop 3): AI responses are pure white, no border/box.
         Clean, content-first presentation.
+
+        v2.3.1-fix: if a live streaming entry exists, it is rolled back
+        first so the Markdown-rendered answer REPLACES the plain streamed
+        text instead of duplicating it.
         """
         if not text:
             return
         if self._streaming_active:
+            self._rollback_stream_entry()
             self.end_streaming()
         # AI responses: plain text, white, no container
-        self.write(Markdown(text))
+        # v2.3.1: smooth scroll so the final answer glides into view.
+        self.write(Markdown(text), animate=True)
 
     def add_error(self, text: str) -> None:
         """Display an error message."""

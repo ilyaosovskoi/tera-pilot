@@ -1192,7 +1192,7 @@ class ToolEngine:
         p.write_bytes(latest.read_bytes())
         return f"[UNDO] {path} restored from {latest.name}"
 
-    # ── v1.0.11: Git tools — direct project access like Claude Code ──
+    # ── v1.0.11: Git tools — direct project access ──
     # These give the agent the ability to inspect git state, see diffs,
     # stage files, and commit changes — without asking the user to run
     # git commands manually. The agent wraps the existing GitService
@@ -1482,7 +1482,7 @@ class ToolEngine:
         system prompt was truncated (more than
         ``MCPManager.DEFAULT_TYPED_CATALOG_MAX`` tools). The agent
         calls this to discover the rest on demand — the same lazy-
-        loading pattern Claude Code introduced in v2.1.7+.
+        loading pattern mature coding agents use.
         """
         try:
             from .mcp_manager import get_mcp_manager
@@ -2103,7 +2103,7 @@ class ToolEngine:
             The exit code + output become verification evidence.
           - ``review_subagent``: spawn a fresh-context reviewer
             sub-agent (role="reviewer") over the touched files + goal.
-            Independent verification — what Claude Code's "reviewer
+            Independent verification — what a "reviewer
             subagent" pattern does, now available in ALL sections
             (not just Heavy Code).
           - ``full``: run_tests + review_subagent. Use for high-stakes
@@ -2598,7 +2598,7 @@ class ToolEngine:
     # file-pattern. ``_grep`` does REGEX search (with optional case
     # sensitivity) over a glob of files, and ``_glob`` returns paths
     # matching a pattern. Together they give the agent the same
-    # "search the workspace on demand" capability Claude Code's
+    # "search the workspace on demand" capability other coding agents'
     # agentic-search harness has — the agent decides WHAT to search
     # for based on its reasoning, instead of relying solely on
     # ContextManager's heuristic auto-attach.

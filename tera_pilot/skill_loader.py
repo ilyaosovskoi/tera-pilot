@@ -1,7 +1,7 @@
 """
 Tera Pilot v1.0.11 — Skill Loader (SKILL.md format).
 
-Implements the Claude Code model of reusable instruction packages:
+Implements the reusable instruction-package model:
 
   SKILL.md    — a Markdown file with YAML frontmatter describing when
                 the skill should be used, plus a body with step-by-step
@@ -21,7 +21,7 @@ Implements the Claude Code model of reusable instruction packages:
                 and can request the full text of a skill via the
                 get_skill tool.
 
-This mirrors how Claude Code treats skills as "instruction packages
+This mirrors how skills are treated as "instruction packages
 that get injected into context when needed" rather than separate
 programs.
 """

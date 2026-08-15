@@ -1,45 +1,45 @@
 /* ===================================================================
-   apple-design.css — v2.3.0 SpaceX design system + UI modes
+   design-polish.css — v2.3.1 Noir design system + UI modes
    ===================================================================
-   Loaded after style.css. Holds the SpaceX/Tesla component polish
-   (scoped to [data-theme="spacex"]) and the Basic/Advanced UI-mode
+   Loaded after style.css. Holds the Noir component polish
+   (scoped to [data-theme="noir"]) and the Basic/Advanced UI-mode
    system: in Basic mode every element marked .advanced-only is hidden
    and the advanced Settings tabs disappear, so the default surface
    stays clean for almost everyone. Switch via the topbar toggle.
    =================================================================== */
 
 /* ────────────────────────────────────────────────────────────────────
-   SPACEX THEME — component polish
+   NOIR THEME — component polish
    ──────────────────────────────────────────────────────────────────── */
-[data-theme="spacex"] .sidebar{border-right:1px solid rgba(255,255,255,0.06)}
-[data-theme="spacex"] .sidebar-label{
+[data-theme="noir"] .sidebar{border-right:1px solid rgba(255,255,255,0.06)}
+[data-theme="noir"] .sidebar-label{
   font-family:'JetBrains Mono',monospace;
   letter-spacing:0.16em;
   color:var(--text-muted);
   font-size:10px;
 }
-[data-theme="spacex"] .brand-name{font-weight:650;letter-spacing:-0.01em}
-[data-theme="spacex"] .brand-version{
+[data-theme="noir"] .brand-name{font-weight:650;letter-spacing:-0.01em}
+[data-theme="noir"] .brand-version{
   font-family:'JetBrains Mono',monospace;
   border-radius:2px;
   background:var(--bg-secondary);
   color:var(--text-muted);
 }
-[data-theme="spacex"] .nav-item,
-[data-theme="spacex"] .chat-item{border-radius:var(--r-sm)}
-[data-theme="spacex"] .nav-item.active,
-[data-theme="spacex"] .chat-item.active{
+[data-theme="noir"] .nav-item,
+[data-theme="noir"] .chat-item{border-radius:var(--r-sm)}
+[data-theme="noir"] .nav-item.active,
+[data-theme="noir"] .chat-item.active{
   background:var(--bg-floating);
   box-shadow:inset 0 0 0 1px var(--border-strong);
 }
-[data-theme="spacex"] .new-chat-btn{border-radius:var(--r-sm)}
-[data-theme="spacex"] .topbar{
+[data-theme="noir"] .new-chat-btn{border-radius:var(--r-sm)}
+[data-theme="noir"] .topbar{
   background:rgba(5,5,6,0.72);
   backdrop-filter:blur(14px);
   -webkit-backdrop-filter:blur(14px);
   border-bottom:1px solid var(--border);
 }
-[data-theme="spacex"] .statusbar{
+[data-theme="noir"] .statusbar{
   font-family:'JetBrains Mono',monospace;
   font-size:10.5px;
   letter-spacing:0.05em;
@@ -47,29 +47,29 @@
   border-top:1px solid var(--border);
   background:rgba(5,5,6,0.6);
 }
-[data-theme="spacex"] .composer{
+[data-theme="noir"] .composer{
   background:linear-gradient(180deg,var(--bg-floating) 0%,var(--bg-secondary) 100%);
   border:1px solid var(--border-strong);
   border-radius:var(--r-composer);
 }
-[data-theme="spacex"] .composer:focus-within{
+[data-theme="noir"] .composer:focus-within{
   box-shadow:0 0 0 1px rgba(255,255,255,0.28);
 }
-[data-theme="spacex"] .composer-meta{
+[data-theme="noir"] .composer-meta{
   font-family:'JetBrains Mono',monospace;
   font-size:9.5px;
   letter-spacing:0.12em;
   text-transform:uppercase;
 }
-[data-theme="spacex"] .composer-prompt{font-family:'JetBrains Mono',monospace;color:var(--text-muted)}
-[data-theme="spacex"] .send-btn{
+[data-theme="noir"] .composer-prompt{font-family:'JetBrains Mono',monospace;color:var(--text-muted)}
+[data-theme="noir"] .send-btn{
   background:#FFFFFF;
   color:#050506;
   border-radius:4px;
 }
-[data-theme="spacex"] .send-btn:hover{box-shadow:0 0 16px rgba(255,255,255,0.35)}
-[data-theme="spacex"] .send-btn.stop{background:#E82127;color:#fff}
-[data-theme="spacex"] .btn-primary{
+[data-theme="noir"] .send-btn:hover{box-shadow:0 0 16px rgba(255,255,255,0.35)}
+[data-theme="noir"] .send-btn.stop{background:#E82127;color:#fff}
+[data-theme="noir"] .btn-primary{
   background:#FFFFFF;
   color:#050506;
   border-radius:4px;
@@ -77,80 +77,80 @@
   letter-spacing:0.09em;
   font-weight:600;
 }
-[data-theme="spacex"] .btn-secondary{
+[data-theme="noir"] .btn-secondary{
   border-radius:4px;
   border:1px solid var(--border-strong);
 }
-[data-theme="spacex"] .empty-state h2{
+[data-theme="noir"] .empty-state h2{
   font-weight:650;
   letter-spacing:-0.03em;
   color:var(--text-primary);
 }
-[data-theme="spacex"] .es-chip,
-[data-theme="spacex"] .agent-mode-toggle,
-[data-theme="spacex"] .plan-mode-toggle{border-radius:var(--r-sm)}
-[data-theme="spacex"] .agent-mode-toggle.active{
+[data-theme="noir"] .es-chip,
+[data-theme="noir"] .agent-mode-toggle,
+[data-theme="noir"] .plan-mode-toggle{border-radius:var(--r-sm)}
+[data-theme="noir"] .agent-mode-toggle.active{
   background:rgba(255,255,255,0.12);
   border-color:rgba(255,255,255,0.45);
   color:#fff;
 }
-[data-theme="spacex"] .provider-trigger,
-[data-theme="spacex"] .model-selector-chip{border-radius:var(--r-sm)}
-[data-theme="spacex"] .msg{--msg-font-size:15px}
-[data-theme="spacex"] .msg-role{
+[data-theme="noir"] .provider-trigger,
+[data-theme="noir"] .model-selector-chip{border-radius:var(--r-sm)}
+[data-theme="noir"] .msg{--msg-font-size:15px}
+[data-theme="noir"] .msg-role{
   font-family:'JetBrains Mono',monospace;
   font-size:9.5px;
   letter-spacing:0.14em;
   text-transform:uppercase;
   color:var(--text-muted);
 }
-[data-theme="spacex"] .msg-body{border-radius:var(--r-card)}
-[data-theme="spacex"] .activity-panel{
+[data-theme="noir"] .msg-body{border-radius:var(--r-card)}
+[data-theme="noir"] .activity-panel{
   border:1px solid var(--border);
   border-radius:var(--r-panel);
   background:rgba(10,10,12,0.85);
   backdrop-filter:blur(10px);
   -webkit-backdrop-filter:blur(10px);
 }
-[data-theme="spacex"] .modal,
-[data-theme="spacex"] .cmd-palette,
-[data-theme="spacex"] .provider-menu,
-[data-theme="spacex"] .model-selector-menu{
+[data-theme="noir"] .modal,
+[data-theme="noir"] .cmd-palette,
+[data-theme="noir"] .provider-menu,
+[data-theme="noir"] .model-selector-menu{
   background:linear-gradient(180deg,var(--bg-floating) 0%,rgba(10,10,12,0.98) 100%);
   backdrop-filter:blur(16px);
   -webkit-backdrop-filter:blur(16px);
   border:1px solid var(--border-strong);
   border-radius:var(--r-panel);
 }
-[data-theme="spacex"] .modal-tab{
+[data-theme="noir"] .modal-tab{
   font-family:'JetBrains Mono',monospace;
   font-size:11px;
   letter-spacing:0.06em;
   text-transform:uppercase;
   color:var(--text-secondary);
 }
-[data-theme="spacex"] .modal-tab.active{color:#fff;border-bottom:2px solid #fff}
-[data-theme="spacex"] .token-bar,
-[data-theme="spacex"] .tb-tokens{font-family:'JetBrains Mono',monospace}
-[data-theme="spacex"] ::selection{background:rgba(255,255,255,0.22)}
-[data-theme="spacex"] .kbd{
+[data-theme="noir"] .modal-tab.active{color:#fff;border-bottom:2px solid #fff}
+[data-theme="noir"] .token-bar,
+[data-theme="noir"] .tb-tokens{font-family:'JetBrains Mono',monospace}
+[data-theme="noir"] ::selection{background:rgba(255,255,255,0.22)}
+[data-theme="noir"] .kbd{
   font-family:'JetBrains Mono',monospace;
   border-radius:3px;
   border-color:var(--border-strong);
 }
-[data-theme="spacex"] .git-bar,
-[data-theme="spacex"] .context-indicator{
+[data-theme="noir"] .git-bar,
+[data-theme="noir"] .context-indicator{
   background:rgba(10,10,12,0.9);
   border:1px solid var(--border-strong);
   border-radius:var(--r-sm);
 }
-[data-theme="spacex"] .theme-card.active,
-[data-theme="spacex"] .template-card.selected,
-[data-theme="spacex"] .skill-card.selected{
+[data-theme="noir"] .theme-card.active,
+[data-theme="noir"] .template-card.selected,
+[data-theme="noir"] .skill-card.selected{
   border-color:rgba(255,255,255,0.5);
   box-shadow:0 0 0 1px rgba(255,255,255,0.3);
 }
-[data-theme="spacex"] .profile-avatar{
+[data-theme="noir"] .profile-avatar{
   border-radius:4px;
   background:linear-gradient(135deg,#FFFFFF 0%,#8E8E93 100%);
   color:#050506;
@@ -210,5 +210,32 @@
   background:#fff;
   box-shadow:0 0 6px rgba(255,255,255,0.65);
 }
-[data-theme="spacex"] .ui-mode-toggle{border-radius:4px}
-[data-theme="spacex"] .ui-mode-toggle[data-mode="advanced"]{background:rgba(255,255,255,0.12)}
+[data-theme="noir"] .ui-mode-toggle{border-radius:4px}
+[data-theme="noir"] .ui-mode-toggle[data-mode="advanced"]{background:rgba(255,255,255,0.12)}
+
+/* ────────────────────────────────────────────────────────────────────
+   NOIR THEME — motion polish (v2.3.1)
+   Quiet fades, hairline glows, no bouncing.
+   ──────────────────────────────────────────────────────────────────── */
+[data-theme="noir"] .chat-item{
+  transition:background var(--m-fast) var(--ease), color var(--m-fast) var(--ease),
+    box-shadow var(--m-fast) var(--ease), transform var(--m-fast) var(--ease);
+}
+[data-theme="noir"] .chat-item:hover{
+  background:var(--bg-hover);
+  transform:translateX(1px);
+}
+[data-theme="noir"] .nav-item{
+  transition:background var(--m-fast) var(--ease), color var(--m-fast) var(--ease),
+    box-shadow var(--m-fast) var(--ease);
+}
+[data-theme="noir"] .brand-mark{
+  transition:opacity var(--m-med) var(--ease), transform var(--m-med) var(--ease);
+}
+[data-theme="noir"] .brand-mark:hover{opacity:0.85}
+[data-theme="noir"] .composer:focus-within{
+  box-shadow:0 0 0 1px rgba(255,255,255,0.28);
+  transition:box-shadow var(--m-med) var(--ease);
+}
+[data-theme="noir"] .activity-panel{transition:all var(--m-slow) var(--ease)}
+[data-theme="noir"] .activity-header{transition:opacity var(--m-fast) var(--ease)}

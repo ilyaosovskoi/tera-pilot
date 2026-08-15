@@ -23,6 +23,8 @@ from textual.containers import Vertical, Horizontal
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static, Label
 
+from .motion import entrance
+
 
 # The 6 most popular providers — keep this list short and simple.
 QUICK_PROVIDERS = [
@@ -50,11 +52,11 @@ class QuickSettingsModal(ModalScreen[None]):
         width: 60;
         height: auto;
         max-height: 28;
-        border: thick $border;
+        border: solid $border;
         background: $surface;
         padding: 1 2;
     }
-    #qs-title {
+        #qs-title {
         text-style: bold;
         margin-bottom: 1;
     }
@@ -137,6 +139,8 @@ class QuickSettingsModal(ModalScreen[None]):
             )
 
     def on_mount(self) -> None:
+        # v2.3.1: entrance animation — fade + slight rise.
+        entrance(self.query_one("#qs-container"))
         # Pre-fill model from bridge
         try:
             status = self.bridge.get_status()

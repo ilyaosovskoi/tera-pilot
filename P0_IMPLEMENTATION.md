@@ -272,21 +272,22 @@ providers and publishing measured metrics (see `eval/README.md`).
 
 ---
 
-## 6. GUI v2.3.0 — SpaceX theme + Basic/Advanced modes
+## 6. GUI v2.3.0 — Noir theme + Basic/Advanced modes
 
-**What:** the web interface moved to SpaceX/Tesla aesthetics (black
-"launch-pad" minimalism) and gained a **Basic/Advanced** switcher.
+**What:** the web interface moved to black "launch-pad" minimalism and
+ gained a **Basic/Advanced** switcher. (Theme ids are neutral; see
+ v2.3.1 for the brand-name cleanup.)
 
-**`spacex` theme:**
+**`noir` theme:**
 
 - clean black background (`#050506`), layered surfaces, hairline borders
   (alpha 0.07/0.14), a single white accent;
 - sharp corners (4–8px instead of 20px+), mono family for statuses/versions
   (JetBrains Mono), uppercase labels with wide tracking;
-- Tesla red `#E82127` for dangerous states, signal green/blue;
-- component polish in `apple-design.css` (the v2.2.2 stub became a layer of
-  SpaceX overrides).
-- **Default theme** for new installs (in settings, the "SpaceX" card is first
+- red `#E82127` for dangerous states, signal green/blue;
+- component polish in `design-polish.css` (the v2.2.2 stub became a layer of
+  Noir overrides).
+- **Default theme** for new installs (in settings, the "Noir" card is first
   in the list; previously saved themes are untouched).
 
 **Basic/Advanced modes:**
@@ -433,6 +434,75 @@ manual validator agree on required fields and vocabulary; sample report is
 schema-valid and JSON-serializable; raw tool args are rejected; missing
 required fields are rejected; `passed` without `self_verify_called` is
 rejected; non-JSON metadata serializes safely.
+
+---
+
+## 11b. v2.3.1 — streaming fix + minimal motion language + brand cleanup
+
+### 11b.1. ChatLog streaming duplication (real, user-visible bug)
+
+The v2.2.4 streaming implementation updated `RichLog._children[-1]`, but
+`RichLog` on Textual 8.x has no `_children` — every `append_token_delta`
+chunk fell through to a fresh `self.write()`, so a stream of N chunks
+produced N progressively-longer duplicate log entries. Worse,
+`_on_turn_done` skipped `add_final()` on streamed turns, so the final
+answer was never rendered as Markdown (it stayed as raw plain text).
+
+**Fix** (`tera_pilot_tui/widgets/chat_log.py`, `app.py`): the streaming
+entry is now tracked by a baseline line count — each chunk rolls the
+entry back and re-writes it in place (one growing entry, never N), and
+`add_final()` replaces it with the Markdown render. New
+`abort_streaming()` discards partial text on errors/interrupts.
+Regression tests: `tests/test_chat_log_streaming.py` (3 tests).
+
+### 11b.2. Minimal design + motion
+
+- **Brand cleanup**: all third-party brand references removed from the UI
+  (theme ids `spacex`→`noir`, `cursor`→`flat` with a localStorage
+  migration for saved themes; `apple-design.css` renamed to
+  `design-polish.css`; "Tesla/SpaceX/Apple/Claude Code" wording removed
+  from user-facing strings, CSS comments and docs).
+
+- **TUI**: near-black (`#0a0a0c`) surfaces, hairline borders, single warm
+  accent; `GuardianModal` finally got its own styles (it rendered
+  unstyled before); entrance animations for all modals (fade + rise via
+  the `animate()` API — Textual 8's CSS `@keyframes`/`transition` are not
+  supported at app level), suggestion-bar fade-in, a warm "working"
+  border on the input while the agent runs, and smooth scroll on chat
+  writes. Shared helpers in `tera_pilot_tui/widgets/motion.py`.
+- **GUI**: micro-interaction press feedback on every clickable control,
+  agent-step glide-in, message hover lift, staggered empty-state chips,
+  modal-body fade, generating-glow on the brand dot, provider-menu item
+  slide, all gated by `prefers-reduced-motion`.
+- Version bumped to 2.3.1 (package.json, `__version__`, web server,
+  TUI InfoBox, web UI chrome).
+
+### 11b.3. Dead HTTP endpoints in the browser GUI (real, user-visible bug)
+
+The browser GUI (served by `tera_pilot.web_server`, the current primary
+interface) dispatched every backend call through `bridge_shim.js` HTTP
+routes, but a large cluster of those routes had no handler on the Python
+backend — the GUI's `/context`, `/clear`, `/compact`, `/pin`, `/unpin`,
+`/reload-context` slash commands, the Collective Memory editor, the
+Apply/Copy file buttons, the file-tree panel, Settings save, Stop
+generation, diff-review responses and ~20 more controls all silently
+failed with HTTP 404 (`{"error": "not found"}`).
+
+**Fix** (`tera_pilot/api_extended.py`, `api_server.py`, `bridge_shim.js`):
+implemented the missing endpoints, reusing the shared `AgentRuntime`
+(via `handler.ctx.get_agent_runtime`) so context ops affect the exact
+conversation the GUI streams, `CodeViewerService` for safe
+workspace-scoped file read/list, the checkpoint system for agent undo,
+and `AutoRouter.classify_explain` for prompt classification. The memory
+editor routes live under neutral `/api/memory/*` (the old
+`/api/claude_md/*` never existed, so there is no compat break) and the
+file write path blocks traversal outside the workspace. Also fixed a
+latent bug: the chat stream polled `ServerContext._stop_event`, which is
+*also* the server-shutdown event — a GUI Stop would have killed the whole
+server; chat streaming now has its own cancel event
+(`_chat_cancel_event`). `bridge_shim.js` gained a `POST_ARG_MAP` for the
+positional-argument methods so payloads reach the new handlers intact.
+Regression tests: `tests/test_api_extended_endpoints.py` (24 tests).
 
 ---
 

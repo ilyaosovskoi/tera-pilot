@@ -25,6 +25,8 @@ from textual.containers import Vertical, Horizontal
 from textual.screen import ModalScreen
 from textual.widgets import Button, Label, Static
 
+from .motion import entrance
+
 
 def _verdict_color(verdict: str) -> str:
     v = (verdict or "").upper()
@@ -134,6 +136,13 @@ class VerificationModal(ModalScreen[None]):
 
             with Horizontal(id="verify-buttons"):
                 yield Button("Dismiss (Esc)", variant="primary", id="dismiss")
+
+    def on_mount(self) -> None:
+        """v2.3.1: entrance animation — fade + slight rise."""
+        try:
+            entrance(self.query_one("#verify-box"))
+        except Exception:
+            pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(None)

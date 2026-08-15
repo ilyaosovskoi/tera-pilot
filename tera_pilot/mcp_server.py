@@ -4,7 +4,7 @@ G13 — MCP Server Mode.
 
 Tera Pilot can connect to external MCP servers (as a client), but cannot BE an
 MCP server itself.  This module exposes Tera Pilot's tools via the MCP protocol
-so other agents (Claude Code, Codex, etc.) can call Tera Pilot as a tool provider.
+so other agents can call Tera Pilot as a tool provider.
 
 Protocol:
   - MCP over stdio using JSON-RPC 2.0 with Content-Length framing.

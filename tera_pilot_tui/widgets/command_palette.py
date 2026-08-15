@@ -19,6 +19,8 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static, Input
 
+from .motion import entrance
+
 
 @dataclass
 class CommandEntry:
@@ -102,14 +104,15 @@ class CommandPalette(ModalScreen):
         max-width: 80;
         height: auto;
         max-height: 22;
-        background: #161b22;
-        border: tall $accent;  /* builtin variable OK */
+        background: #111114;
+        border: solid #2e2e33;
         padding: 0;
         margin-bottom: 4;
     }
 
+    
     #palette-header {
-        background: $accent 20%;
+        background: #d77757 20%;
         color: $text;
         padding: 0 1;
         height: 1;
@@ -118,7 +121,7 @@ class CommandPalette(ModalScreen):
 
     #palette-filter {
         height: 3;
-        border: tall $accent;  /* builtin variable OK */
+        border: solid #2e2e33;
         margin: 0 1;
         padding: 0;
     }
@@ -179,6 +182,8 @@ class CommandPalette(ModalScreen):
     def on_mount(self) -> None:
         try:
             self._populate_list()
+            # v2.3.1: entrance animation — fade + slight rise.
+            entrance(self.query_one("#palette-container"))
             self.query_one("#palette-filter", Input).focus()
         except Exception:
             self.dismiss(result=None)

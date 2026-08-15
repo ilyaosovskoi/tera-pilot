@@ -15,7 +15,7 @@ class InfoBox(Static):
         self._model: str = "unknown"
         self._provider: str = "unknown"
         self._directory: str = "~"
-        self._version: str = "2.2.4"
+        self._version: str = "2.3.1"
 
     def update_info(
         self,
@@ -45,5 +45,5 @@ class InfoBox(Static):
         ]
         return Panel(
             Text.from_markup("\n".join(lines)),
-            border_style="#505050",
+            border_style="#1f1f23",
         )
