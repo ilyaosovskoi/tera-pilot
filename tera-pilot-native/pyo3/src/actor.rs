@@ -56,13 +56,16 @@ impl CancelToken {
     }
 
     /// Spawn a child token auto-cancelled when this token is cancelled.
+    ///
+    /// Registers the child flag BEFORE checking the parent state: a parent
+    /// cancel that lands in the window between the two used to be lost
+    /// (TOCTOU race), leaving the child uncancelled forever.
     fn child(&self) -> CancelToken {
         let child = CancelToken::new();
+        self.children.lock().unwrap().push(Arc::downgrade(&child.cancelled));
         if self.is_cancelled() {
             child.cancel("parent cancelled");
-            return child;
         }
-        self.children.lock().unwrap().push(Arc::downgrade(&child.cancelled));
         child
     }
 }

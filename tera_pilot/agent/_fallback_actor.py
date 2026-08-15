@@ -44,11 +44,13 @@ class CancelToken:
 
     def on_cancel(self) -> threading.Event:
         ev = threading.Event()
-        if self.is_cancelled():
-            ev.set()
-        else:
-            with self._lock:
-                self._listeners.append(ev)
+        with self._lock:
+            # Register the listener BEFORE checking the state: a cancel
+            # landing in the window between the two used to be lost
+            # (TOCTOU race), leaving the waiter blocked forever.
+            self._listeners.append(ev)
+            if self._event.is_set():
+                ev.set()
         return ev
 
     def child(self) -> "CancelToken":
