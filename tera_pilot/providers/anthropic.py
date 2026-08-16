@@ -106,12 +106,13 @@ class AnthropicProvider(Provider):
         skill: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         stop: Optional[List[str]] = None,
+        model: Optional[str] = None,
     ) -> ProviderResponse:
         self._ensure_loaded()
         messages = self._inject_skill(messages, skill)
 
         system, conv = self._split_system(messages)
-        payload = self._build_payload(system, conv, tools, stop, stream=False)
+        payload = self._build_payload(system, conv, tools, stop, stream=False, model=model)
         data = self._post(payload)
 
         # Extract text and tool_use from content blocks.
@@ -130,15 +131,19 @@ class AnthropicProvider(Provider):
 
         # If there are tool_use blocks, serialize them as structured
         # text that the agent runtime's OutputParser can parse.
+        # v2.4.1-fix: the old format was
+        # ``⌘{"name": ..., "id": ..., "arguments": ...}⌠`` which the
+        # OutputParser never understood (it looks for ``"tool"`` /
+        # ``"args"`` keys), so every Anthropic tool call was silently
+        # dropped in non-streaming mode (headless daemon / CLI runs).
+        # We now emit the exact parser format ``{"tool": ..., "args": ...}``.
         if tool_calls_raw:
             tool_text_parts = []
             for tc in tool_calls_raw:
-                tc_id = tc.get("id", "")
                 tc_name = tc.get("name", "")
-                tc_input = tc.get("input", {})
+                tc_input = tc.get("input", {}) or {}
                 tool_text_parts.append(
-                    '\u2318{"name": "' + tc_name + '", "id": "' + tc_id
-                    + '", "arguments": ' + json.dumps(tc_input) + '}\u2920'
+                    json.dumps({"tool": tc_name, "args": tc_input})
                 )
             if text:
                 text = text + "\n" + "\n".join(tool_text_parts)
@@ -163,12 +168,13 @@ class AnthropicProvider(Provider):
         skill: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         stop: Optional[List[str]] = None,
+        model: Optional[str] = None,
     ) -> Generator[str, None, None]:
         self._ensure_loaded()
         messages = self._inject_skill(messages, skill)
 
         system, conv = self._split_system(messages)
-        payload = self._build_payload(system, conv, tools, stop, stream=True)
+        payload = self._build_payload(system, conv, tools, stop, stream=True, model=model)
 
         for event in self._post_stream(payload):
             if event.get("type") == "content_block_delta":
@@ -202,7 +208,8 @@ class AnthropicProvider(Provider):
                 conv.append(m)
         return "\n\n".join(sys_parts), conv
 
-    def _build_payload(self, system, conv, tools, stop, *, stream: bool) -> Dict[str, Any]:
+    def _build_payload(self, system, conv, tools, stop, *, stream: bool,
+                       model: Optional[str] = None) -> Dict[str, Any]:
         # Translate to Anthropic's format: messages must alternate user/assistant
         anthropic_msgs = []
         for m in conv:
@@ -212,7 +219,7 @@ class AnthropicProvider(Provider):
             })
 
         payload: Dict[str, Any] = {
-            "model": self.config.model,
+            "model": model or self.config.model,
             "messages": anthropic_msgs,
             "max_tokens": self.config.max_tokens,
             "temperature": self.config.temperature,

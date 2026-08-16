@@ -488,14 +488,23 @@ def _analyze_divergences(responses: List[ProviderResponse]) -> List[DivergencePo
     file_sets = {r.provider_id: set(r.files_touched) for r in succeeded}
     all_files = set().union(*file_sets.values()) if file_sets else set()
     if all_files:
+        # Files unique to each provider (present in NO other response).
+        # The old guard (`others = all_files - files; if others`) was
+        # inverted: it skipped exactly the providers with the LARGEST
+        # file sets (strict supersets of the others), so a divergence
+        # like {main.py} vs {main.py, utils.py} was never reported.
         only_in: Dict[str, set] = {}
         for pid, files in file_sets.items():
-            others = all_files - files
-            if others:
-                only_in[pid] = files - set().union(*(s for p, s in file_sets.items() if p != pid))
+            others_union: set = set()
+            for other_pid, other_files in file_sets.items():
+                if other_pid != pid:
+                    others_union |= other_files
+            unique = files - others_union
+            if unique:
+                only_in[pid] = unique
         # Build a description of file-set divergence.
         differing_files = []
-        for pid, files in file_sets.items():
+        for pid in file_sets:
             unique = only_in.get(pid, set())
             if unique:
                 differing_files.append(f"{pid}: {sorted(unique)[:3]}")

@@ -243,27 +243,29 @@ def test_timeout_is_retried_then_fails(tmp_path, fake):
     err = ProviderError(
         "HTTPSConnectionPool(host='api.openai.com', port=443): Read timed out. (read timeout=120)"
     )
+    # _RETRY_MAX_ATTEMPTS is 5 — exhaust every attempt so the run fails.
     fake._script = [FakeProvider.final_answer("never")]
-    fake._errors = [err, err, err]
+    fake._errors = [err] * 5
     bridge, _, _, _ = make_bridge(tmp_path, fake, streaming=False)
     t, holder = run_in_thread(bridge, "task")
     result = _wait_result(t, holder, timeout=120)
 
     assert result.success is False
-    assert fake.call_count >= 3, "transient errors should be retried"
+    assert fake.call_count >= 5, "transient errors should be retried"
     assert "timed out" in result.error.lower() or "timeout" in result.error.lower()
 
 
 def test_rate_limit_is_retried(tmp_path, fake):
     err = ProviderError("HTTP 429 Too Many Requests (rate limit exceeded)")
+    # _RETRY_MAX_ATTEMPTS is 5 — exhaust every attempt so the run fails.
     fake._script = [FakeProvider.final_answer("never")]
-    fake._errors = [err, err, err]
+    fake._errors = [err] * 5
     bridge, _, _, _ = make_bridge(tmp_path, fake, streaming=False)
     t, holder = run_in_thread(bridge, "task")
     result = _wait_result(t, holder, timeout=120)
 
     assert result.success is False
-    assert fake.call_count >= 3
+    assert fake.call_count >= 5
 
 
 # ── workspace / provider / model switching ─────────────────────────────

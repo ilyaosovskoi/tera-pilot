@@ -243,6 +243,22 @@ What has already been implemented from the P0 roadmap — environment doctor, si
 
 The **v2.3.1** release completes the browser GUI: chat streaming renders a single live entry (no more duplicated lines), every control talks to the backend (no more silent 404s), all themes are brand-neutral (Noir/Flat), and the TUI gained smooth modal/scroll motion in a minimal dark theme.
 
+The **v2.3.2** release is a reliability and version-consistency release: the version is now in sync everywhere (npm, pip, Web UI, TUI, auto-updater); the daemon builds a config-backed provider registry (previously every daemon task crashed with `TypeError`); providers accept a per-call `model` override and honour provider retry-delay hints on quota errors; `AgentRuntime.get_token_stats()` exists so the daemon and e2e harness report real token usage; a keyless `local` OpenAI-compatible provider is registered (no more `Unknown provider: local` warnings for local-endpoint configs); and the evaluation harness ships 43 baseline-verified repository tasks (see below).
+
+## Reproducible Evaluation
+
+The `eval/` harness (P0.1) runs real repository tasks against the agent and records schema-valid results in `eval/results/`. It ships **43 tasks** across bug fixes, test repair, refactoring, features, code review and documentation (`eval/tasks/`), each with a clean-copy fixture repo and a baseline-verified test command:
+
+```bash
+python3 -m eval.runner check                       # structural check of all tasks
+python3 -m eval.runner smoke                       # fake-driver smoke set (CI)
+python3 -m eval.runner run eval/tasks/<task_id> --driver api \
+    --api-base http://127.0.0.1:18734 --api-token <token>   # live agent run
+python3 -m eval.runner report --dir eval/results   # summary
+```
+
+**Current results:** the first live run of `fix-missing-return` (a bug-fix task whose fixture tests fail at baseline) produced a working fix — the task's `pytest` passes (`2 passed`) and verification is `passed` — but the api driver recorded the run as `error` because the SSE stream did not deliver its final `done` event within the 300 s task timeout. Driven directly (SSE probe), the same agent completes the task in ~16 s. This driver limitation is tracked for the next release.
+
 ## Audit Export & Verification
 
 Every tool call is recorded in the process-scoped activity log. For tamper-evident evidence you can export the log with Ed25519 signatures and a SHA-256 hash chain, then verify it — even on a different machine using the public key from `~/.tera_pilot/audit_key.pub`:
@@ -273,7 +289,7 @@ Environment variables are now `TERA_PILOT_*` (e.g. `TERA_PILOT_PROVIDER`, `TERA_
 - Quality depends on the selected model, provider configuration and repository tests.
 - Cloud providers and remote MCP servers still send data outside the machine by design; local-first is not the same as always-offline.
 - Enterprise features such as SSO/SCIM, centralized RBAC, formal compliance certifications and managed fleet control are roadmap work.
-- Benchmark claims are intentionally not made until Tera Pilot has a reproducible evaluation suite.
+- Benchmark claims are limited to the reproducible evaluation harness (`eval/`, 43 repository tasks). Known harness limitation: the api driver records a run as `error` if the 300 s SSE stream times out even when the agent's fix already passes the task's tests.
 
 ## License
 

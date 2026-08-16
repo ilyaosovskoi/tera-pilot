@@ -70,7 +70,7 @@ class TeraPilotTUIApp(App):
         try:
             from tera_pilot import __version__ as _tera_pilot_version
         except Exception:
-            _tera_pilot_version = "2.0.0"
+            _tera_pilot_version = "2.3.2"
 
         # Initialize InfoBox with current state
         info = self.query_one(InfoBox)

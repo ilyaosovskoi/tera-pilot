@@ -51,6 +51,46 @@ from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse, parse_qs
 
 
+def _build_registry():
+    """Build a ProviderRegistry configured from ~/.tera_pilot/config.json.
+
+    v2.4.1-fix (real-run): the daemon previously called
+    ``AgentRuntime(workspace=...)`` with no ``registry`` argument at all —
+    but ``AgentRuntime.__init__`` requires one, so every daemon task
+    (HTTP + `tera-pilot-daemon task`) crashed with TypeError before the
+    agent even started. Mirror the api_server wiring: apply each
+    provider's config from config.json (api_key / model / api_base),
+    then set the active provider.
+    """
+    from tera_pilot.providers import get_registry, ProviderConfig
+    from tera_pilot.utils import load_config
+
+    registry = get_registry()
+    cfg = load_config() or {}
+    for pid, pcfg in (cfg.get("providers") or {}).items():
+        try:
+            registry.configure(
+                pid,
+                ProviderConfig(
+                    provider_id=pid,
+                    model=pcfg.get("model", ""),
+                    api_key=pcfg.get("api_key") or None,
+                    api_base=pcfg.get("api_base") or None,
+                    temperature=float(pcfg.get("temperature", 0.2)),
+                    max_tokens=int(pcfg.get("max_tokens", 4096)),
+                ),
+            )
+        except Exception as e:
+            print(f"[daemon] failed to configure provider {pid}: {e}")
+    active = cfg.get("active_provider")
+    if active:
+        try:
+            registry.set_active(active)
+        except Exception as e:
+            print(f"[daemon] failed to set active provider {active}: {e}")
+    return registry
+
+
 # ── Task states ────────────────────────────────────────────────
 
 class TaskState(str, Enum):
@@ -251,8 +291,9 @@ class TaskQueue:
 
         workspace = task.workspace or os.getcwd()
 
-        # Create a headless AgentRuntime (same as CLI/TUI path)
-        agent = AgentRuntime(workspace=workspace)
+        # Create a headless AgentRuntime (same as CLI/TUI path).
+        # v2.4.1-fix: pass a config-backed registry (see _build_registry).
+        agent = AgentRuntime(registry=_build_registry(), workspace=workspace)
 
         # Event callback — streams to SSE subscribers
         def on_event(kind: str, data: Dict[str, Any]) -> None:
@@ -393,7 +434,13 @@ class DaemonHandler(BaseHTTPRequestHandler):
         if path == "/health":
             self._send_json({"status": "ok", "uptime": time.time()})
         elif path == "/tasks":
-            limit = int(query.get("limit", ["50"])[0])
+            # Guard the limit param: a non-integer ?limit=abc must not
+            # 500 the request thread (ValueError from int()).
+            try:
+                limit = int(query.get("limit", ["50"])[0])
+            except (ValueError, TypeError):
+                limit = 50
+            limit = max(1, min(limit, 500))
             self._send_json({"tasks": self.task_queue.list_tasks(limit=limit)})
         elif path.startswith("/task/") and "/stream" not in path:
             task_id = path.split("/task/")[1]
@@ -648,7 +695,8 @@ def run_single_task(
     except ImportError:
         from .agent_runtime.runtime import AgentRuntime
 
-    agent = AgentRuntime(workspace=workspace or os.getcwd())
+    # v2.4.1-fix: pass a config-backed registry (see _build_registry).
+    agent = AgentRuntime(registry=_build_registry(), workspace=workspace or os.getcwd())
     result = agent.run(prompt)
 
     task.state = TaskState.COMPLETED

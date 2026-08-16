@@ -68,12 +68,14 @@ class ProviderRegistry:
         from .sambanova import SambaNovaProvider
         from .ollama import OllamaProvider
         from .nvidia_nim import NvidiaNIMProvider
+        from .local import LocalProvider
 
         for cls in (LMStudioProvider, OpenAIProvider, AnthropicProvider,
                     OpenRouterProvider, GroqProvider, DeepSeekProvider,
                     ZAIProvider, GeminiProvider, MistralProvider, TogetherProvider,
                     FireworksProvider, XAIProvider, CerebrasProvider,
-                    SambaNovaProvider, OllamaProvider, NvidiaNIMProvider):
+                    SambaNovaProvider, OllamaProvider, NvidiaNIMProvider,
+                    LocalProvider):
             self.register(cls)
 
     # ── Configuration ─────────────────────────────────────────────

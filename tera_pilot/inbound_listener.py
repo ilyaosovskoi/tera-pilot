@@ -601,12 +601,18 @@ def make_daemon_stop_callback(
             # TaskQueue.list_tasks returns the current tasks; we
             # cancel the most recent RUNNING one. If the daemon exposes
             # a "cancel current" method, prefer that.
+            #
+            # v2.4.1-fix: the old code read ``t.get("status")`` /
+            # ``t.get("task_id")`` — but TaskRecord.to_dict() emits
+            # ``"state"`` / ``"id"``, so the running-task check never
+            # matched and the kill switch silently cancelled NOTHING
+            # (a G21 §21a "must exist from day one" security feature).
             cancelled_id = ""
             try:
                 tasks = task_queue.list_tasks(limit=10)
                 for t in tasks:
-                    if isinstance(t, dict) and t.get("status") == "running":
-                        cancelled_id = t.get("task_id", "")
+                    if isinstance(t, dict) and t.get("state") == "running":
+                        cancelled_id = t.get("id", "")
                         task_queue.cancel_task(cancelled_id)
                         break
             except Exception:

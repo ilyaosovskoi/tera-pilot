@@ -536,21 +536,37 @@ def create_learning_entry(
     tags_str = ", ".join(tags or ["auto", "process"])
     # Fill in the template. We use simple {field} placeholders so we
     # don't need a templating engine.
-    body = template.format(
-        id=learn_id.split("-", 1)[-1] if "-" in learn_id else learn_id,
-        date=date_str,
-        tags=tags_str,
-        source=source,
-        severity=severity,
-        title=title,
-        context=context,
-        what_happened=what_happened,
-        root_cause=root_cause,
-        evidence=evidence,
-        do=do_rule,
-        dont=dont_rule,
-        how_to_apply=how_to_apply,
-    )
+    #
+    # v2.4.1-fix: template.format() was previously called OUTSIDE any
+    # try/except — a project's custom Learnings.md template containing a
+    # placeholder we don't provide (or a literal brace) raised KeyError /
+    # ValueError and crashed the whole /learnings scan (and the auto
+    # learning loop that calls it). The project template is user-authored
+    # free-form content; a formatting failure must degrade to the
+    # fallback template, never crash.
+    fmt_kwargs = {
+        "id": learn_id.split("-", 1)[-1] if "-" in learn_id else learn_id,
+        "date": date_str,
+        "tags": tags_str,
+        "source": source,
+        "severity": severity,
+        "title": title,
+        "context": context,
+        "what_happened": what_happened,
+        "root_cause": root_cause,
+        "evidence": evidence,
+        "do": do_rule,
+        "dont": dont_rule,
+        "how_to_apply": how_to_apply,
+    }
+    try:
+        body = template.format(**fmt_kwargs)
+    except (KeyError, ValueError, IndexError) as e:
+        logger.warning(
+            "[learning] Learnings.md template has unsupported placeholder(s) "
+            "(%s) — using the built-in fallback template", e,
+        )
+        body = _FALLBACK_TEMPLATE.format(**fmt_kwargs)
     if slug is None:
         slug = _slugify(title)
     filename = _learning_filename(date_str, slug)

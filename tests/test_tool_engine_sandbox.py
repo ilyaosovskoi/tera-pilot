@@ -184,6 +184,79 @@ def test_guardian_no_policy_is_safe():
     assert risk.level == "medium"
 
 
+# ── Subprocess output draining (pipe-buffer deadlock fix) ─────────────
+
+
+def _auto_approve(engine):
+    engine._request_confirmation = lambda *a, **k: True  # type: ignore[method-assign]
+
+
+def test_run_code_large_output_no_timeout(tmp_path):
+    """>64KB of stdout must not deadlock the pipe and spuriously time out.
+
+    Old behaviour: stdout/stderr were only read AFTER the child exited, so
+    a child writing more than the OS pipe buffer (~64KB) blocked forever
+    on write and was killed at the deadline → "[TIMEOUT]" with no output.
+    """
+    e = _engine(tmp_path)
+    _auto_approve(e)
+    res = e._run_code('print("x" * 100000)', language="python", timeout=15)
+    assert "[TIMEOUT]" not in res
+    assert "x" * 20 in res  # output was actually captured
+
+
+def test_run_code_large_stderr_no_timeout(tmp_path):
+    e = _engine(tmp_path)
+    _auto_approve(e)
+    res = e._run_code('import sys; sys.stderr.write("e" * 100000)', language="python", timeout=15)
+    assert "[TIMEOUT]" not in res
+    assert "[STDERR]" in res
+
+
+def test_execute_command_large_output_no_timeout(tmp_path):
+    (tmp_path / "big.txt").write_text("y" * 150000, encoding="utf-8")
+    e = _engine(tmp_path)
+    _auto_approve(e)
+    res = e._execute_command("cat big.txt", timeout=15)
+    assert "[TIMEOUT]" not in res
+    assert "y" * 20 in res
+
+
+# ── Workspace symlink resolution (fix: __init__ must resolve) ──────────
+
+
+def test_workspace_with_symlink_prefix_not_falsely_blocked(tmp_path):
+    """A workspace whose path contains a symlink component (e.g. macOS
+    /var → /private/var) must not reject every path as "outside the
+    workspace". Old __init__ kept the workspace unresolved while
+    _resolve_path resolved the candidate → is_relative_to always failed.
+    """
+    # Create a symlinked alias of tmp_path, then construct with it.
+    link = tmp_path.parent / f"{tmp_path.name}_link"
+    try:
+        link.symlink_to(tmp_path, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported here")
+    try:
+        e = ToolEngine(str(link))
+        (tmp_path / "f.txt").write_text("hi", encoding="utf-8")
+        # A file inside the (symlinked) workspace must resolve.
+        p = e._resolve_path("f.txt")
+        assert p.exists()
+        # A path outside must still be blocked.
+        with pytest.raises(PermissionError):
+            e._resolve_path("/etc/passwd")
+        # And a path-taking command must not be falsely rejected.
+        _auto_approve(e)
+        res = e._execute_command("cat f.txt", timeout=15)
+        assert "SECURITY ERROR" not in res
+    finally:
+        try:
+            link.unlink()
+        except OSError:
+            pass
+
+
 # ── Guardian template path (fix: correct location) ─────────────────────
 
 

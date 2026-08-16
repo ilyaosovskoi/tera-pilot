@@ -254,6 +254,12 @@ def run_api_driver(task, workspace, api_base, api_token=None):
     Mutating endpoints are protected by the bearer token (CSRF-to-localhost
     defense), so `api_token` is forwarded as `Authorization: Bearer …` when
     provided.
+
+    The agent blocks on a `diff_review` SSE event until the UI answers
+    (`POST /api/agent/diff_review`). This driver is headless — no human is
+    watching — so it auto-accepts every diff the same way the browser UI
+    does when "Apply" is clicked. Without this, every file write stalls
+    for the 300 s review timeout and the run dies with a timeout.
     """
     before = _usage_stats(api_base, api_token)
     payload = {"text": task["prompt"], "project_root": str(workspace)}
@@ -265,6 +271,25 @@ def run_api_driver(task, workspace, api_base, api_token=None):
         data=json.dumps(payload).encode("utf-8"),
         headers=headers,
     )
+
+    def _auto_accept_diff_review(review_id: str) -> None:
+        """Accept a pending diff review so the agent can continue.
+        Best effort — never raises (a review response failure must not
+        abort the whole run)."""
+        try:
+            hdrs = {"Content-Type": "application/json"}
+            if api_token:
+                hdrs["Authorization"] = "Bearer " + api_token
+            resp_req = urllib.request.Request(
+                api_base.rstrip("/") + "/api/agent/diff_review",
+                data=json.dumps({"accepted": True, "review_id": review_id}).encode("utf-8"),
+                headers=hdrs,
+                method="POST",
+            )
+            with urllib.request.urlopen(resp_req, timeout=10) as resp:
+                resp.read()
+        except Exception:
+            pass
     tokens = 0
     cost = 0.0
     iterations = 0
@@ -292,6 +317,10 @@ def run_api_driver(task, workspace, api_base, api_token=None):
                     iterations += 1
                     if evt.get("tool"):
                         tools.append(evt["tool"])
+                elif etype == "diff_review":
+                    # Headless driver: auto-accept so the agent never
+                    # stalls on the 300 s review timeout.
+                    _auto_accept_diff_review(evt.get("review_id", ""))
                 elif etype == "router_decision":
                     provider = evt.get("provider_id") or evt.get("provider")
                     model = evt.get("model")

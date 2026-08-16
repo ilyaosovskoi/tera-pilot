@@ -49,6 +49,55 @@ from tera_pilot.agent.guardian import assess_risk, GuardianVerdict, GuardianConf
 logger = logging.getLogger(__name__)
 
 
+# ── Subprocess output draining ────────────────────────────────────────
+# The poll loops in ``_execute_command`` / ``_run_code`` need to watch
+# for cancellation and deadlines WHILE the child runs, so they can't use
+# ``subprocess.run`` (blocking, no cancellation path). But reading the
+# pipes only AFTER the child exits is a classic pipe-buffer deadlock:
+# a child that writes more than the OS pipe buffer (~64KB) blocks
+# forever on write, never exits, and the poll loop kills it at the
+# deadline — so any command with >64KB of output spuriously reported
+# ``[TIMEOUT]`` with no output captured (e.g. ``print("x" * 100000)``
+# is a millisecond of work that appeared to hang).
+#
+# Fix: drain each pipe in a daemon thread WHILE the poll loop runs, then
+# join + concatenate after the child exits.
+
+def _spawn_pipe_drain(proc):
+    """Start daemon threads that drain ``proc.stdout`` / ``proc.stderr``
+    into per-pipe byte buffers. Returns ``(stdout_buf, stderr_buf,
+    t_out, t_err)``. The reader threads exit on EOF (the child's exit
+    closes the write ends).
+    """
+    stdout_buf: List[bytes] = []
+    stderr_buf: List[bytes] = []
+
+    def _reader(pipe, buf):
+        try:
+            while True:
+                chunk = pipe.read(65536)
+                if not chunk:
+                    return
+                buf.append(chunk)
+        except (OSError, ValueError):
+            # Pipe closed / already read — the buffer holds what we got.
+            pass
+
+    t_out = threading.Thread(target=_reader, args=(proc.stdout, stdout_buf), daemon=True)
+    t_err = threading.Thread(target=_reader, args=(proc.stderr, stderr_buf), daemon=True)
+    t_out.start()
+    t_err.start()
+    return stdout_buf, stderr_buf, t_out, t_err
+
+
+def _collect_pipe_drain(stdout_buf, stderr_buf, t_out, t_err) -> Tuple[bytes, bytes]:
+    """Join the drain threads (bounded timeout for safety) and return
+    ``(stdout_bytes, stderr_bytes)``."""
+    t_out.join(timeout=5)
+    t_err.join(timeout=5)
+    return b"".join(stdout_buf), b"".join(stderr_buf)
+
+
 class ToolEngine:
     """Executes agent tool calls in a sandboxed environment."""
 
@@ -63,7 +112,15 @@ class ToolEngine:
     MAX_OUTPUT = 2000
 
     def __init__(self, workspace: Optional[str] = None):
-        self.workspace = Path(workspace) if workspace else Path.cwd()
+        # v2.4.1-fix: resolve the workspace here, exactly like
+        # set_workspace() does. The old code kept the path unresolved,
+        # so on macOS (where /var is a symlink to /private/var) a
+        # workspace under /var/folders/... made `_resolve_path` resolve
+        # the candidate to /private/var/... while `is_relative_to`
+        # compared against the unresolved /var/... base → EVERY file
+        # operation and path-taking command (cat/rm/grep/...) was
+        # falsely rejected with "escapes the workspace sandbox".
+        self.workspace = Path(workspace).resolve() if workspace else Path.cwd().resolve()
         self._allowed_dirs: List[Path] = [self.workspace]
         self._backup_dir = Path(tempfile.gettempdir()) / "tera_pilot_backups"
         self._backup_dir.mkdir(parents=True, exist_ok=True)
@@ -2529,7 +2586,11 @@ class ToolEngine:
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     cwd=tmpdir, env=sandbox_env,
                 )
-                stdout, stderr = b"", b""
+                # Drain the pipes in background threads while polling so
+                # a child writing more than the OS pipe buffer can't
+                # block forever (old code read only after exit → spurious
+                # TIMEOUT on e.g. a 100KB print).
+                stdout_buf, stderr_buf, t_out, t_err = _spawn_pipe_drain(proc)
                 deadline = time.time() + timeout
                 try:
                     # Poll for completion, checking cancel every 0.5s
@@ -2543,12 +2604,11 @@ class ToolEngine:
                             proc.wait()
                             return f"[TIMEOUT] Exceeded {timeout}s"
                         time.sleep(0.5)
-                    stdout = proc.stdout.read()
-                    stderr = proc.stderr.read()
                 except Exception:
                     proc.kill()
                     proc.wait()
                     raise
+                stdout, stderr = _collect_pipe_drain(stdout_buf, stderr_buf, t_out, t_err)
 
                 parts = []
                 out_text = stdout.decode("utf-8", errors="replace")
@@ -2859,7 +2919,10 @@ class ToolEngine:
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 cwd=self.workspace,
             )
-            stdout, stderr = b"", b""
+            # Drain the pipes in background threads while polling so a
+            # child writing more than the OS pipe buffer can't block
+            # forever (old code read only after exit → spurious TIMEOUT).
+            stdout_buf, stderr_buf, t_out, t_err = _spawn_pipe_drain(proc)
             deadline = time.time() + timeout
             try:
                 while proc.poll() is None:
@@ -2872,12 +2935,11 @@ class ToolEngine:
                         proc.wait()
                         return f"[TIMEOUT] Command exceeded {timeout}s"
                     time.sleep(0.25)
-                stdout = proc.stdout.read()
-                stderr = proc.stderr.read()
             except Exception:
                 proc.kill()
                 proc.wait()
                 raise
+            stdout, stderr = _collect_pipe_drain(stdout_buf, stderr_buf, t_out, t_err)
 
             out_text = stdout.decode("utf-8", errors="replace")
             err_text = stderr.decode("utf-8", errors="replace")

@@ -123,7 +123,7 @@ _DANGEROUS_FLAGS_FALLBACK = {
 _DANGEROUS_FLAGS = {
     "python3": {"-c", "-m"},
     "python": {"-c", "-m"},
-    "node": {"-e", "-e", "--eval"},
+    "node": {"-e", "--eval"},
     "pip": {"install", "uninstall"},
     "npm": {"install", "uninstall", "run"},
     "git": {"clone", "push", "pull", "fetch", "remote"},

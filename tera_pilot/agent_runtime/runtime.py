@@ -153,6 +153,10 @@ class AgentRuntime:
         # back to the parent.
         self._provider_override: Optional[str] = None
         self._model_override: Optional[str] = None
+        # v2.4.1-fix: provider quota cooldown — set after a 429 so the
+        # next LLM call waits out the provider's retryDelay (see
+        # _wait_out_provider_cooldown).
+        self._provider_cooldown_until: float = 0.0
 
         logger.info("AgentRuntime initialized (Provider-backed)")
 
@@ -359,6 +363,44 @@ class AgentRuntime:
     def set_guardian_callback(self, fn: Optional[Callable]) -> None:
         """Wire the UI callback used for Guardian safety review MODIFY verdicts."""
         self.tools._guardian_callback = fn
+
+    def get_token_stats(self) -> Dict[str, Any]:
+        """Return token/cost usage for this runtime.
+
+        v2.3.2-fix: the daemon (``daemon.py``) and the e2e harness
+        (``e2e_agent_test.py``) called ``agent.get_token_stats()``, but
+        the method never existed on ``AgentRuntime`` — both call sites
+        degraded silently inside try/except and the daemon recorded
+        zero tokens/cost for every task. When a ``TokenTracker`` is
+        attached its all-time totals are used (they include sub-agent
+        calls and real pricing); otherwise the per-run counters
+        (``_run_tokens_in`` / ``_run_tokens_out``) are returned.
+        """
+        tracker = getattr(self, "_token_tracker", None)
+        if tracker is not None:
+            try:
+                t = tracker.stats()
+                total_in = int(t.get("total_tokens_in", 0) or 0)
+                total_out = int(t.get("total_tokens_out", 0) or 0)
+                total_cost = float(t.get("total_cost", 0.0) or 0.0)
+                requests = int(t.get("request_count", 0) or 0)
+            except Exception:
+                total_in, total_out = self._run_tokens_in, self._run_tokens_out
+                total_cost, requests = 0.0, 0
+        else:
+            total_in, total_out = self._run_tokens_in, self._run_tokens_out
+            total_cost, requests = 0.0, 0
+        return {
+            "total_tokens_in": total_in,
+            "total_tokens_out": total_out,
+            "total_tokens": total_in + total_out,
+            # Both spellings are used by callers: daemon.py reads
+            # ``total_cost_usd``, TokenTracker.stats() exposes
+            # ``total_cost``.
+            "total_cost_usd": total_cost,
+            "total_cost": total_cost,
+            "request_count": requests,
+        }
 
     def _reload_skills(self) -> None:
         """v1.0.11: (re)load the skill list from disk.
@@ -570,9 +612,13 @@ class AgentRuntime:
     # UI's cost/burn-rate/budget features are accurate.
 
     _RETRY_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
-    _RETRY_MAX_ATTEMPTS = 3
+    _RETRY_MAX_ATTEMPTS = 5
     _RETRY_BASE_DELAY = 1.0   # seconds
-    _RETRY_MAX_DELAY = 16.0   # seconds
+    _RETRY_MAX_DELAY = 90.0   # seconds
+    # 429/quota errors are honoured with the provider's own retryDelay
+    # (e.g. Gemini free tier: "Please retry in 41s"). Never hammer a
+    # quota-exhausted endpoint with less than this floor.
+    _RETRY_QUOTA_MIN_DELAY = 10.0
 
     def _is_retryable(self, exc: Exception) -> bool:
         """Return True if *exc* looks like a transient provider error."""
@@ -596,6 +642,65 @@ class AgentRuntime:
             except ValueError:
                 pass
         return False
+
+    @staticmethod
+    def _extract_retry_delay(exc: Exception) -> Optional[float]:
+        """Parse the provider's suggested retry delay out of an error.
+
+        Providers embed a retry hint in 429/503 errors, e.g.:
+          - Gemini:   "Please retry in 41.343146745s."
+          - JSON:     "retryDelay": "41s"  /  retryDelay: 41s
+
+        v2.4.1-fix (real-run): we used to ignore this hint entirely and
+        retry with a 1s→16s backoff — far below the provider's own
+        estimate, so a free-tier quota hit (5 req/min on Gemini) was
+        retried too early, failed again, and the whole agent run died
+        after 3 attempts.
+
+        Returns None when no hint is present (plain backoff applies).
+        """
+        import re as _re
+        msg = str(exc)
+        m = _re.search(r'retry\s*(?:in|delay)\D*([\d.]+)s', msg, _re.IGNORECASE)
+        if not m:
+            return None
+        try:
+            return max(float(m.group(1)), 0.0)
+        except ValueError:
+            return None
+
+    def _quota_backoff_delay(self, exc: Exception) -> float:
+        """Retry delay for 429/quota errors: honour the provider hint.
+
+        Returns a delay >= ``_RETRY_QUOTA_MIN_DELAY`` so we never
+        hammer an exhausted quota endpoint, and never less than the
+        provider's own estimate.
+        """
+        hint = self._extract_retry_delay(exc)
+        if hint is not None:
+            return max(hint, self._RETRY_QUOTA_MIN_DELAY)
+        # No explicit hint — give the sliding window time to slide.
+        return self._RETRY_QUOTA_MIN_DELAY
+
+    def _wait_out_provider_cooldown(self) -> None:
+        """Pause until the provider's quota cooldown expires.
+
+        After a 429 the provider told us to wait ~N seconds. We set
+        ``self._provider_cooldown_until`` so the *next* LLM call in the
+        agent loop also respects that pause (otherwise a fresh burst of
+        calls right after recovery would re-trip the quota).
+        Cancellation-aware: a Stop click aborts the wait.
+        """
+        now = time.time()
+        if now >= getattr(self, "_provider_cooldown_until", 0.0):
+            return
+        remaining = self._provider_cooldown_until - now
+        logger.info("[agent] provider quota cooldown — waiting %.1fs", remaining)
+        while now < self._provider_cooldown_until:
+            if self.tools.is_cancelled():
+                return
+            time.sleep(min(0.5, self._provider_cooldown_until - now))
+            now = time.time()
 
     def _generate_with_retry(self, provider, messages):
         """Call provider.generate with exponential-backoff retry.
@@ -645,6 +750,12 @@ class AgentRuntime:
             raise
         except Exception as _be:
             logger.debug("[agent] budget check skipped: %s", _be)
+
+        # v2.4.1-fix: respect the provider's quota cooldown before every
+        # call — a previous 429 told us to wait N seconds; firing a fresh
+        # burst right after recovery re-trips the quota (Gemini free tier
+        # is 5 req/min).
+        self._wait_out_provider_cooldown()
 
         for attempt in range(1, self._RETRY_MAX_ATTEMPTS + 1):
             try:
@@ -699,10 +810,21 @@ class AgentRuntime:
                     logger.warning("[agent] LLM call FAILED (%.1fs, non-retryable): %s",
                                    elapsed, exc)
                     break
-                # Exponential backoff with jitter: 1s, 2s, 4s, ... capped at 16s.
+                # v2.4.1-fix: quota/429 errors honour the provider's own
+                # retryDelay (Gemini free tier: "Please retry in 41s")
+                # instead of the old 1s→16s backoff that was far too
+                # short and killed the run after 3 attempts. Also set a
+                # cooldown so the NEXT agent-loop call is paced too.
                 delay = min(self._RETRY_MAX_DELAY,
                             self._RETRY_BASE_DELAY * (2 ** (attempt - 1)))
                 delay = delay * (0.5 + 0.5 * _random.random())
+                if self._is_quota_error(exc):
+                    qdelay = self._quota_backoff_delay(exc)
+                    if qdelay > delay:
+                        delay = qdelay
+                    cooldown_until = time.time() + qdelay
+                    if cooldown_until > getattr(self, "_provider_cooldown_until", 0.0):
+                        self._provider_cooldown_until = cooldown_until
                 logger.warning(
                     "[agent] transient provider error (attempt %d/%d, %.1fs): %s — retrying in %.1fs",
                     attempt, self._RETRY_MAX_ATTEMPTS, elapsed, exc, delay,
@@ -718,6 +840,14 @@ class AgentRuntime:
                     slept += step
         # All retries exhausted (or non-retryable) — re-raise the last error.
         raise last_exc if last_exc is not None else RuntimeError("generate failed")
+
+    @staticmethod
+    def _is_quota_error(exc: Exception) -> bool:
+        """True for 429 / RESOURCE_EXHAUSTED / quota-exceeded errors."""
+        msg = str(exc).lower()
+        if "429" in msg or "resource_exhausted" in msg:
+            return True
+        return any(s in msg for s in ("quota", "rate limit", "rate-limit"))
 
     def _generate_streaming_with_retry(self, provider, messages):
         """Stream tokens from the provider, emitting each chunk via
@@ -751,6 +881,9 @@ class AgentRuntime:
         model_name = getattr(getattr(provider, "config", None), "model", "?")
         logger.info("[agent] LLM stream starting — provider=%s model=%s",
                     provider.provider_id, model_name)
+
+        # v2.4.1-fix: same quota-cooldown pacing as _generate_with_retry.
+        self._wait_out_provider_cooldown()
 
         for attempt in range(1, self._RETRY_MAX_ATTEMPTS + 1):
             try:
@@ -838,9 +971,17 @@ class AgentRuntime:
                     logger.warning("[agent] LLM stream FAILED (%.1fs, non-retryable): %s",
                                    elapsed, exc)
                     break
+                # v2.4.1-fix: honour provider retryDelay on quota errors.
                 delay = min(self._RETRY_MAX_DELAY,
                             self._RETRY_BASE_DELAY * (2 ** (attempt - 1)))
                 delay = delay * (0.5 + 0.5 * _random.random())
+                if self._is_quota_error(exc):
+                    qdelay = self._quota_backoff_delay(exc)
+                    if qdelay > delay:
+                        delay = qdelay
+                    cooldown_until = time.time() + qdelay
+                    if cooldown_until > getattr(self, "_provider_cooldown_until", 0.0):
+                        self._provider_cooldown_until = cooldown_until
                 logger.warning(
                     "[agent] transient stream error (attempt %d/%d, %.1fs): %s — retrying in %.1fs",
                     attempt, self._RETRY_MAX_ATTEMPTS, elapsed, exc, delay,

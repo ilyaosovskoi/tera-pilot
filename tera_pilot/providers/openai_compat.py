@@ -113,6 +113,7 @@ class OpenAICompatProvider(Provider):
         skill: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         stop: Optional[List[str]] = None,
+        model: Optional[str] = None,
     ) -> ProviderResponse:
         """Call the chat-completions endpoint (non-streaming).
 
@@ -124,11 +125,22 @@ class OpenAICompatProvider(Provider):
         ``ProviderResponse`` with an empty text and a descriptive
         ``finish_reason`` instead of crashing the agent loop
         (BUGS_REPORT M-AUTO-5).
+
+        v2.4.1-fix: ``model`` (per-call override, G20b) is now accepted
+        and threaded into the payload. Before, callers passing
+        ``model=...`` crashed with TypeError.
+
+        v2.4.1-fix: tool_calls returned by the API are ALSO serialized
+        into ``text`` (as ``{"tool": ..., "args": ...}`` JSON) so the
+        agent runtime's OutputParser — which only parses text — can
+        see them. Native ``tool_calls`` alone were previously invisible
+        to the legacy ReAct loop: ``content`` is null for a
+        tool-calls-only response, so the tool call was silently dropped.
         """
         self._ensure_loaded()
         messages = self._inject_skill(messages, skill)
 
-        payload = self._build_payload(messages, tools, stop, stream=False)
+        payload = self._build_payload(messages, tools, stop, stream=False, model=model)
         data = self._post(payload, stream=False)
 
         choices = data.get("choices") or []
@@ -153,6 +165,24 @@ class OpenAICompatProvider(Provider):
         if not text and not message.get("tool_calls"):
             text = f"[{finish_reason}] no content returned"
 
+        # v2.4.1-fix: serialize native tool_calls into the text-based
+        # JSON format the agent runtime's OutputParser understands
+        # ({"tool": name, "args": {...}}), appended after any text.
+        native_tool_calls = message.get("tool_calls")
+        if native_tool_calls:
+            serialized = []
+            for tc in native_tool_calls:
+                fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
+                name = fn.get("name", "")
+                try:
+                    args = json.loads(fn.get("arguments", "{}") or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+                if name:
+                    serialized.append(json.dumps({"tool": name, "args": args}))
+            if serialized:
+                text = (text + "\n" if text else "") + "\n".join(serialized)
+
         return ProviderResponse(
             text=text,
             model=data.get("model", self.config.model),
@@ -171,11 +201,12 @@ class OpenAICompatProvider(Provider):
         skill: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         stop: Optional[List[str]] = None,
+        model: Optional[str] = None,
     ) -> Generator[str, None, None]:
         self._ensure_loaded()
         messages = self._inject_skill(messages, skill)
 
-        payload = self._build_payload(messages, tools, stop, stream=True)
+        payload = self._build_payload(messages, tools, stop, stream=True, model=model)
         for line in self._post_stream(payload):
             if not line or not line.startswith("data: "):
                 continue
@@ -206,9 +237,10 @@ class OpenAICompatProvider(Provider):
                       self.provider_id, self.config.model,
                       self.config.api_base or self.api_base)
 
-    def _build_payload(self, messages, tools, stop, *, stream: bool) -> Dict[str, Any]:
+    def _build_payload(self, messages, tools, stop, *, stream: bool,
+                       model: Optional[str] = None) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
-            "model": self.config.model,
+            "model": model or self.config.model,
             "messages": [m.to_dict() for m in messages],
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,

@@ -184,8 +184,25 @@ class Provider(ABC):
         skill: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         stop: Optional[List[str]] = None,
+        model: Optional[str] = None,
     ) -> ProviderResponse:
-        """Blocking generation — returns a single response."""
+        """Blocking generation — returns a single response.
+
+        ``model`` optionally overrides the configured model for THIS call
+        only (G20b per-subtask routing: the task-decomposition router
+        places each subtask on a different model without touching the
+        provider's config). Subclasses MUST accept it and use it in
+        place of ``self.config.model`` when non-None.
+
+        v2.4.1-fix: several callers (consensus_engine, guardian,
+        second_opinion, persona_memory, task_decomposition_router, and
+        AgentRuntime's G20b override path) were passing ``model=`` here
+        — but no provider implemented the kwarg, so every one of those
+        calls crashed with ``TypeError: unexpected keyword argument
+        'model'`` (the Guardian LLM review, the consensus run, and the
+        second-opinion check silently degraded to APPROVE; the
+        decomposition router always fell back to single-model).
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -196,8 +213,13 @@ class Provider(ABC):
         skill: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         stop: Optional[List[str]] = None,
+        model: Optional[str] = None,
     ) -> Generator[str, None, None]:
-        """Streaming generation — yields token chunks."""
+        """Streaming generation — yields token chunks.
+
+        ``model`` optionally overrides the configured model for THIS call
+        only (same contract as :meth:`generate`).
+        """
         raise NotImplementedError
 
     # ── Helpers ───────────────────────────────────────────────────

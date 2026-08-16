@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0",
+  "task_id": "fix-missing-return",
+  "task_name": "Fix apply_discount missing return",
+  "category": "bug_fix",
+  "status": "error",
+  "timestamp": "2026-08-16T16:01:07.043447+00:00",
+  "runner_version": "0.2.0",
+  "driver": "api",
+  "provider": null,
+  "model": null,
+  "workspace": {
+    "repo_hash": "f1925223b8cb5bd7",
+    "commit": null,
+    "baseline": {
+      "test_passed": false,
+      "test_exit_code": 1,
+      "duration_sec": 0.645
+    }
+  },
+  "prompt": "apply_discount(price, percent) in discount.py computes the discounted value but never returns it, so callers always get None. Fix the function so the tests in test_discount.py pass.",
+  "metrics": {
+    "duration_sec": 314.269,
+    "iterations": 27,
+    "tokens": 0,
+    "cost_usd": 0.0,
+    "tools_used": [
+      "execute_command",
+      "read_file",
+      "str_replace"
+    ],
+    "test_command": [
+      "python3",
+      "-m",
+      "pytest",
+      "-q"
+    ],
+    "test_passed": true,
+    "test_exit_code": 0,
+    "test_output": "..                                                                       [100%]\n2 passed in 0.00s\n",
+    "verification_status": "passed",
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "request_count": 0,
+    "cancelled": false
+  },
+  "final_output": "request timed out after 300s"
+}
