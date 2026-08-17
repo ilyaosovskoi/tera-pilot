@@ -7,7 +7,7 @@ from .base import ProviderCapability
 class SambaNovaProvider(OpenAICompatProvider):
     provider_id: str = "sambanova"
     label: str = "SambaNova"
-    default_model: str = "Meta-Llama-3.3-70B-Instruct"
+    default_model: str = "Meta-Llama-4-Maverick-17B-128E-Instruct"
     api_base: str = "https://api.sambanova.ai/v1"
     env_var: str = "SAMBANOVA_API_KEY"
     capabilities: frozenset = frozenset({

@@ -16,6 +16,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -25,14 +26,28 @@ from tera_pilot.api_server import TeraPilotAPIServer  # noqa: E402
 
 
 @pytest.fixture(scope="module")
-def api():
-    server = TeraPilotAPIServer(port=0)
-    token = server.auth_token
-    server.start()
-    ws = tempfile.mkdtemp(prefix="tera_pilot_api_test_")
-    server.ctx.config["project_root"] = ws
-    yield {"server": server, "port": server.port, "token": token, "ws": ws}
-    server.stop()
+def api(tmp_path_factory):
+    # Isolate ~/.tera_pilot: several endpoints (_save_settings, the
+    # open_project fix, provider activation) persist config via
+    # _save_config → ~/.tera_pilot/config.json. Without this the test
+    # suite overwrites the developer's REAL config (project_root was
+    # observed pointing at a deleted pytest tmp dir after a run).
+    home = tmp_path_factory.mktemp("tera_pilot_home")
+    old_home = os.environ.get("HOME")
+    os.environ["HOME"] = str(home)
+    try:
+        server = TeraPilotAPIServer(port=0)
+        token = server.auth_token
+        server.start()
+        ws = tempfile.mkdtemp(prefix="tera_pilot_api_test_")
+        server.ctx.config["project_root"] = ws
+        yield {"server": server, "port": server.port, "token": token, "ws": ws}
+        server.stop()
+    finally:
+        if old_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = old_home
 
 
 def _request(api, method, path, payload=None):
@@ -165,6 +180,134 @@ def test_files_write_blocks_traversal(api):
     assert st == 200
     assert data.get("ok") is False
     assert "escapes" in data.get("error", "")
+
+
+def test_open_project_switches_config_project_root(api):
+    """The GUI's 'Open project' endpoint must update
+    ``ctx.config['project_root']`` immediately — the file tree
+    (/api/files/list), /api/status and _runtime() all read the CONFIG,
+    not the bridge workspace, so a stale config kept the tree on the old
+    directory until the next agent run finished."""
+    new_ws = tempfile.mkdtemp(prefix="tera_pilot_open_proj_")
+    (Path(new_ws) / "hello.txt").write_text("hi", encoding="utf-8")
+
+    st, data = _post(api, "/api/open_project", {"path": new_ws})
+    assert st == 200
+    assert data.get("ok") is True
+
+    # /api/status must report the new project root right away.
+    st, status = _get(api, "/api/status")
+    assert st == 200
+    assert Path(status.get("project") or "").resolve() == Path(new_ws).resolve()
+
+    # The file tree must be rooted at the new project.
+    st, files = _post(api, "/api/files/list")
+    assert st == 200
+    assert any(f.get("path") == "hello.txt" for f in files)
+
+    # Invalid path must be rejected without switching anything.
+    st, data = _post(api, "/api/open_project", {"path": "/definitely/not/a/dir_xyz"})
+    assert st == 200
+    assert data.get("ok") is False
+
+
+def test_providers_health_no_import_crash(api):
+    """Regression (v2.3.2): /api/providers/health crashed with
+    ``ImportError: No module named 'tera_pilot.providers.types'`` on EVERY
+    call, and the GUI's Test button then showed the misleading
+    "Invalid API key" for any failure. The endpoint must return a
+    structured response (even for an unknown provider) and never
+    reference the nonexistent module."""
+    st, data = _post(api, "/api/providers/health", {"provider_id": "no_such_provider_xyz"})
+    assert st == 200
+    assert data.get("ok") is False
+    assert "provider_id" in data
+    assert "No module named" not in str(data.get("error", ""))
+
+
+def test_providers_health_does_not_cripple_provider_config(api):
+    """Regression (v2.4.x): the health probe runs with max_tokens=100. If
+    that temp config leaks into the registry, the NEXT ``registry.get(pid)``
+    builds a provider capped at 100 output tokens — agent tool calls (which
+    carry file content) get truncated mid-JSON, the parser sees prose, and
+    the run ends as a false-success "final answer". The probe must swap the
+    config on the live instance only and leave the registry map untouched."""
+    server = api["server"]
+    ctx = server.ctx
+    providers = ctx.registry.list_providers()
+    assert providers, "registry should have registered providers"
+    pid = providers[0]["id"]
+
+    provider = ctx.registry.get(pid)
+    original_max = provider.config.max_tokens
+    assert original_max != 100
+
+    # Stub generate() so the probe never touches the network.
+    class _Resp:
+        text = "hi"
+        model = ""
+        tokens_in = 1
+        tokens_out = 1
+
+    provider.generate = lambda messages: _Resp()
+
+    st, data = _post(api, "/api/providers/health", {"provider_id": pid})
+    assert st == 200
+
+    # The live instance must be restored...
+    assert provider.config.max_tokens == original_max
+    # ...and a FRESH instance built from the registry's persistent config
+    # must NOT be crippled to 100 (this is what the old code broke: it went
+    # through registry.configure(), which stores the probe config in the
+    # registry's _configs map).
+    ctx.registry._instances.pop(pid, None)
+    fresh = ctx.registry.get(pid)
+    assert fresh.config.max_tokens == original_max
+    assert fresh.config.max_tokens != 100
+
+
+def test_providers_models_returns_live_list(api, monkeypatch):
+    """v2.4.x: /api/providers/models fetches the provider's /models list."""
+    import urllib.request as _u
+
+    class _FakeResp:
+        def read(self):
+            return b'{"data":[{"id":"model-a"},{"id":"model-b"}]}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    real_urlopen = _u.urlopen
+
+    def fake_urlopen(req, timeout=0):
+        # Let the test's own localhost API call pass through.
+        if "127.0.0.1" in str(req.full_url):
+            return real_urlopen(req, timeout=timeout)
+        # The external request must point at the provider's models endpoint.
+        assert "/models" in str(req.full_url)
+        return _FakeResp()
+
+    monkeypatch.setattr(_u, "urlopen", fake_urlopen)
+    st, data = _post(api, "/api/providers/models", {"provider_id": "openai"})
+    assert st == 200
+    assert data.get("ok") is True
+    assert data.get("models") == ["model-a", "model-b"]
+
+
+def test_providers_models_unknown_provider(api):
+    st, data = _post(api, "/api/providers/models", {"provider_id": "no_such_provider_xyz"})
+    assert st == 200
+    assert data.get("ok") is False
+    assert "provider" in str(data.get("error", "")).lower()
+
+
+def test_providers_models_missing_provider_id(api):
+    st, data = _post(api, "/api/providers/models", {})
+    assert st == 200
+    assert data.get("ok") is False
 
 
 # ── Settings & agent controls ───────────────────────────────────────

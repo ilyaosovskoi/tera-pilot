@@ -15,7 +15,7 @@ class InfoBox(Static):
         self._model: str = "unknown"
         self._provider: str = "unknown"
         self._directory: str = "~"
-        self._version: str = "2.3.2"
+        self._version: str = "2.3.3"
 
     def update_info(
         self,

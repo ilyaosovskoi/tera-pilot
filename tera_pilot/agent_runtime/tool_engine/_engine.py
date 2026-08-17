@@ -2944,10 +2944,15 @@ class ToolEngine:
             out_text = stdout.decode("utf-8", errors="replace")
             err_text = stderr.decode("utf-8", errors="replace")
             parts = []
+            # Keep the TAIL of long output, not the head (same as
+            # _run_code): for test runs / builds / installs the useful
+            # signal (failure summary, exit error, last log lines) is
+            # at the END — truncating at the head cut it off, so a
+            # 5000-char pytest output lost the failure report entirely.
             if out_text:
-                parts.append(out_text[:self.MAX_OUTPUT])
+                parts.append(out_text[-self.MAX_OUTPUT:])
             if err_text:
-                parts.append(err_text[:self.MAX_OUTPUT])
+                parts.append(err_text[-self.MAX_OUTPUT:])
             if proc.returncode != 0:
                 parts.append(f"[EXIT CODE] {proc.returncode}")
             # v1.1.5-fix (tera_pilot_bug_report.md bug #9): if the agent just

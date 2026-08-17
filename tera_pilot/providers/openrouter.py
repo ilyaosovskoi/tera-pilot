@@ -7,7 +7,7 @@ from .base import ProviderCapability
 class OpenRouterProvider(OpenAICompatProvider):
     provider_id: str = "openrouter"
     label: str = "OpenRouter"
-    default_model: str = "anthropic/claude-3.5-sonnet"
+    default_model: str = "anthropic/claude-sonnet-4.6"
     api_base: str = "https://openrouter.ai/api/v1"
     env_var: str = "OPENROUTER_API_KEY"
     capabilities: frozenset = frozenset({

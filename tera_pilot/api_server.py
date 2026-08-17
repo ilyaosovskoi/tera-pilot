@@ -178,20 +178,20 @@ def _plugins_dir() -> Path:
 
 _PROVIDER_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "local":      {"model": "", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
-    "openrouter": {"model": "anthropic/claude-3.5-sonnet", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
-    "groq":       {"model": "llama-3.3-70b-versatile", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
-    "openai":     {"model": "gpt-4o", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
-    "anthropic":  {"model": "claude-3-5-sonnet-20241022", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
-    "deepseek":   {"model": "deepseek-chat", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
-    "zai":        {"model": "glm-4-plus", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
-    "gemini":     {"model": "gemini-2.5-pro", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
+    "openrouter": {"model": "anthropic/claude-sonnet-4.6", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
+    "groq":       {"model": "meta-llama/llama-4-maverick-17b-128e-instruct", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
+    "openai":     {"model": "gpt-5.5", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
+    "anthropic":  {"model": "claude-sonnet-5", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
+    "deepseek":   {"model": "deepseek-v4-pro", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
+    "zai":        {"model": "glm-5.1", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
+    "gemini":     {"model": "gemini-3.1-pro", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
     "mistral":    {"model": "mistral-large-latest", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
-    "together":   {"model": "meta-llama/Llama-3-70b-chat-hf", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
+    "together":   {"model": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
     # M4: providers that were in bridge but missing from api_server
-    "fireworks":  {"model": "accounts/fireworks/models/llama-v3p1-70b-instruct", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
-    "xai":        {"model": "grok-2", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
-    "cerebras":   {"model": "llama-3.3-70b", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
-    "sambanova":  {"model": "Meta-Llama-3.3-70B-Instruct", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
+    "fireworks":  {"model": "accounts/fireworks/models/llama4-maverick-instruct-basic", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
+    "xai":        {"model": "grok-4.3", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
+    "cerebras":   {"model": "llama-4-scout-17b-16e-instruct", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
+    "sambanova":  {"model": "Meta-Llama-4-Maverick-17B-128E-Instruct", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
     "ollama":     {"model": "llama3.1", "api_key": "", "api_base": "http://localhost:11434/v1", "temperature": 0.2, "max_tokens": 4096},
     "lmstudio":   {"model": "", "api_key": "", "api_base": "http://localhost:1234/v1", "temperature": 0.2, "max_tokens": 4096},
 }
@@ -266,6 +266,24 @@ def _chat_path(chat_id: str) -> Path:
     if not _validate_chat_id(chat_id):
         raise ValueError(f"invalid chat_id: {chat_id!r}")
     return _chats_dir() / f"{chat_id}.json"
+
+
+def _chat_title_from_text(text: str, limit: int = 60) -> str:
+    """Build a clean initial chat title from the first user message.
+
+    v2.4.x: the old code used ``text[:60]`` verbatim, which kept markdown
+    quote prefixes (``> ``), double spaces and punctuation, so titles looked
+    like ``> Создай в папке  mini_project  небольшой Python-модуль  uti...``.
+    We strip quote prefixes/markdown markers and collapse whitespace so the
+    default title (and the non-LLM fallback in /api/chat/generate_title) is
+    readable.
+    """
+    cleaned = re.sub(r"^\s*>+\s?", "", text or "", flags=re.M)
+    cleaned = re.sub(r"[#*_`|~\\]\[\]", " ", cleaned)
+    title = " ".join(cleaned.split())
+    if len(title) > limit:
+        title = title[:limit].rstrip() + "..."
+    return title or "New chat"
 
 
 # Process-wide lock guarding all chat-file load-modify-save cycles.
@@ -1082,6 +1100,10 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
             'api_token': self.ctx._auth_token,
             'snippets_count': len(self.ctx.config.get('snippets', [])),
             'auto_route': self.ctx.config.get('auto_route', True),
+            # v2.4.x: expose saved UI preferences (theme, Basic/Advanced
+            # mode) so the frontend can restore them across browsers/webviews
+            # even when localStorage is unavailable.
+            'ui': self.ctx.config.get('ui', {}) or {},
             'agent_available': True,
             'token_stats': token_stats,
             'git_status': git_status,
@@ -1134,8 +1156,10 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                 for k in ('model', 'api_base', 'temperature', 'max_tokens'):
                     if k in body:
                         pcfg[k] = body[k]
-                if body.get('api_key'):
-                    pcfg['api_key'] = body['api_key']
+                # v2.3.2-fix: strip whitespace from pasted keys.
+                key = (body.get('api_key') or '').strip()
+                if key:
+                    pcfg['api_key'] = key
                 _save_config(self.ctx.config)
 
                 cfg = ProviderConfig(
@@ -1181,7 +1205,17 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                     temperature=0.2,
                     max_tokens=100,
                 )
-                self.ctx.registry.configure(pid, cfg_obj)
+                # v2.4.x-fix (root cause of "agent reports success but did
+                # nothing"): the OLD code went through registry.configure(),
+                # which stores cfg_obj in the registry's _configs map — so
+                # even though `finally` restored the instance, the NEXT
+                # registry.get(pid) built a fresh instance from the crippled
+                # max_tokens=100 config. Every subsequent agent/chat LLM call
+                # was then capped at 100 output tokens; tool calls carrying
+                # file content got truncated mid-JSON, the parser saw prose,
+                # and the run ended as a false-success "final answer". Swap
+                # the config on the live instance instead (registry map stays
+                # untouched) and restore it in `finally` below.
                 provider = self.ctx.registry.get(pid)
                 if not provider.is_loaded:
                     provider.load()
@@ -1257,7 +1291,7 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
             chat_id = uuid.uuid4().hex[:12]
             chat = {
                 'id': chat_id,
-                'title': text[:60] + ('...' if len(text) > 60 else ''),
+                'title': _chat_title_from_text(text),
                 'created_at': datetime.utcnow().isoformat() + 'Z',
                 'updated_at': datetime.utcnow().isoformat() + 'Z',
                 'messages': [],
@@ -1534,7 +1568,7 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
             chat_id = uuid.uuid4().hex[:12]
             chat = {
                 'id': chat_id,
-                'title': text[:60] + ('...' if len(text) > 60 else ''),
+                'title': _chat_title_from_text(text),
                 'created_at': datetime.utcnow().isoformat() + 'Z',
                 'updated_at': datetime.utcnow().isoformat() + 'Z',
                 'messages': [],
@@ -1723,15 +1757,31 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                     handler._sse({'type': 'error', 'message': result.error or 'Agent failed with no output.'})
                     return
 
+                # v2.4.x-fix: report REAL token usage (accumulated by the
+                # runtime from the actual provider responses) instead of
+                # ``result.iterations`` — a 3-iteration run used to show as
+                # "3 tokens" no matter how much text the model produced.
+                _meta = result.metadata or {}
+                total_in = int(_meta.get('total_tokens_in', 0) or 0)
+                total_out = int(_meta.get('total_tokens_out', 0) or 0)
+                total_tokens = total_in + total_out
+                degraded = bool(_meta.get('degraded_prose', False))
+
                 chat2 = _load_chat(chat_id)
                 if chat2:
                     chat2['messages'].append({
                         'role': 'assistant',
                         'content': text_result,
                         'ts': datetime.utcnow().isoformat() + 'Z',
-                        'tokens': result.iterations,
+                        'tokens': total_tokens or 0,
+                        'tokens_in': total_in,
+                        'tokens_out': total_out,
                         'elapsed': elapsed,
                         'tool_calls': [tc.name.value for tc in (result.tool_calls or [])],
+                        # v2.4.x: True when the run ended as prose-without-
+                        # tools — the UI must warn instead of showing a clean
+                        # completion.
+                        'degraded': degraded,
                     })
                     chat2['updated_at'] = datetime.utcnow().isoformat() + 'Z'
                     _save_chat(chat2)
@@ -1739,7 +1789,10 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                 handler._sse({
                     'type': 'done',
                     'text': text_result,
-                    'tokens': result.iterations,
+                    'tokens': total_tokens or 0,
+                    'tokens_in': total_in,
+                    'tokens_out': total_out,
+                    'degraded': degraded,
                     'elapsed': elapsed,
                     # v1.1.1: accurately report cancellation — previously
                     # hardcoded to False, so a Stop-then-partial-output
@@ -1979,8 +2032,12 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                     for k in ('model', 'api_base', 'temperature', 'max_tokens'):
                         if k in pcfg:
                             cfg['providers'][pid][k] = pcfg[k]
-                    if pcfg.get('api_key'):
-                        cfg['providers'][pid]['api_key'] = pcfg['api_key']
+                    # v2.3.2-fix: strip whitespace — pasted keys with a
+                    # trailing space/newline were stored verbatim and then
+                    # rejected by the provider as invalid.
+                    key = (pcfg.get('api_key') or '').strip()
+                    if key:
+                        cfg['providers'][pid]['api_key'] = key
 
             _save_config(cfg)
 

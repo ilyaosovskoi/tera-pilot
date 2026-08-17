@@ -7,7 +7,7 @@ from .base import ProviderCapability
 class GeminiProvider(OpenAICompatProvider):
     provider_id: str = "gemini"
     label: str = "Google Gemini"
-    default_model: str = "gemini-2.5-pro"
+    default_model: str = "gemini-3.1-pro"
     api_base: str = "https://generativelanguage.googleapis.com/v1beta/openai"
     env_var: str = "GOOGLE_API_KEY"
     capabilities: frozenset = frozenset({

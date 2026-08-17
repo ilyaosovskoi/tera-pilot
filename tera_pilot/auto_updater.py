@@ -46,7 +46,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-__version__ = "2.3.2"
+__version__ = "2.3.3"
 
 # v1.1.5-fix (bug #11): real default repo. The old placeholder
 # "user/tera_pilot" caused every update check to be silently skipped.
@@ -238,7 +238,7 @@ class AutoUpdater:
                 url,
                 headers={
                     "Accept": "application/vnd.github+json",
-                    "User-Agent": "Tera Pilot-Updater/2.3.2",
+                    "User-Agent": "Tera Pilot-Updater/2.3.3",
                 },
             )
             with urllib.request.urlopen(req, timeout=10) as resp:

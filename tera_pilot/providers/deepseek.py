@@ -7,7 +7,7 @@ from .base import ProviderCapability
 class DeepSeekProvider(OpenAICompatProvider):
     provider_id: str = "deepseek"
     label: str = "DeepSeek"
-    default_model: str = "deepseek-chat"
+    default_model: str = "deepseek-v4-pro"
     api_base: str = "https://api.deepseek.com/v1"
     env_var: str = "DEEPSEEK_API_KEY"
     capabilities: frozenset = frozenset({

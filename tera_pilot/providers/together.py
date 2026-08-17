@@ -7,7 +7,7 @@ from .base import ProviderCapability
 class TogetherProvider(OpenAICompatProvider):
     provider_id: str = "together"
     label: str = "Together AI"
-    default_model: str = "meta-llama/Llama-3-70b-chat-hf"
+    default_model: str = "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8"
     api_base: str = "https://api.together.xyz/v1"
     env_var: str = "TOGETHER_API_KEY"
     capabilities: frozenset = frozenset({

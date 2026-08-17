@@ -257,15 +257,19 @@ def test_timeout_is_retried_then_fails(tmp_path, fake):
 
 def test_rate_limit_is_retried(tmp_path, fake):
     err = ProviderError("HTTP 429 Too Many Requests (rate limit exceeded)")
-    # _RETRY_MAX_ATTEMPTS is 5 — exhaust every attempt so the run fails.
+    # v2.4.x: quota/429 errors get _RETRY_QUOTA_MAX_ATTEMPTS attempts (the
+    # upstream explicitly asks us to retry shortly) — exhaust every one so
+    # the run fails instead of succeeding on the scripted final answer.
+    from tera_pilot.agent_runtime.runtime import AgentRuntime
+    budget = AgentRuntime._RETRY_QUOTA_MAX_ATTEMPTS
     fake._script = [FakeProvider.final_answer("never")]
-    fake._errors = [err] * 5
+    fake._errors = [err] * budget
     bridge, _, _, _ = make_bridge(tmp_path, fake, streaming=False)
     t, holder = run_in_thread(bridge, "task")
-    result = _wait_result(t, holder, timeout=120)
+    result = _wait_result(t, holder, timeout=180)
 
     assert result.success is False
-    assert fake.call_count >= 5
+    assert fake.call_count >= budget
 
 
 # ── workspace / provider / model switching ─────────────────────────────

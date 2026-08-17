@@ -853,7 +853,7 @@ async function handleSend(){
               }
               if(data.detail === 'tool_result' || data.tool){ refreshFileTree(); }
             }
-            else if(data.type==='done'){finalizeMessage(data);debouncedRefreshChatList();hideActivity();if(useAgent&&state.projectRoot)refreshFileTree()}
+            else if(data.type==='done'){finalizeMessage(data);debouncedRefreshChatList();hideActivity();if(useAgent&&state.projectRoot)refreshFileTree();_maybeAutoTitle()}
             else if(data.type==='diff_review'){
               // v1.1.1: agent paused for diff review (HTTP path)
               // v1.0.5-security: capture the per-request review_id so the
@@ -1359,6 +1359,16 @@ function finalizeMessage(result){
     body._rawText = result.text;
     body.innerHTML = renderMarkdown(body._rawText);
     wireCodeButtons(last);
+  }
+  // v2.4.x: warn when the run degraded to prose-without-tools — the
+  // agent produced text but never executed a tool, so any claim that
+  // work was done is unreliable. Show a banner instead of a clean
+  // "task complete" surface.
+  if(result && result.degraded && body){
+    var warn=document.createElement('div');
+    warn.className='msg-degraded-warning';
+    warn.textContent='⚠️ The agent couldn\u2019t use its tools this run (provider issue) and only produced text — the requested work was likely NOT completed. Check the result or retry.';
+    body.insertBefore(warn, body.firstChild);
   }
   const meta=last.querySelector('.msg-meta');
   if(result){
@@ -2379,7 +2389,10 @@ async function openSettings(tab='providers'){
   modal.classList.add('open');modalBackdrop.classList.add('open');
 }
 function closeSettings(){modal.classList.remove('open');modalBackdrop.classList.remove('open')}
-document.getElementById('openSettingsBtn').addEventListener('click',()=>openSettings('providers'));
+// Named handler so the quick-settings wiring below can remove it by
+// reference (an anonymous arrow function cannot be removed later).
+function _openFullSettings(){openSettings('providers');}
+document.getElementById('openSettingsBtn').addEventListener('click', _openFullSettings);
 document.getElementById('modalClose').addEventListener('click',closeSettings);
 document.getElementById('modalCancel').addEventListener('click',closeSettings);
 modalBackdrop.addEventListener('click',closeSettings);
@@ -3056,8 +3069,13 @@ function renderAppearanceTab(body){
     <div class="textsize-seg" id="textsizeSeg">${sizes.map(s=>`<button class="textsize-btn${curSize===s.id?' active':''}" data-size="${s.id}">${s.label}</button>`).join('')}</div>
   </div></div>`;
   // Additional settings
+  // v2.4.x: Interface mode (Basic/Advanced) — moved here from the top-bar
+  // pill toggle, so the mode is still switchable but doesn't clutter the
+  // chrome. The Settings button respects it: Advanced → full settings.
+  const curUiMode=document.documentElement.getAttribute('data-ui-mode')||'basic';
   html+=`<div class="settings-section"><div class="settings-section-title">Interface</div>
   <div style="padding:var(--s-16);background:var(--bg-floating);border:1px solid var(--border);border-radius:var(--r-panel)">
+    <div class="toggle-row" style="margin-bottom:var(--s-12)"><div><div class="toggle-row-label">Interface mode</div><div class="toggle-row-desc">Advanced exposes every control (agent tools, MCP, project, heavy-code…). Basic keeps a clean surface.</div></div><div class="uimode-seg" id="uiModeSeg"><button class="uimode-btn${curUiMode==='basic'?' active':''}" data-mode="basic">Basic</button><button class="uimode-btn${curUiMode==='advanced'?' active':''}" data-mode="advanced">Advanced</button></div></div>
     <div class="toggle-row"><div><div class="toggle-row-label">Neural background animation</div><div class="toggle-row-desc">Floating particle network behind the UI. Disable for lower GPU usage.</div></div><div class="toggle ${!state.neuralBgDisabled?'on':''}" id="toggleNeural"></div></div>
   </div></div>`;
   body.innerHTML=html;
@@ -3078,6 +3096,19 @@ function renderAppearanceTab(body){
       card.classList.add('active');
     });
   });
+  // v2.4.x: Wire the Interface-mode segmented control
+  const uiModeSeg=document.getElementById('uiModeSeg');
+  if(uiModeSeg){
+    uiModeSeg.querySelectorAll('.uimode-btn').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const mode=btn.dataset.mode;
+        setUiMode(mode);
+        persistUiMode(mode);
+        uiModeSeg.querySelectorAll('.uimode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
+        toast(mode==='advanced'?'Advanced mode — full control surface':'Basic mode — clean interface','info');
+      });
+    });
+  }
   // Wire neural toggle
   const neuralToggle=document.getElementById('toggleNeural');
   if(neuralToggle){
@@ -3146,16 +3177,6 @@ function setUiMode(mode){
   mode=(mode==='advanced')?'advanced':'basic';
   document.documentElement.setAttribute('data-ui-mode',mode);
   try{localStorage.setItem('tera_pilot:uiMode',mode)}catch(e){}
-  const btn=document.getElementById('uiModeToggle');
-  if(btn){
-    btn.setAttribute('data-mode',mode);
-    btn.setAttribute('aria-pressed',String(mode==='advanced'));
-    const label=document.getElementById('uiModeLabel');
-    if(label)label.textContent=mode==='advanced'?'Advanced':'Basic';
-    btn.title=mode==='advanced'
-      ?'Advanced mode — full control surface. Click for Basic.'
-      :'Basic mode — clean interface. Click for Advanced.';
-  }
   // Hide advanced Settings tabs in basic mode.
   document.querySelectorAll('.modal-tab[data-advanced]').forEach(function(tab){
     tab.style.display=(mode==='advanced')?'':'none';
@@ -3168,19 +3189,37 @@ function setUiMode(mode){
     renderSettingsTab(fallback).catch(function(){});
   }
 }
+// v2.4.x: persist the Basic/Advanced choice to the backend config too.
+// localStorage alone is unreliable in some embedded webviews, so the
+// choice now survives a browser/webview reset (restored on next load).
+function persistUiMode(mode){
+  if(!isBackendAvailable()) return;
+  callBridge('save_settings',{ui:{mode:mode}}).catch(function(){});
+}
 (function initUiMode(){
   let saved='basic';
   try{saved=localStorage.getItem('tera_pilot:uiMode')||'basic'}catch(e){}
   setUiMode(saved);
-  const btn=document.getElementById('uiModeToggle');
-  if(btn){
-    btn.addEventListener('click',function(){
-      const next=document.documentElement.getAttribute('data-ui-mode')==='advanced'?'basic':'advanced';
-      setUiMode(next);
-      toast(next==='advanced'?'Advanced mode — full control surface':'Basic mode — clean interface','info');
-    });
+  // v2.4.x: prefer the backend-saved mode (authoritative across browsers).
+  // Only overrides when the backend has an explicit value — so existing
+  // localStorage-only users keep their current choice.
+  if(isBackendAvailable()){
+    callBridge('get_status').then(function(st){
+      if(st && st.ui && (st.ui.mode==='advanced'||st.ui.mode==='basic')){
+        setUiMode(st.ui.mode);
+      }
+    }).catch(function(){});
   }
 })();
+
+// v2.4.x: the Settings button is mode-aware — Advanced mode opens the
+// FULL settings modal immediately, Basic mode opens the quick-settings
+// panel. No more "opens basic first, then I have to switch to advanced".
+function openSettingsByMode(){
+  const mode=document.documentElement.getAttribute('data-ui-mode');
+  if(mode==='advanced'){openSettings('providers');}
+  else{openQuickSettings();}
+}
 
 async function renderProvidersTab(body){
   let providers=state.providers;
@@ -3253,7 +3292,7 @@ async function renderProvidersTab(body){
     // scroll of fully-expanded cards. Only the active provider (or one the
     // user just expanded) is open; the rest collapse to just the header.
     const card=document.createElement('div');card.className='provider-config-card accordion'+(isActive?' active open':'');card.dataset.id=p.id;
-    card.innerHTML=`<div class="provider-config-header" data-toggle><span class="provider-accordion-chevron">\u25b8</span><div class="provider-config-name">${escapeHtml(p.label)} ${isActive?'<span class="provider-config-active">Active</span>':''}</div><div class="provider-config-actions"><button class="btn-secondary" data-action="activate" data-id="${p.id}" ${isActive?'disabled':''}>Set active</button><button class="btn-secondary" data-action="test" data-id="${p.id}">Test</button></div></div><div class="provider-config-body"><div class="full"><div class="field-label">Model</div><input class="field-input" data-field="model" data-id="${p.id}" value="${escapeHtml(p.model||'')}" placeholder="model name"></div>${meta.needsKey?`<div class="full"><div class="field-label">API Key ${p.api_key_set?'<span style="color:var(--success)">· set</span>':'<span style="color:var(--danger)">· not set</span>'}</div><input class="field-input password" data-field="api_key" data-id="${p.id}" placeholder="${p.api_key_set?'•••••••• (leave empty to keep)':'sk-...'}"></div>`:'<div class="full"><div class="field-label">No API key needed — runs on your machine.</div></div>'}${meta.keyUrl?`<div class="full" style="margin-top:2px"><a href="${meta.keyUrl}" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent)">${meta.needsKey?'Get an API key →':'Download →'}</a>${meta.keyHint?` <span style="font-size:11px;color:var(--text-muted)">— ${escapeHtml(meta.keyHint)}</span>`:''}</div>`:''}</div><div class="field-status" id="test-status-${p.id}"></div>`;
+    card.innerHTML=`<div class="provider-config-header" data-toggle><span class="provider-accordion-chevron">\u25b8</span><div class="provider-config-name">${escapeHtml(p.label)} ${isActive?'<span class="provider-config-active">Active</span>':''}</div><div class="provider-config-actions"><button class="btn-secondary" data-action="activate" data-id="${p.id}" ${isActive?'disabled':''}>Set active</button><button class="btn-secondary" data-action="test" data-id="${p.id}">Test</button></div></div><div class="provider-config-body"><div class="full"><div class="field-label">Model <button class="model-fetch-btn btn-secondary" data-id="${p.id}" title="Fetch the live model list from this provider">↻ Fetch models</button></div><input class="field-input" data-field="model" data-id="${p.id}" value="${escapeHtml(p.model||'')}" placeholder="model name"><div class="model-list-wrap" id="model-list-${p.id}" style="display:none"><input class="field-input model-filter" placeholder="Filter models…"><div class="model-list-items"></div></div><div class="field-status" id="model-status-${p.id}"></div></div>${meta.needsKey?`<div class="full"><div class="field-label">API Key ${p.api_key_set?'<span style="color:var(--success)">· set</span>':'<span style="color:var(--danger)">· not set</span>'}</div><input class="field-input password" data-field="api_key" data-id="${p.id}" placeholder="${p.api_key_set?'•••••••• (leave empty to keep)':'sk-...'}"></div>`:'<div class="full"><div class="field-label">No API key needed — runs on your machine.</div></div>'}${meta.keyUrl?`<div class="full" style="margin-top:2px"><a href="${meta.keyUrl}" target="_blank" rel="noopener" style="font-size:11px;color:var(--accent)">${meta.needsKey?'Get an API key →':'Download →'}</a>${meta.keyHint?` <span style="font-size:11px;color:var(--text-muted)">— ${escapeHtml(meta.keyHint)}</span>`:''}</div>`:''}</div><div class="field-status" id="test-status-${p.id}"></div>`;
     body.appendChild(card);
   }
   // Accordion toggle — clicking the header (but not its buttons) expands/
@@ -3268,11 +3307,67 @@ async function renderProvidersTab(body){
   });
   body.querySelectorAll('[data-action="activate"]').forEach(btn=>{btn.addEventListener('click',async()=>{const id=btn.dataset.id;state.activeProvider=id;if(isBackendAvailable()){try{await callBridge('set_provider',id);toast(`Switched to ${PROVIDER_META[id].label}`)}catch(e){toast(e.message,'error')}}renderSettingsTab('providers');providerTriggerText.textContent=PROVIDER_META[id].statusLabel;statusProvider.textContent=PROVIDER_META[id].modelDisplay||PROVIDER_META[id].model})});
   body.querySelectorAll('[data-action="test"]').forEach(btn=>{btn.addEventListener('click',async(e)=>{e.stopPropagation();const id=btn.dataset.id;const status=document.getElementById('test-status-'+id);status.className='field-status testing';status.innerHTML='<span class="field-status-spinner"></span> Checking…';
-    if(isBackendAvailable()){try{const r=await callBridge('health_check',id);if(r.ok){status.className='field-status ok';status.textContent='\u2713 Connected ('+r.latency_ms+'ms)'}else if(r.rate_limited){status.className='field-status warn';status.textContent='\u26A0 Rate limited'}else if(!r.key_valid){status.className='field-status warn';status.textContent='\u2717 Invalid API key'}else{status.className='field-status warn';status.textContent='\u2717 '+(r.error||'failed').slice(0,80)}}catch(e){status.className='field-status warn';status.textContent='\u2717 '+e.message}}
+    if(isBackendAvailable()){try{const r=await callBridge('health_check',id);if(r.ok){status.className='field-status ok';status.textContent='\u2713 Connected ('+r.latency_ms+'ms)'}else if(r.rate_limited){status.className='field-status warn';status.textContent='\u26A0 Rate limited'}else if(r.key_valid===false){status.className='field-status warn';status.textContent='\u2717 Invalid API key'}else{status.className='field-status warn';status.textContent='\u2717 '+(r.error||'failed').slice(0,80)}}catch(e){status.className='field-status warn';status.textContent='\u2717 '+e.message}}
     else{status.className='field-status warn';status.textContent='Backend not connected'}
   })});
+  // v2.4.x: Fetch models — pull the LIVE model list from the provider's
+  // /models endpoint and let the user pick one (or keep typing manually).
+  body.querySelectorAll('.model-fetch-btn').forEach(btn=>{
+    btn.addEventListener('click',async(e)=>{
+      e.stopPropagation();
+      const id=btn.dataset.id;
+      const status=document.getElementById('model-status-'+id);
+      const wrap=document.getElementById('model-list-'+id);
+      const items=wrap?wrap.querySelector('.model-list-items'):null;
+      const filter=wrap?wrap.querySelector('.model-filter'):null;
+      if(!status) return;
+      status.className='field-status testing';
+      status.innerHTML='<span class="field-status-spinner"></span> Fetching models…';
+      if(wrap) wrap.style.display='none';
+      try{
+        const r=await callBridge('fetch_models', id);
+        if(r && r.ok && Array.isArray(r.models) && r.models.length){
+          status.className='field-status ok';
+          status.textContent='✓ '+r.models.length+' models';
+          if(wrap){
+            wrap.style.display='block';
+            if(filter) filter.value='';
+            renderModelItems(items, r.models, '', id);
+            if(filter) filter.oninput=function(){renderModelItems(items, r.models, filter.value, id);};
+          }
+        }else{
+          status.className='field-status warn';
+          status.textContent='✗ '+((r&&r.error)||'no models returned').slice(0,140);
+        }
+      }catch(err){status.className='field-status warn';status.textContent='✗ '+err.message}
+    });
+  });
 }
 
+// v2.4.x: render the fetched model list; clicking an item sets the
+// provider's model field (manual entry stays possible via the input).
+function renderModelItems(container, models, q, pid){
+  if(!container) return;
+  const ql=(q||'').toLowerCase();
+  const list=models.filter(function(m){return !ql||m.toLowerCase().indexOf(ql)!==-1;});
+  container.innerHTML='';
+  if(!list.length){container.innerHTML='<div class="model-list-empty">No models match</div>';return;}
+  list.slice(0,300).forEach(function(m){
+    const el=document.createElement('button');
+    el.className='model-list-item';
+    el.textContent=m;
+    el.title=m;
+    el.addEventListener('click',function(){
+      const input=document.querySelector('.provider-config-card[data-id="'+pid+'"] input[data-field="model"]');
+      if(input) input.value=m;
+      const wrap=container.closest('.model-list-wrap');
+      if(wrap) wrap.style.display='none';
+      const status=document.getElementById('model-status-'+pid);
+      if(status){status.className='field-status ok';status.textContent='✓ Selected: '+m;}
+    });
+    container.appendChild(el);
+  });
+}
 
 
 async function renderSnippetsTab(body){
@@ -3390,11 +3485,25 @@ document.getElementById('modalSave').addEventListener('click',async()=>{
   const tab=state.activeModalTab;
   if(tab==='providers'){
     const providers={};
-    document.querySelectorAll('#settingsBody .provider-config-card').forEach(card=>{const id=card.dataset.id;const fields={};card.querySelectorAll('[data-field]').forEach(inp=>{const f=inp.dataset.field;if(f==='temperature')fields[f]=parseFloat(inp.value);else if(f==='max_tokens')fields[f]=parseInt(inp.value);else fields[f]=inp.value});providers[id]=fields});
+    document.querySelectorAll('#settingsBody .provider-config-card').forEach(card=>{const id=card.dataset.id;const fields={};card.querySelectorAll('[data-field]').forEach(inp=>{const f=inp.dataset.field;if(f==='temperature')fields[f]=parseFloat(inp.value);else if(f==='max_tokens')fields[f]=parseInt(inp.value);else if(f==='api_key')fields[f]=inp.value.trim();else fields[f]=inp.value});providers[id]=fields});
     const currentTheme=document.documentElement.getAttribute('data-theme')||'dark';
-    if(isBackendAvailable()){try{const result=await callBridge('save_settings',{active_provider:state.activeProvider,providers:providers,ui:{theme:currentTheme}});if(result.ok){toast('Settings saved','success');closeSettings()}else toast(result.error||'Save failed','error')}catch(e){toast('Save failed: '+e.message,'error')}}else{toast('Saved (demo mode)','success');closeSettings()}
+    if(isBackendAvailable()){try{const result=await callBridge('save_settings',{active_provider:state.activeProvider,providers:providers,ui:{theme:currentTheme}});if(result.ok){toast('Settings saved','success');await refreshProviderState();closeSettings()}else toast(result.error||'Save failed','error')}catch(e){toast('Save failed: '+e.message,'error')}}else{toast('Saved (demo mode)','success');closeSettings()}
   }else{closeSettings()}
 });
+
+// v2.3.2-fix: after saving settings the UI kept showing the OLD provider
+// state (stale api_key_set / active provider) until a full page reload —
+// so a key that WAS persisted still looked like "didn't save". Refresh
+// provider state + status-bar labels from the backend after any save.
+async function refreshProviderState(){
+  try{
+    const [providers,status]=await Promise.all([callBridge('list_providers'),callBridge('get_status')]);
+    if(Array.isArray(providers)&&providers.length){state.providers=providers;}
+    if(status&&status.active_provider){state.activeProvider=status.active_provider;}
+    const activeP=state.providers.find(p=>p.id===state.activeProvider);
+    if(activeP){const _m=PROVIDER_META[activeP.id]||{};if(providerTriggerText)providerTriggerText.textContent=_m.statusLabel||activeP.label;if(statusProvider)statusProvider.textContent=_m.modelDisplay||_m.model||activeP.model;}
+  }catch(e){console.warn('[tera_pilot] refreshProviderState failed',e)}
+}
 
 // ═══════════════════════════════════════════════════════════════
 // v2.2.4: QUICK SETTINGS — simplified two-tier settings
@@ -3414,6 +3523,9 @@ const quickSettingsModal = document.getElementById('quickSettingsModal');
 const quickSettingsBackdrop = document.getElementById('quickSettingsBackdrop');
 
 function openQuickSettings() {
+  // v2.3.2-fix: never stack the quick-settings modal on top of the full
+  // settings modal (they used to open together from one click).
+  if (typeof closeSettings === 'function') closeSettings();
   renderQuickSettings();
   quickSettingsModal.classList.add('open');
   quickSettingsBackdrop.classList.add('open');
@@ -3448,6 +3560,22 @@ function renderQuickSettings() {
     }
     html += '</button>';
   }
+  // v2.3.2-fix: if the ACTIVE provider isn't one of the quick 6 (e.g.
+  // OpenRouter), render it as an extra button anyway — otherwise the
+  // API-key field below silently targets a provider the user can't even
+  // see or select here, and a pasted key appears to "not save".
+  if (!QUICK_PROVIDERS.some(p => p.id === activeId)) {
+    const extraMeta = PROVIDER_META[activeId] || {};
+    const extraState = providers.find(x => x.id === activeId);
+    const extraHasKey = extraState && extraState.api_key_set;
+    html += `<button class="qs-provider-btn active" data-qs-provider="${activeId}">`;
+    html += `<span class="qs-provider-icon">🔌</span>`;
+    html += `<span class="qs-provider-name">${escapeHtml(extraMeta.label || activeId)}</span>`;
+    if (extraMeta.needsKey !== false) {
+      html += `<span class="qs-provider-key${extraHasKey ? ' set' : ''}">${extraHasKey ? '✓' : '—'}</span>`;
+    }
+    html += '</button>';
+  }
   html += '</div></div>';
 
   // Model input
@@ -3459,7 +3587,7 @@ function renderQuickSettings() {
   // API key (only if provider needs one)
   if (activeMeta.needsKey !== false) {
     html += '<div class="qs-section">';
-    html += `<div class="qs-section-title">API Key ${activeP.api_key_set ? '<span style="color:var(--success)">· set</span>' : '<span style="color:var(--danger)">· not set</span>'}</div>`;
+    html += `<div class="qs-section-title">API Key — ${escapeHtml(activeMeta.label || activeId)} ${activeP.api_key_set ? '<span style="color:var(--success)">· set</span>' : '<span style="color:var(--danger)">· not set</span>'}</div>`;
     html += `<input class="field-input qs-key-input" id="qsApiKey" type="password" placeholder="${activeP.api_key_set ? '•••••••• (leave empty to keep)' : 'sk-...'}">`;
     const quickP = QUICK_PROVIDERS.find(x => x.id === activeId);
     if (quickP && quickP.keyUrl) {
@@ -3510,8 +3638,15 @@ function renderQuickSettings() {
 }
 
 // Wire up Quick Settings buttons
-document.getElementById('openSettingsBtn').removeEventListener('click', ()=>openSettings('providers'));
-document.getElementById('openSettingsBtn').addEventListener('click', openQuickSettings);
+// v2.3.2-fix: the original handler was an anonymous arrow function, so
+// removeEventListener with a NEW arrow function removed nothing — the
+// Settings button kept BOTH handlers and opened the full settings modal
+// AND the quick-settings modal stacked on top of each other. Remove by
+// the named reference registered above instead.
+document.getElementById('openSettingsBtn').removeEventListener('click', _openFullSettings);
+// v2.4.x: mode-aware — Advanced mode opens the FULL settings directly,
+// Basic mode opens quick settings (see openSettingsByMode).
+document.getElementById('openSettingsBtn').addEventListener('click', openSettingsByMode);
 document.getElementById('quickSettingsClose').addEventListener('click', closeQuickSettings);
 quickSettingsBackdrop.addEventListener('click', closeQuickSettings);
 document.getElementById('quickSettingsAdvanced').addEventListener('click', () => {
@@ -3521,7 +3656,7 @@ document.getElementById('quickSettingsAdvanced').addEventListener('click', () =>
 document.getElementById('quickSettingsSave').addEventListener('click', async () => {
   const activeId = state.activeProvider || 'openai';
   const model = document.getElementById('qsModel')?.value || '';
-  const apiKey = document.getElementById('qsApiKey')?.value || '';
+  const apiKey = document.getElementById('qsApiKey')?.value?.trim() || '';
   const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
 
   const providers = {};
@@ -3537,10 +3672,9 @@ document.getElementById('quickSettingsSave').addEventListener('click', async () 
       });
       if (result.ok) {
         toast('Settings saved', 'success');
-        // Update UI
-        const meta = PROVIDER_META[activeId] || {};
-        if (providerTriggerText) providerTriggerText.textContent = meta.statusLabel || meta.label;
-        if (statusProvider) statusProvider.textContent = meta.modelDisplay || meta.model || model;
+        // Refresh provider state from the backend so the UI shows the
+        // saved key/active provider immediately (v2.3.2-fix).
+        await refreshProviderState();
         closeQuickSettings();
       } else {
         toast(result.error || 'Save failed', 'error');
@@ -3901,12 +4035,12 @@ window.addEventListener('tera_pilot:bridge_ready',async()=>{
     window.bridge.agent_final.connect(function(result){
       if(window.__onVerifyReset) window.__onVerifyReset();
       // v1.0.8: the final answer replaces any streamed provisional text
-      // v1.1.2-fix: use real token counts from the backend instead of
-      // the iteration count (previously result.iterations was passed as
-      // "tokens", showing e.g. "5 tokens" for 5 iterations).
+      // v2.4.x: use REAL token counts from the backend (tokens_in+out).
+      // The old ``result.iterations`` fallback showed "3 tokens" for a
+      // 3-iteration run no matter how much text the model produced.
       var totalTok = (result.tokens_in||0) + (result.tokens_out||0);
       console.log('[tera_pilot] agent_final — tokens_in='+result.tokens_in+' tokens_out='+result.tokens_out+' total='+totalTok+' iterations='+result.iterations);
-      finalizeMessage({text:result.text||'',tokens: totalTok || result.iterations||0});
+      finalizeMessage({text:result.text||'',tokens: totalTok||0, tokens_in:result.tokens_in||0, tokens_out:result.tokens_out||0, degraded:!!result.degraded, elapsed:result.elapsed, cancelled:result.cancelled});
       debouncedRefreshChatList();_maybeAutoTitle();refreshFileTree();refreshContextIndicator();
       if(result.error){toast('Agent error: '+result.error,'error')}
     });
@@ -4267,7 +4401,15 @@ function _maybeAutoTitle() {
   }
   if(userMsgCount >= 1 && assistantMsgCount >= 1) {
     _autoTitleRequested[state.activeChatId] = true;
-    callBridge('generate_title', state.activeChatId).catch(function(){});
+    // v2.4.x-fix: the generated title was never APPLIED in the web path
+    // (the promise result was ignored), so chats kept their raw creation
+    // title forever. Update the breadcrumb + sidebar from the response.
+    callBridge('generate_title', state.activeChatId).then(function(r){
+      if(r && r.ok && r.title){
+        if(state.activeChatId === r.chat_id && chatBreadcrumb) chatBreadcrumb.textContent = r.title;
+        debouncedRefreshChatList();
+      }
+    }).catch(function(){});
   }
 }
 
@@ -5617,13 +5759,10 @@ window.finalizeMessage = function(result) {
   if (hcSendBtn) hcSendBtn.addEventListener('click', sendHCMessage);
   if (hcSettingsBtn) {
     hcSettingsBtn.addEventListener('click', () => {
-      // Open settings modal and switch to agent tab
-      const settingsBtn = document.getElementById('openSettingsBtn');
-      if (settingsBtn) settingsBtn.click();
-      setTimeout(() => {
-        const agentTab = document.querySelector('.modal-tab[data-tab="agent"]');
-        if (agentTab) agentTab.click();
-      }, 100);
+      // Open the FULL settings modal directly on the agent tab — the
+      // settings button itself now opens quick settings (v2.3.2-fix).
+      if (typeof closeQuickSettings === 'function') closeQuickSettings();
+      openSettings('agent');
     });
   }
 
@@ -6023,12 +6162,10 @@ env: GITHUB_TOKEN=ghp_xxx</pre>
     ind.innerHTML = '<span class="mcp-indicator-dot"></span><span class="mcp-indicator-text">MCP: 0</span>';
     ind.title = 'Model Context Protocol servers — click to open MCP settings';
     ind.addEventListener('click', () => {
-      const sb = document.getElementById('openSettingsBtn');
-      if (sb) sb.click();
-      setTimeout(() => {
-        const mcpTab = document.querySelector('.modal-tab[data-tab="mcp"]');
-        if (mcpTab) mcpTab.click();
-      }, 100);
+      // Open the FULL settings modal directly on the MCP tab — the
+      // settings button itself now opens quick settings (v2.3.2-fix).
+      if (typeof closeQuickSettings === 'function') closeQuickSettings();
+      openSettings('mcp');
     });
     // Try to insert before the gitBar (or any reasonable spot)
     const firstChild = statusbar.firstElementChild;

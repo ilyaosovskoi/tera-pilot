@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "tera-pilot"
 version = "2.3.2"
 description = """\
-Tera Pilot v2.3.2 — TUI-first, local-first coding agent with multi-provider support, MCP,
+Tera Pilot v2.3.3 — TUI-first, local-first coding agent with multi-provider support, MCP,
 multi-agent Heavy Code mode, Office Worker section, controlled backend integrations, optional
 Rust native acceleration (sandbox / circuit breaker / compaction / interjection),
 v2 agent runtime (asyncio ChatStateActor + three-tier compaction + sub-agent

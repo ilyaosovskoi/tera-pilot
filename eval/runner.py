@@ -241,7 +241,7 @@ def _usage_stats(api_base, api_token):
         return None
 
 
-def run_api_driver(task, workspace, api_base, api_token=None):
+def run_api_driver(task, workspace, api_base, api_token=None, request_timeout=None):
     """Drive a running Tera Pilot instance over POST /api/agent/stream.
 
     SSE event contract matches tera_pilot/api_server.py:
@@ -260,6 +260,13 @@ def run_api_driver(task, workspace, api_base, api_token=None):
     watching — so it auto-accepts every diff the same way the browser UI
     does when "Apply" is clicked. Without this, every file write stalls
     for the 300 s review timeout and the run dies with a timeout.
+
+    ``request_timeout`` overrides the HTTP/SSE read timeout. Defaults to
+    the manifest's ``timeout_secs`` + 120 s grace. The manifest timeout
+    bounds the AGENT's work; the HTTP read timeout must be strictly
+    larger or a task that legitimately uses its whole budget (e.g. with
+    provider quota cooldowns) is cut off mid-run and reported as an
+    error even though the agent was still making progress.
     """
     before = _usage_stats(api_base, api_token)
     payload = {"text": task["prompt"], "project_root": str(workspace)}
@@ -299,8 +306,9 @@ def run_api_driver(task, workspace, api_base, api_token=None):
     provider = None
     model = None
     cancelled = False
+    read_timeout = request_timeout or (task.get("timeout_secs", 300) + 120)
     try:
-        with urllib.request.urlopen(req, timeout=task.get("timeout_secs", 300)) as resp:
+        with urllib.request.urlopen(req, timeout=read_timeout) as resp:
             for raw in resp:
                 line = raw.decode("utf-8", "replace").strip()
                 if not line.startswith("data: "):
@@ -314,8 +322,13 @@ def run_api_driver(task, workspace, api_base, api_token=None):
                     tokens += 1
                     final += evt.get("content", "")
                 elif etype == "step":
-                    iterations += 1
-                    if evt.get("tool"):
+                    # Count REAL agent iterations, not every SSE step:
+                    # the server emits a 'step' event for plan_created /
+                    # thought / tool_called / tool_result / done too, so
+                    # counting all of them inflated `iterations` ~4-6x.
+                    if evt.get("detail") == "iteration_start":
+                        iterations += 1
+                    elif evt.get("detail") == "tool_called" and evt.get("tool"):
                         tools.append(evt["tool"])
                 elif etype == "diff_review":
                     # Headless driver: auto-accept so the agent never
@@ -339,7 +352,7 @@ def run_api_driver(task, workspace, api_base, api_token=None):
         final = f"cannot reach {api_base}: {exc.reason}"
     except TimeoutError:
         status = "error"
-        final = f"request timed out after {task.get('timeout_secs', 300)}s"
+        final = f"request timed out after {read_timeout}s"
     except Exception as exc:  # pragma: no cover - defensive
         status = "error"
         final = f"unexpected driver error: {exc}"

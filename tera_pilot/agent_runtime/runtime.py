@@ -613,6 +613,12 @@ class AgentRuntime:
 
     _RETRY_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
     _RETRY_MAX_ATTEMPTS = 5
+    # v2.4.x: quota/429 errors are SOFT failures — the upstream explicitly
+    # asks us to retry shortly (Retry-After). Give them a longer budget than
+    # plain transient errors: a saturated free-tier shared pool (e.g.
+    # OpenRouter's z-ai/glm-5.2:free → Decart) can stay 429 for 60-90s, and
+    # the old 5×10s budget gave up just before it recovered.
+    _RETRY_QUOTA_MAX_ATTEMPTS = 8
     _RETRY_BASE_DELAY = 1.0   # seconds
     _RETRY_MAX_DELAY = 90.0   # seconds
     # 429/quota errors are honoured with the provider's own retryDelay
@@ -681,6 +687,31 @@ class AgentRuntime:
             return max(hint, self._RETRY_QUOTA_MIN_DELAY)
         # No explicit hint — give the sliding window time to slide.
         return self._RETRY_QUOTA_MIN_DELAY
+
+    def _quota_exhausted_error(self, provider, last_exc: Exception,
+                               attempts: int, elapsed: float) -> None:
+        """Raise an actionable rate-limit error after retries run out.
+
+        v2.4.x: the old code surfaced the raw upstream JSON blob
+        (``OpenRouter HTTP 429: {...}``) — it told the user nothing about
+        what to do. Extract the upstream provider name and produce a short
+        message with concrete next steps (wait / switch model / switch
+        provider), keeping the original error as ``__cause__`` for logs.
+        """
+        import re as _re
+        _upstream = ""
+        m = _re.search(r'"provider_name"\s*:\s*"([^"]+)"', str(last_exc))
+        if m:
+            _upstream = f" (upstream: {m.group(1)})"
+        model_name = getattr(getattr(provider, "config", None), "model", "?")
+        from tera_pilot.providers import ProviderError
+        err = ProviderError(
+            f"Rate limit: {provider.provider_id} model {model_name!r} is "
+            f"temporarily rate-limited{_upstream} — {attempts} attempts over "
+            f"{elapsed:.0f}s. Wait a minute and retry, or switch to another "
+            "model/provider in Settings."
+        )
+        raise err from last_exc
 
     def _wait_out_provider_cooldown(self) -> None:
         """Pause until the provider's quota cooldown expires.
@@ -757,7 +788,11 @@ class AgentRuntime:
         # is 5 req/min).
         self._wait_out_provider_cooldown()
 
-        for attempt in range(1, self._RETRY_MAX_ATTEMPTS + 1):
+        # v2.4.x: quota errors get a longer attempt budget (see
+        # _RETRY_QUOTA_MAX_ATTEMPTS) so saturated free-tier pools have
+        # time to recover; plain transient errors keep the old 5.
+        total_attempts = self._RETRY_MAX_ATTEMPTS
+        for attempt in range(1, self._RETRY_QUOTA_MAX_ATTEMPTS + 1):
             try:
                 # G20b: pass model_override to provider.generate() if set.
                 # consensus_engine does the same — provider.generate()
@@ -801,7 +836,9 @@ class AgentRuntime:
             except Exception as exc:
                 last_exc = exc
                 elapsed = time.time() - call_start
-                if attempt >= self._RETRY_MAX_ATTEMPTS:
+                if self._is_quota_error(exc):
+                    total_attempts = self._RETRY_QUOTA_MAX_ATTEMPTS
+                if attempt >= total_attempts:
                     logger.warning("[agent] LLM call FAILED after %d attempts (%.1fs): %s",
                                    attempt, elapsed, exc)
                     break
@@ -827,7 +864,7 @@ class AgentRuntime:
                         self._provider_cooldown_until = cooldown_until
                 logger.warning(
                     "[agent] transient provider error (attempt %d/%d, %.1fs): %s — retrying in %.1fs",
-                    attempt, self._RETRY_MAX_ATTEMPTS, elapsed, exc, delay,
+                    attempt, total_attempts, elapsed, exc, delay,
                 )
                 # Sleep, but check cancellation every 0.25s so a Stop
                 # click can still abort the wait.
@@ -839,6 +876,11 @@ class AgentRuntime:
                     time.sleep(step)
                     slept += step
         # All retries exhausted (or non-retryable) — re-raise the last error.
+        if last_exc is not None and self._is_quota_error(last_exc):
+            # v2.4.x: surface an actionable message instead of raw JSON.
+            self._quota_exhausted_error(
+                provider, last_exc, total_attempts, time.time() - call_start,
+            )
         raise last_exc if last_exc is not None else RuntimeError("generate failed")
 
     @staticmethod
@@ -885,7 +927,9 @@ class AgentRuntime:
         # v2.4.1-fix: same quota-cooldown pacing as _generate_with_retry.
         self._wait_out_provider_cooldown()
 
-        for attempt in range(1, self._RETRY_MAX_ATTEMPTS + 1):
+        # v2.4.x: same quota-aware attempt budget as _generate_with_retry.
+        total_attempts = self._RETRY_MAX_ATTEMPTS
+        for attempt in range(1, self._RETRY_QUOTA_MAX_ATTEMPTS + 1):
             try:
                 full_text: List[str] = []
                 chunk_count = 0
@@ -963,7 +1007,9 @@ class AgentRuntime:
             except Exception as exc:
                 last_exc = exc
                 elapsed = time.time() - call_start
-                if attempt >= self._RETRY_MAX_ATTEMPTS:
+                if self._is_quota_error(exc):
+                    total_attempts = self._RETRY_QUOTA_MAX_ATTEMPTS
+                if attempt >= total_attempts:
                     logger.warning("[agent] LLM stream FAILED after %d attempts (%.1fs): %s",
                                    attempt, elapsed, exc)
                     break
@@ -984,7 +1030,7 @@ class AgentRuntime:
                         self._provider_cooldown_until = cooldown_until
                 logger.warning(
                     "[agent] transient stream error (attempt %d/%d, %.1fs): %s — retrying in %.1fs",
-                    attempt, self._RETRY_MAX_ATTEMPTS, elapsed, exc, delay,
+                    attempt, total_attempts, elapsed, exc, delay,
                 )
                 slept = 0.0
                 while slept < delay:
@@ -994,6 +1040,11 @@ class AgentRuntime:
                     time.sleep(step)
                     slept += step
 
+        if last_exc is not None and self._is_quota_error(last_exc):
+            # v2.4.x: surface an actionable message instead of raw JSON.
+            self._quota_exhausted_error(
+                provider, last_exc, total_attempts, time.time() - call_start,
+            )
         raise last_exc if last_exc is not None else RuntimeError("stream failed")
 
     # ── High-level API ───────────────────────────────────────────────────
@@ -1135,6 +1186,11 @@ class AgentRuntime:
 
     def _run_agent_loop(self, task: Task, **gen_kwargs) -> TaskResult:
         all_steps: List[AgentStep] = []
+        # v2.4.x: set when the loop gives up on tool calls and accepts the
+        # model's prose as the final answer (iteration 3+ with no tool call).
+        # Such a run did NOT do the requested work — the UI must warn instead
+        # of presenting it as a normal successful completion.
+        self._degraded_prose = False
         autonomy = gen_kwargs.pop("autonomy", "always_ask")
 
         # v1.2.1-fix (Plan Mode gating): извлекаем параметры plan_mode
@@ -1586,14 +1642,21 @@ class AgentRuntime:
                 # Iteration 3+ with no tool call: accept the prose as
                 # the final answer. The model isn't cooperating, and
                 # looping further just wastes the user's time.
-                logger.info(
+                # v2.4.x: mark the run as DEGRADED — no tool was ever
+                # executed, so whatever the prose claims was done, it
+                # wasn't. The UI shows a warning banner instead of a
+                # clean "task complete".
+                self._degraded_prose = True
+                logger.warning(
                     "[agent] iter %d: accepting prose as final answer "
-                    "(model not emitting tool calls)", iteration,
+                    "(model not emitting tool calls) — run DEGRADED, no "
+                    "tools executed", iteration,
                 )
                 final_output = raw
                 step.is_final = True
                 all_steps.append(step)
-                self._emit(AgentEvent.DONE, output=final_output, iterations=iteration)
+                self._emit(AgentEvent.DONE, output=final_output, iterations=iteration,
+                           degraded=True)
                 break
 
             all_steps.append(step)
@@ -1697,6 +1760,10 @@ class AgentRuntime:
                 "task_type": task.type.value,
                 "total_tokens_in": self._run_tokens_in,
                 "total_tokens_out": self._run_tokens_out,
+                # v2.4.x: True when the run ended by accepting prose as the
+                # final answer without executing any tool — the UI must not
+                # present this as a completed task.
+                "degraded_prose": self._degraded_prose,
             },
         )
 

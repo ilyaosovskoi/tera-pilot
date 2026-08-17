@@ -7,7 +7,7 @@ from .base import ProviderCapability
 class GroqProvider(OpenAICompatProvider):
     provider_id: str = "groq"
     label: str = "Groq"
-    default_model: str = "llama-3.3-70b-versatile"
+    default_model: str = "meta-llama/llama-4-maverick-17b-128e-instruct"
     api_base: str = "https://api.groq.com/openai/v1"
     env_var: str = "GROQ_API_KEY"
     capabilities: frozenset = frozenset({

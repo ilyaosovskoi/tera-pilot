@@ -46,7 +46,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse, parse_qs
 
@@ -593,7 +593,7 @@ class TeraPilotDaemon:
         self.auth_token = auth_token
         self.task_queue = TaskQueue(max_workers=max_workers)
         self._notify = notify
-        self._server: Optional[HTTPServer] = None
+        self._server: Optional[ThreadingHTTPServer] = None
 
     def start(self) -> None:
         """Start the daemon server (blocking)."""
@@ -628,8 +628,13 @@ class TeraPilotDaemon:
         # Start workers
         self.task_queue.start_workers()
 
-        # Start HTTP server
-        self._server = HTTPServer((self.host, self.port), DaemonHandler)
+        # Start HTTP server. MUST be threaded: each SSE stream
+        # (/stream/:id) blocks its request handler until the task
+        # finishes, so a single-stream server would stall every other
+        # endpoint (task submit, cancel, health) for the whole run.
+        # This mirrors api_server.py / web_server.py which both use
+        # ThreadingHTTPServer.
+        self._server = ThreadingHTTPServer((self.host, self.port), DaemonHandler)
         print(f"Tera Pilot daemon running on http://{self.host}:{self.port}")
         print(f"API token: {self.auth_token}")
         print(f"Workers: {self.task_queue._max_workers}")

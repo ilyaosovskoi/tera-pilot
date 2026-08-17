@@ -32,7 +32,7 @@ class AnthropicProvider(Provider):
 
     provider_id: str = "anthropic"
     label: str = "Anthropic"
-    default_model: str = "claude-3-5-sonnet-20241022"
+    default_model: str = "claude-sonnet-5"
     api_base: str = "https://api.anthropic.com"
     env_var: str = "ANTHROPIC_API_KEY"
     capabilities: frozenset = frozenset({

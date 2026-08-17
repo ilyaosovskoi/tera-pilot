@@ -7,7 +7,7 @@ from .base import ProviderCapability
 class OpenAIProvider(OpenAICompatProvider):
     provider_id: str = "openai"
     label: str = "OpenAI"
-    default_model: str = "gpt-4o"
+    default_model: str = "gpt-5.5"
     api_base: str = "https://api.openai.com/v1"
     env_var: str = "OPENAI_API_KEY"
     capabilities: frozenset = frozenset({

@@ -188,7 +188,8 @@ def _cp_to_yaml_entry(body: dict) -> dict:
         ],
     }
     if body.get("api_key"):
-        entry["api_key"] = body["api_key"]
+        # v2.3.2-fix: strip whitespace from pasted keys.
+        entry["api_key"] = body["api_key"].strip()
     if body.get("description"):
         entry["description"] = body["description"]
     return entry
@@ -1684,7 +1685,36 @@ def _open_project(handler, body=None):
         path = body.get("path", "")
         if not path:
             return _err("No path provided")
-        return _ok(_bridge().change_workspace(path))
+        # Resolve + validate BEFORE switching anything.
+        resolved = Path(path).expanduser().resolve()
+        if not resolved.is_dir():
+            return _err(f"Not a directory: {resolved}")
+
+        result = _bridge().change_workspace(str(resolved))
+        if not result.get("ok"):
+            return result
+
+        # v2.3.2-fix: the web UI's file tree (/api/files/list), /api/status
+        # and _runtime() read ``ctx.config['project_root']`` — but this
+        # endpoint only changed the bridge's workspace, so after "Open
+        # Project" the tree kept showing the OLD directory until the next
+        # agent run finished (the agent stream persists project_root only
+        # post-run). Update + persist the config now, and re-point the
+        # shared agent runtime so its tools see the new root immediately.
+        try:
+            from .api_server import _save_config
+            with handler.ctx._config_lock:
+                handler.ctx.config["project_root"] = str(resolved)
+                _save_config(handler.ctx.config)
+            try:
+                handler.ctx.get_agent_runtime(str(resolved))
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning("[api_ext] failed to persist project_root: %s", e)
+
+        result["path"] = str(resolved)
+        return result
     except Exception as e:
         return _err(str(e))
 
@@ -2382,20 +2412,32 @@ def _providers_health(handler, body=None):
     if not pid:
         return _err("provider_id is required")
     try:
-        from .providers.types import ProviderMessage, ProviderConfig
+        # v2.3.2-fix: `tera_pilot.providers.types` does not exist — the
+        # endpoint crashed with ImportError and the UI mislabelled the
+        # failure as "Invalid API key". ProviderMessage/ProviderConfig
+        # live in tera_pilot.providers (re-exported from base.py).
+        from tera_pilot.providers import ProviderMessage, ProviderConfig
         cfg = handler.ctx.config.get("providers", {}).get(pid, {})
         prov_cfg = ProviderConfig(
             provider_id=pid,
             model=cfg.get("model", ""),
-            api_key=cfg.get("api_key") or None,
+            api_key=(cfg.get("api_key") or "").strip() or None,
             api_base=cfg.get("api_base") or None,
             temperature=0.2,
             max_tokens=100,
         )
         import time as _time
+        provider = None
+        original_config = None
         start = _time.time()
         try:
-            resp = handler.ctx.registry.get(pid).generate([
+            # Apply the CURRENT config to the provider INSTANCE only — the
+            # health probe must test the key as saved, not whatever the
+            # provider was last configured with at startup.
+            provider = handler.ctx.registry.get(pid)
+            original_config = provider.config
+            provider.config = prov_cfg
+            resp = provider.generate([
                 ProviderMessage(role="user", content="Say hello in one sentence."),
             ])
             latency_ms = int((_time.time() - start) * 1000)
@@ -2409,8 +2451,88 @@ def _providers_health(handler, body=None):
                 "key_valid": "401" not in msg and "invalid" not in msg and "api key" not in msg,
                 "error": str(exc),
             }
+        finally:
+            # v2.4.x-fix (root cause of the "agent reports success but did
+            # nothing" bug): the probe runs with max_tokens=100, and if we
+            # left that config applied, EVERY subsequent agent/chat LLM call
+            # would be capped at 100 output tokens — tool calls (which carry
+            # file content) got truncated mid-JSON, the parser saw prose, and
+            # the run ended as a false-success "final answer".
+            #
+            # IMPORTANT: we must NOT go through registry.configure() here —
+            # it stores the config in the registry's _configs map, so the
+            # next registry.get(pid) would build a fresh instance from the
+            # crippled max_tokens=100 config. Swapping provider.config on the
+            # live instance (like the oneshot path) and restoring it in
+            # `finally` leaves the registry's persistent config untouched.
+            if provider is not None and original_config is not None:
+                try:
+                    provider.config = original_config
+                except Exception as restore_err:
+                    logger.warning(
+                        "[api_ext] failed to restore provider config after health probe: %s",
+                        restore_err,
+                    )
     except Exception as e:
         return _err(str(e))
+
+
+@_post_route("/api/providers/models")
+def _providers_models(handler, body=None):
+    """Fetch the LIVE model list from a provider's /models endpoint.
+
+    v2.4.x: the hardcoded model lists went stale, so the GUI can now ask
+    the provider itself. Works for every OpenAI-compatible provider
+    (GET ``{api_base}/models`` — OpenAI, Groq, DeepSeek, Mistral, xAI,
+    Together, Fireworks, Cerebras, SambaNova, Ollama, LM Studio,
+    OpenRouter, Z.ai…) and Anthropic (GET ``/v1/models`` with x-api-key).
+    Providers that don't expose a models endpoint return a clean error
+    and the UI falls back to the built-in list.
+    """
+    body = body or {}
+    pid = str(body.get("provider_id") or (body.get("args") or [None])[0] or "").strip()
+    if not pid:
+        return _err("provider_id is required")
+    try:
+        import json as _json
+        import urllib.request as _urlreq
+        cfg = handler.ctx.config.get("providers", {}).get(pid, {})
+        api_key = (cfg.get("api_key") or "").strip() or None
+        api_base = cfg.get("api_base") or ""
+        cls = handler.ctx.registry._classes.get(pid)
+        if cls is None:
+            return _err(f"Unknown provider: {pid}")
+        base = (api_base or getattr(cls, "api_base", "")).rstrip("/")
+        if not base:
+            return _err(f"Provider {pid} has no API base URL")
+        headers = {"Accept": "application/json", "User-Agent": "tera-pilot/2.4"}
+        if pid == "anthropic":
+            url = f"{base}/v1/models"
+            if api_key:
+                headers["x-api-key"] = api_key
+                headers["anthropic-version"] = "2023-06-01"
+        else:
+            url = f"{base}/models"
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+        req = _urlreq.Request(url, headers=headers)
+        with _urlreq.urlopen(req, timeout=20) as resp:
+            payload = _json.loads(resp.read().decode("utf-8", "replace"))
+        raw = payload.get("data", []) if isinstance(payload, dict) else []
+        models = sorted(
+            {str(m["id"]) for m in raw if isinstance(m, dict) and m.get("id")}
+        )
+        if not models:
+            return {
+                "ok": False,
+                "provider_id": pid,
+                "models": [],
+                "error": "Provider returned an empty model list",
+            }
+        return _ok({"models": models, "provider_id": pid, "count": len(models)})
+    except Exception as e:
+        logger.warning("[api_ext] fetch models for %s failed: %s", pid, e)
+        return {"ok": False, "provider_id": pid, "models": [], "error": str(e)}
 
 
 @_get_route("/api/pricing/table")
@@ -2594,15 +2716,72 @@ def _oneshot_enhance(handler, body=None):
     })
 
 
+def _llm_chat_title(handler, first_user: str) -> str:
+    """Short LLM round-trip to name a chat; returns "" on any failure.
+
+    v2.4.x: chat titles used to be a raw truncation of the first message
+    (``> Создай в папке  mini_project  небольшой Python-модуль  uti...``).
+    Now we ask the active provider for a short title, mirroring the
+    oneshot pattern (temp config with a tiny max_tokens, original config
+    restored in ``finally`` so the probe can never leak into later runs).
+    """
+    if not first_user or handler is None:
+        return ""
+    try:
+        from tera_pilot.providers import ProviderMessage, ProviderConfig
+        provider = handler.ctx.registry.active
+        if provider is None:
+            return ""
+        if not provider.is_loaded:
+            provider.load()
+        original_config = provider.config
+        temp_config = ProviderConfig(
+            provider_id=original_config.provider_id,
+            model=original_config.model,
+            api_key=original_config.api_key,
+            api_base=original_config.api_base,
+            temperature=0.3,
+            max_tokens=24,
+            top_p=original_config.top_p,
+            stream=False,
+            timeout=min(float(original_config.timeout or 120.0), 20.0),
+        )
+        provider.config = temp_config
+        try:
+            sample = " ".join(first_user.split())[:300]
+            resp = provider.generate([
+                ProviderMessage(role="system", content=(
+                    "You are a chat-titling assistant. Reply with ONLY a short "
+                    "chat title (max 6 words) that summarises the user's request. "
+                    "Reply in the user's language. No quotes, no trailing period."
+                )),
+                ProviderMessage(role="user", content=sample),
+            ])
+        finally:
+            provider.config = original_config
+        title = (resp.text or "").strip().strip('"\'`“”‘’ .')
+        title = " ".join(title.split())
+        if not title or len(title) > 80:
+            return ""
+        return title
+    except Exception as e:
+        logger.warning("[api_ext] LLM chat title failed, using fallback: %s", e)
+        return ""
+
+
 @_post_route("/api/chat/generate_title")
 def _chat_generate_title(handler, body=None):
-    """Derive a chat title from its first user message (no LLM round-trip)."""
+    """Derive a chat title from its first user message.
+
+    v2.4.x: tries a short LLM round-trip for a meaningful title and falls
+    back to the cleaned truncation when the LLM is unavailable/fails.
+    """
     body = body or {}
     chat_id = str(body.get("chat_id") or (body.get("args") or [None])[0] or "")
     if not chat_id:
         return _err("chat_id is required")
     try:
-        from .api_server import _load_chat, _save_chat
+        from .api_server import _chat_title_from_text, _load_chat, _save_chat
         chat = _load_chat(chat_id)
         if not chat:
             return _err("chat not found")
@@ -2611,7 +2790,7 @@ def _chat_generate_title(handler, body=None):
             if m.get("role") == "user":
                 first_user = m.get("content", "")
                 break
-        title = " ".join(first_user.split())[:60] or "New chat"
+        title = _llm_chat_title(handler, first_user) or _chat_title_from_text(first_user)
         chat["title"] = title
         _save_chat(chat)
         return _ok({"title": title, "chat_id": chat_id})
