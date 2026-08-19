@@ -18,16 +18,29 @@ Tera Pilot already has a strong technical foundation for a TUI-first, local-firs
 - there is an activity/audit trail, signed audit export, token/cost tracking and provider routing;
 - the public command-oriented `tera-pilot-cli` was removed; CI/GitHub use the same backend as the TUI.
 
-But this is not yet a proven product contour. The main gap is operational reliability and evidence:
+Progress since the last snapshot (v2.3.4, August 2026): the reproducible
+evaluation harness is **implemented** (43 tasks, schema v1, check/smoke/report
+commands, live agent runs with recorded baseline); the threat model and a
+security test suite are **published** (`THREAT_MODEL.md`, `SECURITY_TEST_REPORT.md`,
+96 security + 36 sandbox tests, 448-test full suite); offline signed licensing
+(`LICENSING.md`, Ed25519 keys, zero-telemetry) exists for Pro gating; and the
+SSE/`done`-event reliability bug that made live eval runs hang for ~300 s is
+fixed. The remaining gaps are operational:
 
-1. there is no reproducible evaluation harness on real repository tasks;
-2. the test suite is too narrow relative to the size of the runtime;
-3. there is no full clean-install/release pipeline;
-4. there is no single environment doctor and no clear onboarding from installation to the first task;
-5. security/local-first claims are not yet backed by a threat model, egress visibility and independent checks;
+1. the evaluation harness exists but only one dated batch (2026-08-19) has
+   been analyzed — no recurring baseline yet (see `eval/REPORT_2026-08-19.md`);
+2. the test suite is broad (448 tests) but not yet enforced as a mandatory CI
+   merge gate on every change;
+3. there is no full clean-install/release pipeline with signed artifacts;
+4. onboarding relies on `tera-pilot doctor` and README guidance — a built-in
+   `/doctor` inside the TUI start screen is still roadmap;
+5. security claims are now backed by a threat model and tests, but there is no
+   OS-level process sandbox and no independent external security review yet;
 6. the GitHub Action is a good template but not yet proven on real repositories;
-7. quality, latency, cost, rollback and human-acceptance rates are not measured;
-8. enterprise features — identity, RBAC, retention, deployment and support — are absent or roadmap items.
+7. quality, latency, cost, rollback and human-acceptance rates are not measured
+   continuously;
+8. enterprise features — identity, RBAC, retention, deployment and support —
+   are absent or roadmap items.
 
 **Bottom line:** Tera Pilot is a technically serious alpha base approaching a controlled private beta, but the current smoke tests do not yet prove readiness for an external beta. For a public product-ready v1, close the P0 items below first rather than expanding the agent capability list.
 
@@ -104,13 +117,16 @@ P0 is the set of tasks without which a stable, trusted product cannot be promise
 - the benchmark is not substituted by tool-call count or answer length;
 - only measured claims are published in the README.
 
-**Proposed artifacts:**
+**Status (v2.3.4):** done. `eval/README.md`, `eval/tasks/` (43 tasks),
+`eval/runner.py` (fake + api drivers, baseline mode, check/smoke/report),
+`eval/results/schema.json` (schema v1, versioned) all exist, and the
+`tests/test_eval_tasks.py` quality gate proves every task solvable. The first
+live batch (2026-08-19) is analyzed in `eval/REPORT_2026-08-19.md` — including
+two harness corrections shipped in v2.3.4 (retry of parallel-run collisions,
+and passing tests no longer masked by a terminal driver `error`).
 
-- `eval/README.md`;
-- `eval/tasks/`;
-- `eval/runner.py`;
-- `eval/results/schema.json`;
-- `tests/test_evaluation_schema.py`.
+**Remaining:** run recurring baselines on provider/model changes and publish
+measured rates; the 30–50 task minimum is already exceeded (43).
 
 ---
 
@@ -219,6 +235,20 @@ Local-first is an architectural direction, not proof of no leaks. Documents and 
 - the threat model for prompt injection from repositories, web pages and MCP responses;
 - the threat model for CI runners and pull request content.
 
+**Status (v2.3.4):** substantially done. `THREAT_MODEL.md` is published (T1–T8
+threats mapped to mechanisms/modules); `SECURITY_TEST_REPORT.md` documents the
+offensive-testing methodology; `tests/test_security_suite.py` (96 tests) +
+`tests/test_tool_engine_sandbox.py` (36 tests) cover path traversal, command
+policy bypass, git sandbox escapes (`!`-aliases, exec-capable config keys,
+repo-supplied `.git/config`/`.git/hooks`), CORS, encrypted prompts, npm
+scripts, web_fetch, constant-time token checks and audit tampering; the README
+lists known limitations and explicitly disclaims OS-level sandboxing and
+compliance certifications.
+
+**Remaining:** `SECURITY_BOUNDARIES.md` as a separate doc (trust boundaries are
+currently inside `THREAT_MODEL.md`); an independent external security review;
+no "zero telemetry"/"air-gapped"/"secure" claim exceeds its proven scope.
+
 **Definition of done:**
 
 - `THREAT_MODEL.md` and `SECURITY_BOUNDARIES.md` are published;
@@ -272,6 +302,16 @@ The current test contour is too small for the number of runtime modules.
 - lint/type checks for mutable modules;
 - dependency audit and secret scanning;
 - coverage report with an explanation of exclusions.
+
+**Status (v2.3.4):** the suite grew to **448 tests** (security suite, sandbox,
+SSE connection-close, pipe-drain, licensing no-telemetry, undo/checkpoint,
+learning-loop ids, M1/M2/M3 gating, eval driver, TUI widgets, version sync).
+Regression tests exist for every known bug fixed in this cycle.
+
+**Remaining:** make CI mandatory for merge on every change (currently the
+quality-gate tests run, but not as a hard merge gate); add a coverage report
+with exclusion explanations; flaky tests must not be masked by retry without a
+separate issue.
 
 **Definition of done:**
 

@@ -147,6 +147,7 @@ Tera Pilot treats autonomy as a policy decision, not a binary marketing label.
 - **Checkpoints and undo** provide recovery paths for file changes.
 - **Activity and audit logs** record tool execution and agent identity.
 - **Signed audit support** uses Ed25519 signatures and hash chaining for exported records.
+- **Offline licensing** (Pro gating) uses Ed25519-signed keys verified entirely offline — zero telemetry, no phone-home (see [`LICENSING.md`](LICENSING.md)).
 
 These mechanisms provide control and evidence; they are not a claim of formal SOC 2, ISO 27001, or vulnerability-free code. See [`TERA_PILOT_PRODUCT_STRATEGY.md`](TERA_PILOT_PRODUCT_STRATEGY.md) for the security and product roadmap, and [`THREAT_MODEL.md`](THREAT_MODEL.md) for the public threat model and trust boundaries.
 
@@ -304,7 +305,7 @@ python3 -m eval.runner run eval/tasks/<task_id> --driver api \
 python3 -m eval.runner report --dir eval/results   # summary
 ```
 
-**Current results:** the first live run of `fix-missing-return` (a bug-fix task whose fixture tests fail at baseline) produced a working fix — the task's `pytest` passes (`2 passed`) and verification is `passed` — but the api driver recorded the run as `error` because the SSE stream did not deliver its final `done` event within the 300 s task timeout. Driven directly (SSE probe), the same agent completes the task in ~16 s. This driver limitation is tracked for the next release.
+**Current results:** the first analyzed live batch (2026-08-19, 30 runs across 9 tasks) is documented in [`eval/REPORT_2026-08-19.md`](eval/REPORT_2026-08-19.md), with recorded vs. corrected numbers: 12 of 27 meaningful runs passed their verification tests, and 8 of 9 tasks were solved at least once. Two harness corrections shipped in v2.3.4: parallel launches that collide on the single-agent server are retried with backoff instead of failing, and a run whose tests **passed** (agent actually ran) is no longer masked by a terminal driver `error`. Raw per-run logs are development artifacts and are not versioned; the report is the versioned summary. Earlier provider-specific runs (Groq) are in [`GROQ_EVAL_REPORT.md`](GROQ_EVAL_REPORT.md).
 
 ## Audit Export & Verification
 
@@ -337,7 +338,7 @@ Environment variables are now `TERA_PILOT_*` (e.g. `TERA_PILOT_PROVIDER`, `TERA_
 - Cloud providers and remote MCP servers still send data outside the machine by design; local-first is not the same as always-offline.
 - Enterprise features such as SSO/SCIM, centralized RBAC, formal compliance certifications and managed fleet control are roadmap work.
 - There is no OS-level process sandbox around `execute_command`/`run_code` yet — the sandbox is path-based (bubblewrap/firejail-style isolation is roadmap work; see [Security Posture & Verification](#security-posture--verification)).
-- Benchmark claims are limited to the reproducible evaluation harness (`eval/`, 43 repository tasks). Known harness limitation: the api driver records a run as `error` if the 300 s SSE stream times out even when the agent's fix already passes the task's tests.
+- Benchmark claims are limited to the reproducible evaluation harness (`eval/`, 43 repository tasks, first batch in `eval/REPORT_2026-08-19.md`); only measured claims are published. The harness's own known caveats are recorded in the report, not the README.
 
 ## License
 
