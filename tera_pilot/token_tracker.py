@@ -29,6 +29,7 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     "claude-opus-4-8":              {"in": 0.005, "out": 0.025},
     "claude-haiku-4-5-20251001":    {"in": 0.001, "out": 0.005},
     "claude-fable-5":               {"in": 0.003, "out": 0.015},
+    "claude-opus-5":                {"in": 0.015, "out": 0.075},
     # OpenAI
     "gpt-5.5":                      {"in": 0.005, "out": 0.030},
     "gpt-5.4":                      {"in": 0.0025, "out": 0.015},
@@ -39,6 +40,8 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     "gemini-3.5-flash":             {"in": 0.0003, "out": 0.0025},
     # xAI
     "grok-4.3":                     {"in": 0.002, "out": 0.006},
+    "grok-4.5":                     {"in": 0.002, "out": 0.006},
+    "grok-4.6":                     {"in": 0.002, "out": 0.006},
     # Z.ai
     "glm-5.1":                      {"in": 0.0006, "out": 0.0022},
     # Mistral
@@ -55,6 +58,7 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     # Local — free
     "local":                        {"in": 0.0, "out": 0.0},
     "llama3.3":                     {"in": 0.0, "out": 0.0},
+    "llama4":                       {"in": 0.0, "out": 0.0},
     # Legacy models kept for historical entries already on disk
     "claude-3-5-sonnet-20241022": {"in": 0.003, "out": 0.015},
     "claude-3-5-haiku-20241022":  {"in": 0.001, "out": 0.005},

@@ -94,8 +94,44 @@ class OutputParser:
     }
 
     @classmethod
+    def tool_calls_from_native(cls, native_calls: List[Dict[str, Any]]) -> List[ToolCall]:
+        """Convert API-level native ``tool_calls`` into ToolCall objects.
+
+        v2.3.5-fix (small-model support): the native-history loop keeps
+        the conversation as real OpenAI-style messages (assistant
+        ``tool_calls`` + ``role="tool"`` results) instead of embedding
+        everything in one user prompt — small models trained on native
+        tool calling (e.g. LFM 2.6B) follow their plan correctly in
+        that format, while they degenerate into a ``read_file`` loop
+        when observations are buried in prose. This converter turns the
+        API's native tool_calls into the ToolCall objects the runtime
+        executes, preserving each call's ``id`` for the matching
+        ``tool_call_id`` in the follow-up tool message.
+        """
+        out: List[ToolCall] = []
+        for tc in native_calls or []:
+            fn = tc.get("function") or {}
+            name = fn.get("name", "")
+            if not name:
+                continue
+            try:
+                args = json.loads(fn.get("arguments", "{}") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                args = {}
+            if not isinstance(args, dict):
+                args = {}
+            try:
+                call = ToolCall(name=ToolName(name), args=args)
+            except (ValueError, KeyError):
+                logger.warning(f"[parser] native tool name lookup failed: {name}")
+                continue
+            call.id = tc.get("id")
+            out.append(call)
+        return out
+
+    @classmethod
     def parse_tool_call(cls, text: str) -> Optional[ToolCall]:
-        """Extract JSON tool call from text, with self-correction.
+        """Extract the FIRST JSON tool call from text, with self-correction.
 
         v1.0.5-correctness: the old regex used ``[^{}]*`` and ``[^}]*``
         which exclude braces — so any tool call whose ``args`` contained
@@ -121,7 +157,53 @@ class OutputParser:
             if not match:
                 return None
             raw = match.group(0)
+        return cls._tool_call_from_json(raw)
 
+    @classmethod
+    def parse_tool_calls(cls, text: str) -> List[ToolCall]:
+        """Extract EVERY JSON tool call from the model response, in order.
+
+        v2.3.5-fix (small-model support): small but capable agent models
+        (e.g. LFM 2.5 2.6B) emit their whole PLAN as several tool-call
+        JSON blocks in a single response — read file A, read file B,
+        then write file C. The runtime previously executed only the
+        FIRST call and silently dropped the rest, so the model saw its
+        other calls "not happen" and repeated them forever (the
+        degenerate ``read_file`` loop observed with LFM 2.6B). Parsing
+        every call lets the runtime execute the model's plan in order.
+
+        Consecutive identical calls (same tool + same args) are
+        deduplicated, so a model that repeats ``read_file x.py`` three
+        times in one response only reads it once.
+        """
+        cleaned = cls._strip_code_fence(text)
+        calls: List[ToolCall] = []
+        last_key: Optional[Tuple] = None
+        for raw, _end in cls._iter_balanced_json(cleaned):
+            call = cls._tool_call_from_json(raw)
+            if call is None:
+                continue
+            name = call.name.value if isinstance(call.name, ToolName) else call.name
+            key = (name, json.dumps(call.args, sort_keys=True, ensure_ascii=False))
+            if key == last_key:
+                continue
+            last_key = key
+            calls.append(call)
+        if not calls:
+            single = cls.parse_tool_call(cleaned)
+            if single is not None:
+                calls.append(single)
+        return calls
+
+    @classmethod
+    def _tool_call_from_json(cls, raw: str) -> Optional[ToolCall]:
+        """Build a ToolCall from one raw JSON block, with self-correction.
+
+        Shared by parse_tool_call / parse_tool_calls so single- and
+        multi-call parsing apply the exact same recovery logic:
+        safe JSON load, last-resort arg extraction by name, top-level
+        arg lifting, and the dynamic MCP-tool name pass-through.
+        """
         data = cls._safe_json(raw)
         if data is None:
             # _safe_json failed — try extracting tool name + args by name
@@ -160,6 +242,82 @@ class OutputParser:
         except (ValueError, KeyError) as e:
             logger.warning(f"[parser] Tool name lookup failed: {e}")
             return None
+
+    @classmethod
+    def _iter_balanced_json(cls, text: str):
+        """Yield ``(raw, end_index)`` for every balanced ``{...}`` with ``"tool"``.
+
+        Scans forward through *text*, yielding each brace-balanced block
+        that contains the key ``"tool"`` (ignoring braces inside string
+        literals), in order of appearance. Scanning resumes AFTER the
+        previously yielded block, so nested ``"tool"`` keys inside an
+        already-matched block (e.g. the inner tool of ``call_mcp_tool``'s
+        ``args``) are never matched as separate calls.
+        """
+        marker = '"tool"'
+        search_from = 0
+        n = len(text)
+        while True:
+            idx = text.find(marker, search_from)
+            if idx == -1:
+                return
+            # Walk backwards from idx to find the enclosing opening `{`.
+            open_idx = -1
+            depth = 0
+            in_str: Optional[str] = None
+            j = idx - 1
+            while j >= 0:
+                ch = text[j]
+                if in_str is not None:
+                    if ch == in_str:
+                        in_str = None
+                    j -= 1
+                    continue
+                if ch in ('"', "'"):
+                    in_str = ch
+                    j -= 1
+                    continue
+                if ch == '}':
+                    depth += 1
+                elif ch == '{':
+                    if depth == 0:
+                        open_idx = j
+                        break
+                    depth -= 1
+                j -= 1
+            if open_idx < 0:
+                search_from = idx + len(marker)
+                continue
+            # Walk forwards from open_idx to find the matching `}`.
+            depth = 0
+            in_str = None
+            i = open_idx
+            while i < n:
+                ch = text[i]
+                if in_str is not None:
+                    if ch == '\\':
+                        i += 2
+                        continue
+                    if ch == in_str:
+                        in_str = None
+                    i += 1
+                    continue
+                if ch in ('"', "'"):
+                    in_str = ch
+                    i += 1
+                    continue
+                if ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        yield text[open_idx:i + 1], i + 1
+                        search_from = i + 1
+                        break
+                i += 1
+            else:
+                # Unbalanced — try the next `"tool"` occurrence.
+                search_from = idx + len(marker)
 
     @classmethod
     def _extract_balanced_json(cls, text: str) -> Optional[str]:

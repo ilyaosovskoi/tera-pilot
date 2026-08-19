@@ -9,3 +9,8 @@ stderr.txt
 .venv/
 venv/
 .pytest_cache/
+
+# Raw eval run logs are development artifacts, not versioned.
+# The human-readable summary is eval/REPORT_*.md; the schema stays tracked.
+eval/results/*.json
+!eval/results/schema.json

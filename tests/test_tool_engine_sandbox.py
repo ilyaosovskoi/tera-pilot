@@ -89,6 +89,65 @@ def test_non_git_path_commands_still_validated(tmp_path):
     assert e._validate_command_paths(["cat", "file.txt"]) is None
 
 
+# ── git shell-alias sandbox escape (fix 4) ─────────────────────────────
+# git executes any alias whose value starts with '!' through the shell:
+# `git -c alias.x='!<cmd>' x` / `git config alias.x '!<cmd>'`. The value
+# is never a path, so it bypassed _resolve_path entirely — a genuine
+# workspace-sandbox escape to arbitrary shell execution.
+
+
+def test_git_c_shell_alias_exec_blocked(tmp_path):
+    e = _engine(tmp_path)
+    res = e._execute_command("git -c alias.x='!echo pwned' x")
+    assert "SECURITY ERROR" in res, res
+
+
+def test_git_config_shell_alias_value_blocked(tmp_path):
+    e = _engine(tmp_path)
+    res = e._execute_command("git config alias.x '!touch /tmp/pwned'")
+    assert "SECURITY ERROR" in res, res
+
+
+def test_git_c_inline_shell_alias_blocked(tmp_path):
+    e = _engine(tmp_path)
+    res = e._execute_command("git -c alias.x='!cat /etc/passwd' x")
+    assert "SECURITY ERROR" in res, res
+
+
+def test_git_legit_c_flag_still_allowed(tmp_path):
+    e = _engine(tmp_path)
+    res = e._execute_command("git -c core.quotepath=false status")
+    assert "SECURITY ERROR" not in res
+
+
+def test_git_exec_capable_config_keys_blocked(tmp_path):
+    """git executes the values of several config keys as commands — the
+    path checks can't see them (not paths), so they must be blocked by
+    key. Confirmed live: core.fsmonitor runs on `git status`, core.editor
+    on `git commit`."""
+    e = _engine(tmp_path)
+    for cmd in (
+        "git -c core.fsmonitor='touch /tmp/fsmonitor-pwned' status",
+        "git -c core.editor='touch /tmp/editor-pwned' commit --allow-empty",
+        "git -c core.sshCommand='touch /tmp/ssh-pwned' status",
+        "git -c core.pager='touch /tmp/pager-pwned' status",
+        "git -c core.askpass='touch /tmp/ask-pwned' status",
+        "git -c core.hooksPath='.githooks' status",
+        "git -c sequence.editor='touch /tmp/seq-pwned' status",
+        "git -c credential.helper='touch /tmp/cred-pwned' status",
+        "git -c diff.foo.textconv='touch /tmp/tc-pwned' status",
+        "git -c filter.f.smudge='touch /tmp/sm-pwned' status",
+        "git -c filter.f.clean='touch /tmp/cl-pwned' status",
+        "git config core.editor 'touch /tmp/editor2-pwned'",
+        "git config alias.x '!echo pwned'",
+        # keys are case-insensitive in git
+        "git -c CORE.FSMONITOR='touch /tmp/fm-pwned' status",
+        "git -c Core.Editor='touch /tmp/ed-pwned' status",
+    ):
+        res = e._execute_command(cmd)
+        assert "SECURITY ERROR" in res, f"{cmd!r} must be blocked, got: {res[:80]!r}"
+
+
 # ── _git_diff pathspec validation (fix 2) ──────────────────────────────
 
 
@@ -136,6 +195,169 @@ def test_git_diff_no_path_allowed(tmp_path):
     e._get_git_service = lambda: fake  # type: ignore[method-assign]
     assert e._git_diff(staged=False, path="") == "diff"
     assert fake.last_path is None
+
+
+# ── v2.3.4-security: repo-supplied git exec keys + hooks neutralized ──
+# A malicious repository is UNTRUSTED input (threat model T1). Its OWN
+# `.git/config` can set exec-capable keys (`core.fsmonitor` runs on plain
+# `git status`, `diff.*.textconv` on `git diff`, `core.editor` on
+# `git commit`) and its `.git/hooks/*` run on the matching operation —
+# nothing is passed on the command line, so the arg-level checks in
+# `_validate_command_paths` cannot see it. The engine now injects `-c`
+# overrides that empty those keys and point `core.hooksPath` at a
+# hook-free directory for every git invocation.
+
+import subprocess
+import tempfile
+
+
+def _git_init(tmp_path):
+    """Init a real repo in tmp_path with identity configured."""
+    subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=str(tmp_path), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(tmp_path), check=True)
+    return tmp_path
+
+
+def test_git_repo_config_exec_keys_neutralized(tmp_path):
+    """core.fsmonitor / core.editor from the repo's OWN .git/config must
+    NOT execute on plain git status/commit (the arg checks can't see them)."""
+    _git_init(tmp_path)
+    marker = Path(tempfile.gettempdir()) / "PWNED_repo_config_exec"
+    marker.unlink(missing_ok=True)
+    cfg = (tmp_path / ".git" / "config")
+    cfg.write_text(
+        cfg.read_text(encoding="utf-8")
+        + "\n[core]\n\tfsmonitor = touch " + str(marker)
+        + "\n\teditor = touch " + str(marker) + "\n",
+        encoding="utf-8",
+    )
+    e = _engine(tmp_path)
+    _auto_approve(e)
+    res = e._execute_command("git status --porcelain", timeout=30)
+    assert "[SECURITY ERROR]" not in res, res
+    assert not marker.exists(), "core.fsmonitor executed on git status!"
+    (tmp_path / "f.txt").write_text("x\n", encoding="utf-8")
+    e._execute_command("git add f.txt", timeout=30)
+    res = e._execute_command("git commit -m t", timeout=30)
+    assert "[SECURITY ERROR]" not in res, res
+    assert not marker.exists(), "core.editor executed on git commit!"
+
+
+def test_git_repo_hooks_neutralized(tmp_path):
+    """A malicious pre-commit hook in the repo's .git/hooks must NOT run
+    on git commit."""
+    _git_init(tmp_path)
+    marker = Path(tempfile.gettempdir()) / "PWNED_repo_hook"
+    marker.unlink(missing_ok=True)
+    hooks = tmp_path / ".git" / "hooks"
+    hooks.mkdir(exist_ok=True)
+    hook = hooks / "pre-commit"
+    hook.write_text("#!/bin/sh\ntouch " + str(marker) + "\n", encoding="utf-8")
+    hook.chmod(0o755)
+    e = _engine(tmp_path)
+    _auto_approve(e)
+    (tmp_path / "f.txt").write_text("x\n", encoding="utf-8")
+    e._execute_command("git add f.txt", timeout=30)
+    res = e._execute_command("git commit -m t", timeout=30)
+    assert "[SECURITY ERROR]" not in res, res
+    assert not marker.exists(), "pre-commit hook executed on git commit!"
+
+
+def test_git_textconv_driver_neutralized(tmp_path):
+    """diff.*.textconv from the repo config + .gitattributes must NOT run
+    on git diff."""
+    _git_init(tmp_path)
+    marker = Path(tempfile.gettempdir()) / "PWNED_textconv"
+    marker.unlink(missing_ok=True)
+    (tmp_path / "data.bin").write_text("hello\n", encoding="utf-8")
+    subprocess.run(["git", "add", "data.bin"], cwd=str(tmp_path), check=True)
+    subprocess.run(["git", "commit", "-qm", "init"], cwd=str(tmp_path), check=True)
+    (tmp_path / "data.bin").write_text("world\n", encoding="utf-8")
+    (tmp_path / ".gitattributes").write_text("*.bin diff=evil\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "config", "diff.evil.textconv", "touch " + str(marker)],
+        cwd=str(tmp_path), check=True,
+    )
+    e = _engine(tmp_path)
+    _auto_approve(e)
+    res = e._execute_command("git diff", timeout=30)
+    assert "[SECURITY ERROR]" not in res, res
+    assert not marker.exists(), "diff.*.textconv executed on git diff!"
+
+
+def test_git_legitimate_commands_work_with_neutralization(tmp_path):
+    """Neutralization must not break ordinary git usage."""
+    _git_init(tmp_path)
+    (tmp_path / "a.txt").write_text("x\n", encoding="utf-8")
+    e = _engine(tmp_path)
+    _auto_approve(e)
+    res = e._execute_command("git add a.txt", timeout=30)
+    assert "[SECURITY ERROR]" not in res
+    res = e._execute_command("git commit -m init", timeout=30)
+    assert "init" in res
+    res = e._execute_command("git log --oneline", timeout=30)
+    assert "init" in res
+    res = e._execute_command("git status --porcelain", timeout=30)
+    assert "[SECURITY ERROR]" not in res
+
+
+def test_agent_git_tools_work_import_fixed(tmp_path):
+    """Regression: the agent's git tools (_git_status etc.) used
+    `from .git_service import GitService` inside tool_engine/, which
+    resolves to a NONEXISTENT module — so every git tool call failed
+    with "not a git repository (or git not installed)" on a valid repo."""
+    _git_init(tmp_path)
+    (tmp_path / "a.txt").write_text("x\n", encoding="utf-8")
+    e = _engine(tmp_path)
+    status = e._git_status()
+    assert "Branch:" in status, f"git tools broken: {status[:100]!r}"
+    assert "not a git repository" not in status
+
+
+def test_git_neutralization_helper_marks_exec_keys():
+    """git_neutralization_args must include overrides for every known
+    exec-capable key family (and driver keys parsed from a repo config)."""
+    from tera_pilot.git_service import git_neutralization_args, _git_key_is_exec_capable
+    assert _git_key_is_exec_capable("core.fsmonitor")
+    assert _git_key_is_exec_capable("CORE.EDITOR")  # case-insensitive
+    assert _git_key_is_exec_capable("diff.evil.textconv")
+    assert _git_key_is_exec_capable("filter.f.clean")
+    assert _git_key_is_exec_capable("filter.f.smudge")
+    assert _git_key_is_exec_capable("credential.https://x.helper")
+    assert not _git_key_is_exec_capable("core.quotepath")
+    assert not _git_key_is_exec_capable("user.name")
+    flags = git_neutralization_args(None)
+    joined = " ".join(flags)
+    assert "core.fsmonitor=" in joined
+    assert "core.editor=true" in joined
+    assert "core.hookspath=" in joined
+
+
+# ── v2.3.4-security: auto-detected test/lint commands need approval ────
+# The self-verify flow detects the repo's test command (pytest/npm test/…)
+# and runs it. A malicious repo can ship a package.json whose "test"
+# script is arbitrary code, or test files that execute on import — so the
+# auto-run path must go through the same user-confirmation gate as
+# execute_command/run_code (T2).
+
+
+def test_auto_test_command_requires_confirmation(tmp_path):
+    e = _engine(tmp_path)
+    e._request_confirmation = lambda *a, **k: False  # type: ignore[method-assign]
+    res = e._run_test_command_sandboxed(["pytest", "-q"])
+    assert "REJECTED BY USER" in res, res
+
+
+def test_auto_test_command_runs_when_approved(tmp_path):
+    e = _engine(tmp_path)
+    e._request_confirmation = lambda *a, **k: True  # type: ignore[method-assign]
+    (tmp_path / "test_x.py").write_text(
+        "def test_ok():\n    assert True\n", encoding="utf-8"
+    )
+    res = e._run_test_command_sandboxed(["pytest", "-q", "test_x.py"])
+    assert "REJECTED BY USER" not in res
+    assert "[EXIT CODE]" in res
 
 
 # ── Guardian command-policy check (fix 3) ──────────────────────────────

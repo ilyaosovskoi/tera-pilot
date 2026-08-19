@@ -21,6 +21,8 @@ compaction v2, circuit breaker, sub-agent v2, and sandbox.
 """
 
 import logging
+import os
+import re
 import threading
 import time
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
@@ -69,6 +71,7 @@ class AgentRuntime:
         token_tracker: Optional[Any] = None,
         section: str = "general",
         on_token_delta: Optional[Callable[[str], None]] = None,
+        compact_prompt: Optional[bool] = None,
     ):
         self._registry = registry
         self.memory = ContextMemory(persist_path=memory_persist_path)
@@ -117,6 +120,10 @@ class AgentRuntime:
         # step to finish.  Previously the parameter existed in __init__ but was
         # never stored or used — a phantom feature (see SKILL.md §5).
         self._on_token_delta = on_token_delta
+        # v2.3.5-fix (small-model support): compact-mode override. None =
+        # auto-detect from the active model's size (<= ~8B → compact);
+        # True/False forces it. Config knob: agent_compact_prompt.
+        self._compact_override = compact_prompt
         # v1.1.0: quota tracker — lazily wired via set_quota_tracker().
         # When set, _generate_with_retry calls quota.record() and
         # _run_agent_loop checks quota.exhausted() before each LLM call.
@@ -153,7 +160,7 @@ class AgentRuntime:
         # back to the parent.
         self._provider_override: Optional[str] = None
         self._model_override: Optional[str] = None
-        # v2.4.1-fix: provider quota cooldown — set after a 429 so the
+        # v2.3.4-fix: provider quota cooldown — set after a 429 so the
         # next LLM call waits out the provider's retryDelay (see
         # _wait_out_provider_cooldown).
         self._provider_cooldown_until: float = 0.0
@@ -431,7 +438,7 @@ class AgentRuntime:
         # even when CLAUDE.md exists.
         self._project_context.instructions()
         proj_status = self._project_context.status()
-        sys_prompt_chars = len(PromptBuilder.system())
+        sys_prompt_chars = len(self._system_prompt())
         # v1.1.4-fix (bug 4.2): surface ContextManager's file selection
         # (what's actually auto-attached to the prompt) alongside
         # conversation memory — previously invisible even though it was
@@ -445,7 +452,7 @@ class AgentRuntime:
             "project_context": proj_status,
             "files": file_selection,
             "system_prompt_chars": sys_prompt_chars,
-            "system_prompt_tokens": _estimate_tokens(PromptBuilder.system()),
+            "system_prompt_tokens": _estimate_tokens(self._system_prompt()),
             "workspace": str(self.tools.workspace) if self.tools.workspace else None,
         }
 
@@ -576,19 +583,97 @@ class AgentRuntime:
             provider.load()
         messages: List[ProviderMessage] = []
         if include_system:
-            messages.append(ProviderMessage(role="system", content=PromptBuilder.system()))
+            messages.append(ProviderMessage(role="system", content=self._system_prompt()))
         messages.append(ProviderMessage(role="user", content=prompt))
         resp = self._generate_with_retry(provider, messages)
         return resp.text, int(getattr(resp, 'tokens_in', 0) or 0), int(getattr(resp, 'tokens_out', 0) or 0)
 
+    def _use_compact_prompt(self) -> bool:
+        """Whether to run in compact mode (lean prompt + essential tools).
+
+        v2.3.5-fix (small-model support): the full system prompt +
+        26 native tool schemas are ~8.3K tokens. Small but capable
+        agent models (e.g. LFM 2.5 2.6B) lose the plot under that
+        load — they degrade into repeating their first tool call.
+        Compact mode cuts the prompt ~5x and advertises only the
+        essential tools, which lets such models actually complete
+        tasks (the security layer — command policy, sandbox, diff
+        review — is unchanged and enforced in code).
+
+        Resolution order: explicit ``compact_prompt`` override (config
+        ``agent_compact_prompt``) > heuristic on the active model's
+        size (models whose name contains a size <= 8B, e.g. ``2.6b``,
+        ``7b`` → compact; ``27b``, ``70b`` → full prompt).
+        """
+        if self._compact_override is not None:
+            return bool(self._compact_override)
+        try:
+            provider = self._registry.active
+            model = (getattr(getattr(provider, "config", None), "model", None) or "").lower()
+        except Exception:
+            model = ""
+        m = re.search(r'(\d+(?:\.\d+)?)\s*b\b', model)
+        if m:
+            try:
+                if float(m.group(1)) <= 8.0:
+                    return True
+            except ValueError:
+                pass
+        return False
+
+    def _system_prompt(self, section: str = "general") -> str:
+        """System prompt for *section*, honoring compact mode."""
+        return PromptBuilder.system(section=section, compact=self._use_compact_prompt())
+
+    def _native_tools(self) -> Optional[List[dict]]:
+        """Return the OpenAI-function-format tool schemas for this run,
+        or None when the active provider can't do native tool calling.
+
+        v2.3.4-fix (model compatibility): the legacy ReAct loop only
+        advertised tools as TEXT in the system prompt. Models trained
+        for NATIVE tool calling (OpenAI gpt-oss, newer checkpoints)
+        respond with an API-level tool_call instead of text JSON — and
+        with no ``tools`` in the request the provider rejects it (400
+        "tool choice is none, but model called a tool"). Passing the
+        native schemas lets those models work: their tool_calls are
+        serialized back into the ``{"tool": ..., "args": ...}`` text
+        format by the provider before the OutputParser runs.
+
+        v2.3.5-fix: in compact mode only the essential tools are
+        advertised (build_native_tools_schema(..., compact=True)) so
+        small models aren't drowning in 26 schemas.
+        """
+        try:
+            from tera_pilot.providers.base import ProviderCapability
+            provider = self._get_active_provider()
+            caps = getattr(provider, "capabilities", frozenset())
+            if ProviderCapability.TOOL_CALLING not in caps:
+                return None
+            # A provider may declare TOOL_CALLING yet not accept the
+            # ``tools`` kwarg (test fakes, some local adapters). Passing
+            # it would TypeError every call — check the signature first.
+            import inspect
+            sig = inspect.signature(provider.generate)
+            if "tools" not in sig.parameters:
+                return None
+            from .prompts import build_native_tools_schema
+            return build_native_tools_schema(self.section, compact=self._use_compact_prompt())
+        except Exception:
+            # Never break the agent loop over schema plumbing.
+            return None
+
     def _generate_with_explicit_system(self, system_prompt: str,
-                                        user_prompt: str) -> Tuple[str, int, int]:
+                                        user_prompt: str,
+                                        tools: Optional[List[dict]] = None) -> Tuple[str, int, int]:
         """v1.0.6 — call the provider with an EXPLICIT system message.
 
         Used by the agent loop so the tool-use instructions land in the
         system role (where models pay attention to them) instead of
         being concatenated into the user prompt (where they get treated
         as content to respond to).
+
+        ``tools`` — optional native tool schemas (see ``_native_tools``);
+        lets native-tool-calling models work alongside text-JSON models.
 
         Returns (text, tokens_in, tokens_out).
         """
@@ -599,8 +684,40 @@ class AgentRuntime:
             ProviderMessage(role="system", content=system_prompt),
             ProviderMessage(role="user", content=user_prompt),
         ]
-        resp = self._generate_with_retry(provider, messages)
+        resp = self._generate_with_retry(provider, messages, tools=tools)
         return resp.text, int(getattr(resp, 'tokens_in', 0) or 0), int(getattr(resp, 'tokens_out', 0) or 0)
+
+    def _generate_native_history(self, messages, tools: Optional[List[dict]] = None):
+        """Generate over a NATIVE message history and return the response.
+
+        v2.3.5-fix (small-model support): the legacy loop embeds every
+        observation into one growing user prompt. Models trained on
+        native tool calling (e.g. LFM 2.6B) follow their plan correctly
+        only when the conversation is real OpenAI-style messages
+        (assistant ``tool_calls`` + ``role="tool"`` results); with
+        observations buried in prose they degenerate into a read_file
+        loop. This helper calls the provider with the message list and
+        returns the full ProviderResponse so the caller can read
+        ``resp.tool_calls``.
+
+        The non-streaming ``generate()`` is used so ``resp.tool_calls``
+        is populated (the streaming adapter only forwards content
+        deltas). If a token-delta callback is wired (TUI), the
+        accumulated text is replayed through it afterwards so the UI
+        still streams.
+        """
+        provider = self._get_active_provider()
+        if not provider.is_loaded:
+            provider.load()
+        resp = self._generate_with_retry(provider, messages, tools=tools,
+                                         force_non_streaming=True)
+        if self._on_token_delta is not None and resp is not None and resp.text:
+            try:
+                for chunk in resp.text:
+                    self._on_token_delta(chunk)
+            except Exception:
+                pass  # UI errors must never crash the agent loop.
+        return resp
 
     # ── v1.0.5-correctness: provider call with retry + token tracking ──
 
@@ -613,7 +730,7 @@ class AgentRuntime:
 
     _RETRY_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
     _RETRY_MAX_ATTEMPTS = 5
-    # v2.4.x: quota/429 errors are SOFT failures — the upstream explicitly
+    # v2.3.4: quota/429 errors are SOFT failures — the upstream explicitly
     # asks us to retry shortly (Retry-After). Give them a longer budget than
     # plain transient errors: a saturated free-tier shared pool (e.g.
     # OpenRouter's z-ai/glm-5.2:free → Decart) can stay 429 for 60-90s, and
@@ -657,7 +774,7 @@ class AgentRuntime:
           - Gemini:   "Please retry in 41.343146745s."
           - JSON:     "retryDelay": "41s"  /  retryDelay: 41s
 
-        v2.4.1-fix (real-run): we used to ignore this hint entirely and
+        v2.3.4-fix (real-run): we used to ignore this hint entirely and
         retry with a 1s→16s backoff — far below the provider's own
         estimate, so a free-tier quota hit (5 req/min on Gemini) was
         retried too early, failed again, and the whole agent run died
@@ -692,7 +809,7 @@ class AgentRuntime:
                                attempts: int, elapsed: float) -> None:
         """Raise an actionable rate-limit error after retries run out.
 
-        v2.4.x: the old code surfaced the raw upstream JSON blob
+        v2.3.4: the old code surfaced the raw upstream JSON blob
         (``OpenRouter HTTP 429: {...}``) — it told the user nothing about
         what to do. Extract the upstream provider name and produce a short
         message with concrete next steps (wait / switch model / switch
@@ -733,7 +850,8 @@ class AgentRuntime:
             time.sleep(min(0.5, self._provider_cooldown_until - now))
             now = time.time()
 
-    def _generate_with_retry(self, provider, messages):
+    def _generate_with_retry(self, provider, messages, tools: Optional[List[dict]] = None,
+                             force_non_streaming: bool = False):
         """Call provider.generate with exponential-backoff retry.
 
         Retries on transient errors (429, 5xx, timeouts, connection
@@ -756,10 +874,16 @@ class AgentRuntime:
         each token chunk is relayed to the UI in real time. The full
         text is still accumulated and returned as a ProviderResponse so
         the agent loop can parse tool calls exactly as before.
+
+        v2.3.5-fix: ``force_non_streaming=True`` skips the streaming
+        branch even when a token-delta callback is wired — the native
+        history loop needs ``resp.tool_calls``, which the streaming
+        adapter (content deltas only) cannot provide.
         """
-        # v2.0.0-tui: if a token-delta callback is wired, use streaming.
-        if self._on_token_delta is not None:
-            return self._generate_streaming_with_retry(provider, messages)
+        # v2.0.0-tui: if a token-delta callback is wired, use streaming
+        # (unless the native-history loop asked for non-streaming).
+        if self._on_token_delta is not None and not force_non_streaming:
+            return self._generate_streaming_with_retry(provider, messages, tools=tools)
 
         import random as _random
         last_exc: Optional[Exception] = None
@@ -782,13 +906,13 @@ class AgentRuntime:
         except Exception as _be:
             logger.debug("[agent] budget check skipped: %s", _be)
 
-        # v2.4.1-fix: respect the provider's quota cooldown before every
+        # v2.3.4-fix: respect the provider's quota cooldown before every
         # call — a previous 429 told us to wait N seconds; firing a fresh
         # burst right after recovery re-trips the quota (Gemini free tier
         # is 5 req/min).
         self._wait_out_provider_cooldown()
 
-        # v2.4.x: quota errors get a longer attempt budget (see
+        # v2.3.4: quota errors get a longer attempt budget (see
         # _RETRY_QUOTA_MAX_ATTEMPTS) so saturated free-tier pools have
         # time to recover; plain transient errors keep the old 5.
         total_attempts = self._RETRY_MAX_ATTEMPTS
@@ -798,10 +922,17 @@ class AgentRuntime:
                 # consensus_engine does the same — provider.generate()
                 # accepts an optional ``model`` kwarg that overrides the
                 # provider's configured model for this call only.
+                # v2.3.4-fix: thread native ``tools`` through so
+                # native-tool-calling models are accepted by the API.
+                # Only pass the kwarg when non-empty — some providers /
+                # test fakes reject an explicit ``tools=None``.
+                gen_kwargs = {}
+                if tools:
+                    gen_kwargs["tools"] = tools
                 if self._model_override:
-                    resp = provider.generate(messages, model=self._model_override)
+                    resp = provider.generate(messages, model=self._model_override, **gen_kwargs)
                 else:
-                    resp = provider.generate(messages)
+                    resp = provider.generate(messages, **gen_kwargs)
                 elapsed = time.time() - call_start
                 logger.info("[agent] LLM call completed in %.1fs — provider=%s model=%s tokens_in=%d tokens_out=%d",
                             elapsed, provider.provider_id, model_name,
@@ -847,7 +978,7 @@ class AgentRuntime:
                     logger.warning("[agent] LLM call FAILED (%.1fs, non-retryable): %s",
                                    elapsed, exc)
                     break
-                # v2.4.1-fix: quota/429 errors honour the provider's own
+                # v2.3.4-fix: quota/429 errors honour the provider's own
                 # retryDelay (Gemini free tier: "Please retry in 41s")
                 # instead of the old 1s→16s backoff that was far too
                 # short and killed the run after 3 attempts. Also set a
@@ -877,7 +1008,7 @@ class AgentRuntime:
                     slept += step
         # All retries exhausted (or non-retryable) — re-raise the last error.
         if last_exc is not None and self._is_quota_error(last_exc):
-            # v2.4.x: surface an actionable message instead of raw JSON.
+            # v2.3.4: surface an actionable message instead of raw JSON.
             self._quota_exhausted_error(
                 provider, last_exc, total_attempts, time.time() - call_start,
             )
@@ -891,7 +1022,8 @@ class AgentRuntime:
             return True
         return any(s in msg for s in ("quota", "rate limit", "rate-limit"))
 
-    def _generate_streaming_with_retry(self, provider, messages):
+    def _generate_streaming_with_retry(self, provider, messages,
+                                        tools: Optional[List[dict]] = None):
         """Stream tokens from the provider, emitting each chunk via
         ``self._on_token_delta`` and ``AgentEvent.TOKEN_DELTA``, while
         accumulating the full text into a ``ProviderResponse`` for the
@@ -913,7 +1045,7 @@ class AgentRuntime:
             saved = self._on_token_delta
             self._on_token_delta = None
             try:
-                return self._generate_with_retry(provider, messages)
+                return self._generate_with_retry(provider, messages, tools=tools)
             finally:
                 self._on_token_delta = saved
 
@@ -924,10 +1056,10 @@ class AgentRuntime:
         logger.info("[agent] LLM stream starting — provider=%s model=%s",
                     provider.provider_id, model_name)
 
-        # v2.4.1-fix: same quota-cooldown pacing as _generate_with_retry.
+        # v2.3.4-fix: same quota-cooldown pacing as _generate_with_retry.
         self._wait_out_provider_cooldown()
 
-        # v2.4.x: same quota-aware attempt budget as _generate_with_retry.
+        # v2.3.4: same quota-aware attempt budget as _generate_with_retry.
         total_attempts = self._RETRY_MAX_ATTEMPTS
         for attempt in range(1, self._RETRY_QUOTA_MAX_ATTEMPTS + 1):
             try:
@@ -942,6 +1074,8 @@ class AgentRuntime:
                     if self._model_override
                     else {}
                 )
+                if tools:
+                    stream_kwargs["tools"] = tools
                 for chunk in provider.stream(messages, **stream_kwargs):
                     # Check cancellation between chunks so Ctrl+C still works.
                     if self.tools.is_cancelled():
@@ -1017,7 +1151,7 @@ class AgentRuntime:
                     logger.warning("[agent] LLM stream FAILED (%.1fs, non-retryable): %s",
                                    elapsed, exc)
                     break
-                # v2.4.1-fix: honour provider retryDelay on quota errors.
+                # v2.3.4-fix: honour provider retryDelay on quota errors.
                 delay = min(self._RETRY_MAX_DELAY,
                             self._RETRY_BASE_DELAY * (2 ** (attempt - 1)))
                 delay = delay * (0.5 + 0.5 * _random.random())
@@ -1041,7 +1175,7 @@ class AgentRuntime:
                     slept += step
 
         if last_exc is not None and self._is_quota_error(last_exc):
-            # v2.4.x: surface an actionable message instead of raw JSON.
+            # v2.3.4: surface an actionable message instead of raw JSON.
             self._quota_exhausted_error(
                 provider, last_exc, total_attempts, time.time() - call_start,
             )
@@ -1186,7 +1320,7 @@ class AgentRuntime:
 
     def _run_agent_loop(self, task: Task, **gen_kwargs) -> TaskResult:
         all_steps: List[AgentStep] = []
-        # v2.4.x: set when the loop gives up on tool calls and accepts the
+        # v2.3.4: set when the loop gives up on tool calls and accepts the
         # model's prose as the final answer (iteration 3+ with no tool call).
         # Such a run did NOT do the requested work — the UI must warn instead
         # of presenting it as a normal successful completion.
@@ -1308,7 +1442,7 @@ class AgentRuntime:
         #
         # v1.0.9: append CLAUDE.md project instructions to the system
         # prompt so they're treated as authoritative project rules.
-        system_prompt = PromptBuilder.system(section=self.section)
+        system_prompt = self._system_prompt(self.section)
         # v1.0.9: inject CLAUDE.md project instructions
         proj_instructions = self._project_context.instructions()
         if proj_instructions:
@@ -1378,6 +1512,19 @@ class AgentRuntime:
                 "spawn_multi_agents are available. See the "
                 "HEAVY_CODE_SYSTEM_SUFFIX above for when to use them."
             )
+        # v2.3.5-fix (small-model support): anchor the model to the
+        # workspace root. Small models (e.g. LFM 2.6B) hallucinate
+        # absolute paths from training data (``/home/user/discount.py``)
+        # and then loop on the failing read. Stating the real root and
+        # demanding RELATIVE paths in the system prompt fixes the most
+        # common degenerate loop without weakening any enforcement.
+        if self.tools.workspace:
+            system_prompt = system_prompt + (
+                "\n\n## Workspace\n"
+                f"Root: {self.tools.workspace}\n"
+                "All file paths in tool calls must be RELATIVE to this "
+                "root. Never use absolute paths (e.g. /home/user/...)."
+            )
         # G19a — Symbolic task canvas. Injected ONCE per turn (replace,
         # not append) via the existing fragment system so it tombstone-
         # compacts like every other tool output. Stable id means
@@ -1408,8 +1555,36 @@ class AgentRuntime:
         initial_user_prompt = PromptBuilder.task_prompt(
             task, plan=plan, history=self.memory.to_prompt_history()
         )
+        # v2.3.5-fix (small-model support): put the workspace root in the
+        # USER message too (not just the system prompt). Small models
+        # pattern-match the task prompt against training data and emit
+        # hallucinated absolute paths (e.g. /home/user/discount.py) —
+        # stating the real root where they are looking fixes it.
+        if self.tools.workspace:
+            initial_user_prompt = (
+                f"Workspace root: {self.tools.workspace}\n"
+                "All file paths in tool calls must be RELATIVE to this "
+                "root (e.g. \"discount.py\", never \"/home/user/discount.py\").\n\n"
+                + initial_user_prompt
+            )
 
         current_user_prompt = initial_user_prompt
+        # v2.3.5-fix (small-model support): native-history conversation.
+        # When the provider can do native tool calling we keep the
+        # conversation as real OpenAI-style messages (assistant
+        # tool_calls + role="tool" results) instead of embedding every
+        # observation in the user prompt; models trained on native tool
+        # calling (e.g. LFM 2.6B) follow their plan only in that format.
+        # ``_native_history_active`` flips to True after the first
+        # response that actually carries native tool_calls.
+        self._native_messages: Optional[List[ProviderMessage]] = None
+        self._native_history_active = False
+        if self._native_tools():
+            self._native_messages = [
+                ProviderMessage(role="system", content=system_prompt),
+                ProviderMessage(role="user", content=initial_user_prompt),
+            ]
+
         final_output = ""
         success = True
         error_msg = None
@@ -1479,11 +1654,27 @@ class AgentRuntime:
                 )
 
             try:
-                # v1.0.6: explicit system + user — model now treats the
-                # tool-use instructions as authoritative.
-                raw, tok_in, tok_out = self._generate_with_explicit_system(
-                    system_prompt, current_user_prompt
-                )
+                resp = None
+                if self._native_messages is not None:
+                    # v2.3.5-fix (small-model support): use the native
+                    # message history (assistant tool_calls + tool
+                    # results) — the format small agent models were
+                    # trained on. Used from the FIRST iteration so
+                    # ``resp.tool_calls`` is available for activation.
+                    resp = self._generate_native_history(
+                        self._native_messages,
+                        tools=self._native_tools(),
+                    )
+                    raw = resp.text
+                    tok_in = int(getattr(resp, "tokens_in", 0) or 0)
+                    tok_out = int(getattr(resp, "tokens_out", 0) or 0)
+                else:
+                    # v1.0.6: explicit system + user — model now treats
+                    # the tool-use instructions as authoritative.
+                    raw, tok_in, tok_out = self._generate_with_explicit_system(
+                        system_prompt, current_user_prompt,
+                        tools=self._native_tools(),
+                    )
                 # v1.1.1-fix: accumulate real token counts for the UI
                 self._run_tokens_in += tok_in
                 self._run_tokens_out += tok_out
@@ -1506,7 +1697,18 @@ class AgentRuntime:
                 raw_for_parse = OutputParser.strip_write_token(raw)
             else:
                 intent_path, raw_for_parse = None, raw
-            tool_call = OutputParser.parse_tool_call(raw_for_parse)
+            # v2.3.5-fix (small-model support): prefer the API's NATIVE
+            # tool_calls when the provider returned them — the message
+            # history then switches to the native format (assistant
+            # tool_calls + tool results), which small agent models need
+            # to follow their plan instead of re-reading in a loop.
+            native_calls_this = (getattr(resp, "tool_calls", None)
+                                 if resp is not None else None)
+            if native_calls_this:
+                self._native_history_active = True
+                parsed_calls = OutputParser.tool_calls_from_native(native_calls_this)
+            else:
+                parsed_calls = OutputParser.parse_tool_calls(raw_for_parse)
             is_final = OutputParser.is_final(raw)
             final_text = OutputParser.parse_final_answer(raw)
 
@@ -1514,10 +1716,10 @@ class AgentRuntime:
             self._emit(AgentEvent.THOUGHT, thought=thought, iteration=iteration)
 
             # Sanity-check: if the model emitted [WRITE_FILE] X but the
-            # tool call targets a different path, warn (don't fail — the
-            # tool call is the source of truth, the token is a hint).
-            if write_intent and tool_call is not None:
-                tc_path = tool_call.args.get("path")
+            # first tool call targets a different path, warn (don't fail
+            # — the tool call is the source of truth, the token is a hint).
+            if write_intent and parsed_calls:
+                tc_path = parsed_calls[0].args.get("path")
                 if tc_path and intent_path and tc_path != intent_path:
                     logger.warning(
                         "[agent] [WRITE_FILE] token path %r does not match "
@@ -1532,61 +1734,195 @@ class AgentRuntime:
                 self._emit(AgentEvent.DONE, output=final_output, iterations=iteration)
                 break
 
-            if tool_call is not None:
-                # v1.0.5-security: re-check cancellation BEFORE executing the
-                # tool. The LLM call can take 30–120 s; if the user clicked
-                # Stop during that window, the LLM still returned and we
-                # would have executed the parsed tool_call (writing/deleting
-                # files, running commands) AFTER the user pressed Stop
-                # (BUGS_REPORT H-RT-7). Bail out now instead.
-                if self.tools.is_cancelled():
-                    self._emit(AgentEvent.ITERATION_END,
-                               iteration=iteration, reason="user_stop_before_tool")
-                    logger.info("[agent] cancelled before tool execution: %s",
-                                tool_call.name.value)
+            # v2.3.5-fix (small-model support): the model SIGNALED a tool
+            # call (finish_reason="tool_calls") but the provider returned
+            # no actual tool_calls — LM Studio can emit a truncated
+            # tool-call turn (empty content + empty tool_calls), which
+            # openai_compat surfaces as "[tool_calls] no content returned".
+            # Without this, the runtime would accept that marker as prose
+            # and finalize the run with garbage. Treat it as a failed
+            # attempt and retry with a corrective reminder (bounded by
+            # max_iterations, so it cannot loop forever).
+            if (
+                not parsed_calls
+                and not is_final
+                and getattr(resp, "finish_reason", None) == "tool_calls"
+            ):
+                logger.warning(
+                    "[agent] iter %d: provider signaled tool_calls but "
+                    "returned none — retrying with reminder", iteration,
+                )
+                self._emit(AgentEvent.THOUGHT,
+                           thought="[provider returned an empty tool call — retrying]",
+                           iteration=iteration,
+                           note="empty_tool_calls")
+                reminder = (
+                    "Your previous response signaled a tool call but "
+                    "contained no actual tool call. Emit ONE complete "
+                    "JSON tool call now, e.g. "
+                    '{\"tool\": \"read_file\", \"args\": {\"path\": \"main.py\"}}, '
+                    'or {\"final_answer\": \"...\"}.'
+                )
+                if self._native_history_active and self._native_messages is not None:
+                    self._native_messages.append(
+                        ProviderMessage(role="assistant", content=raw))
+                    self._native_messages.append(
+                        ProviderMessage(role="user", content=reminder))
+                else:
+                    current_user_prompt = initial_user_prompt + "\n\n" + reminder
+                all_steps.append(step)
+                self._emit(AgentEvent.ITERATION_END, iteration=iteration,
+                           reason="empty_tool_calls")
+                continue
+
+            if parsed_calls:
+                # v2.3.5-fix (small-model support): execute EVERY tool
+                # call the model emitted in this response, in order.
+                # Small agent models (e.g. LFM 2.5 2.6B) emit their whole
+                # plan as several calls ("read A, read B, write C"); the
+                # runtime previously executed only the FIRST and dropped
+                # the rest, so the model saw its other calls "not happen"
+                # and repeated them forever (the degenerate read_file
+                # loop). Each call still goes through the same ToolEngine
+                # guards (workspace sandbox, command policy, diff review)
+                # — this only changes WHICH calls get executed, not how.
+                executed_steps: List[AgentStep] = []
+                for tool_call in parsed_calls:
+                    tool_name_str = (tool_call.name.value
+                                     if isinstance(tool_call.name, ToolName)
+                                     else tool_call.name)
+                    # v1.0.5-security: re-check cancellation BEFORE
+                    # executing each tool. The LLM call can take 30–120 s;
+                    # if the user clicked Stop during that window, the LLM
+                    # still returned and we would have executed the parsed
+                    # tool_call (writing/deleting files, running commands)
+                    # AFTER the user pressed Stop (BUGS_REPORT H-RT-7).
+                    # Bail out now instead.
+                    if self.tools.is_cancelled():
+                        self._emit(AgentEvent.ITERATION_END,
+                                   iteration=iteration, reason="user_stop_before_tool")
+                        logger.info("[agent] cancelled before tool execution: %s",
+                                    tool_name_str)
+                        break
+
+                    call_step = AgentStep(thought=thought, is_final=False)
+                    call_step.action = tool_call
+                    # v1.0.5: include write_intent in the event payload so
+                    # the UI can show "[WRITE_FILE] path" before the write
+                    # lands, and pre-warm the diff-review pane.
+                    event_payload: Dict[str, Any] = {
+                        "tool": tool_name_str,
+                        "args": tool_call.args,
+                    }
+                    if write_intent:
+                        event_payload["write_intent"] = intent_path
+                    self._emit(AgentEvent.TOOL_CALLED, **event_payload)
+
+                    observation = self.tools.execute(tool_call)
+
+                    step_summary = (
+                        f"Step {iteration}: [{tool_name_str}] → "
+                        + observation[:300].replace("\n", " ")
+                    )
+                    step_history.append(step_summary)
+                    if len(step_history) > 3:
+                        step_history = step_history[-3:]
+
+                    call_step.observation = (
+                        observation[:500] + " ... [truncated]"
+                        if len(observation) > 500 else observation
+                    )
+
+                    if tool_call.result and len(tool_call.result) > 500:
+                        tool_call.result = tool_call.result[:500] + " ... [truncated]"
+
+                    self._emit(AgentEvent.TOOL_RESULT, tool=tool_name_str,
+                               result=observation[:200])
+                    executed_steps.append(call_step)
+
+                if not executed_steps:
+                    # Cancelled before any tool ran — stop the run.
                     break
 
-                step.action = tool_call
-                # v1.0.5: include write_intent in the event payload so
-                # the UI can show "[WRITE_FILE] path" before the write
-                # lands, and pre-warm the diff-review pane.
-                event_payload: Dict[str, Any] = {
-                    "tool": tool_call.name.value,
-                    "args": tool_call.args,
-                }
-                if write_intent:
-                    event_payload["write_intent"] = intent_path
-                self._emit(AgentEvent.TOOL_CALLED, **event_payload)
+                all_steps.extend(executed_steps)
 
-                observation = self.tools.execute(tool_call)
-
-                step_summary = (
-                    f"Step {iteration}: [{tool_call.name.value}] → "
-                    + observation[:300].replace("\n", " ")
-                )
-                step_history.append(step_summary)
-                if len(step_history) > 3:
-                    step_history = step_history[-3:]
-
-                step.observation = observation[:500] + " ... [truncated]" if len(observation) > 500 else observation
-
-                if tool_call.result and len(tool_call.result) > 500:
-                    tool_call.result = tool_call.result[:500] + " ... [truncated]"
-
-                self._emit(AgentEvent.TOOL_RESULT, tool=tool_call.name.value, result=observation[:200])
-
-                # v1.0.6: continuation prompt is built from the INITIAL
-                # user prompt (task + plan + history) + the step
-                # observations accumulated so far. The system prompt is
-                # sent separately by _generate_with_explicit_system.
-                current_user_prompt = (
-                    initial_user_prompt
-                    + "\n"
-                    + "\n".join(
-                        PromptBuilder.continuation(s, i + 1)
-                        for i, s in enumerate(step_history)
+                if self._native_history_active and self._native_messages is not None:
+                    # v2.3.5-fix (small-model support): native-history
+                    # continuation — append the assistant's tool_calls
+                    # message plus one ``role="tool"`` message per
+                    # executed call, and let the next turn continue over
+                    # this real message list.
+                    asst_content = "" if native_calls_this else raw_for_parse
+                    self._native_messages.append(ProviderMessage(
+                        role="assistant",
+                        content=asst_content,
+                        tool_calls=native_calls_this or None,
+                    ))
+                    for cs in executed_steps:
+                        call = cs.action
+                        obs = cs.observation or ""
+                        if call is not None and call.id:
+                            self._native_messages.append(ProviderMessage(
+                                role="tool", tool_call_id=call.id, content=obs,
+                            ))
+                        else:
+                            # Text-JSON call without a native id — some
+                            # local servers reject ``role="tool"`` without
+                            # a matching tool_call_id; surface the
+                            # observation as a plain user message instead.
+                            _nm = (call.name.value
+                                   if isinstance(call.name, ToolName)
+                                   else call.name)
+                            self._native_messages.append(ProviderMessage(
+                                role="user",
+                                content=f"[tool result {_nm}]\n{obs}",
+                            ))
+                else:
+                    # v1.0.6: continuation prompt is built from the
+                    # INITIAL user prompt (task + plan + history) + the
+                    # step observations accumulated so far. The system
+                    # prompt is sent separately by
+                    # _generate_with_explicit_system.
+                    current_user_prompt = (
+                        initial_user_prompt
+                        + "\n"
+                        + "\n".join(
+                            PromptBuilder.continuation(s, i + 1)
+                            for i, s in enumerate(step_history)
+                        )
                     )
-                )
+
+                    # v2.3.5-fix (small-model support): degenerate-loop
+                    # guard. A small model that repeats the SAME failing
+                    # call (e.g. read_file on a hallucinated absolute
+                    # path) burns its whole iteration budget on the same
+                    # error. Detect the pattern (same tool + same args
+                    # twice in a row, both erroring) and inject
+                    # corrective guidance so the model inspects the
+                    # workspace and retries with a real path.
+                    if len(executed_steps) >= 2:
+                        prev, last = executed_steps[-2], executed_steps[-1]
+                        if (
+                            prev.action is not None and last.action is not None
+                            and prev.action.name == last.action.name
+                            and prev.action.args == last.action.args
+                            and "[TOOL ERROR]" in (last.observation or "")
+                        ):
+                            _nm = (last.action.name.value
+                                   if isinstance(last.action.name, ToolName)
+                                   else last.action.name)
+                            current_user_prompt += (
+                                "\n\n[SYSTEM NOTE] You called "
+                                f"{_nm} with the same arguments twice and it "
+                                "ERRORED both times. STOP repeating that call. "
+                                "First inspect the workspace (list_files or "
+                                "get_project_structure) to find the correct "
+                                "path, then call it with a RELATIVE path."
+                            )
+                            logger.info(
+                                "[agent] degenerate-loop guard fired: %s %s repeated twice with errors",
+                                _nm, last.action.args,
+                            )
             else:
                 # v1.0.6: model didn't emit a tool call OR a final_answer
                 # marker — it just wrote prose. This is the failure mode
@@ -1626,37 +1962,100 @@ class AgentRuntime:
                                    thought=raw.strip()[:500],
                                    iteration=iteration,
                                    note="no_tool_call_retry")
-                    current_user_prompt = (
-                        initial_user_prompt
-                        + "\n\n"
-                        + "REMINDER: You are the agent. You have tools. "
+                    reminder = (
+                        "REMINDER: You are the agent. You have tools. "
                         "Do NOT write code in your reply and ask the "
                         "user to run it — call the write_file or "
                         "str_replace tool DIRECTLY. Output one JSON "
                         "tool call now, or {\"final_answer\": \"...\"} "
                         "if you truly have nothing to do."
                     )
+                    if self._native_history_active and self._native_messages is not None:
+                        self._native_messages.append(
+                            ProviderMessage(role="assistant", content=raw))
+                        self._native_messages.append(
+                            ProviderMessage(role="user", content=reminder))
+                    else:
+                        current_user_prompt = (
+                            initial_user_prompt
+                            + "\n\n"
+                            + reminder
+                        )
                     all_steps.append(step)
                     self._emit(AgentEvent.ITERATION_END, iteration=iteration)
+                    continue
+                # v2.3.5-fix (overall agent quality): a model stuck in a
+                # repetition loop produces a response dominated by one
+                # verbatim fragment and no tool call / final answer.
+                # Accepting it as the final answer would surface garbage
+                # to the user. Refuse to finalize on it — nudge the model
+                # back on track and keep going (bounded by
+                # max_iterations, so the loop cannot spin forever; if it
+                # exhausts, the run reports an honest "max iterations"
+                # failure instead of succeeding with repeated text).
+                from .repetition_guard import is_repetition_dominated
+                if is_repetition_dominated(raw):
+                    logger.warning(
+                        "[agent] iter %d: response is repetition-dominated "
+                        "— refusing to finalize on repeated text", iteration,
+                    )
+                    self._emit(AgentEvent.THOUGHT,
+                               thought="[repetition detected — model is "
+                                       "looping; refusing to finalize on "
+                                       "repeated text]",
+                               iteration=iteration,
+                               note="repetition_guard")
+                    note = (
+                        "Your previous response was repetitive and "
+                        "contained no tool call or final answer. STOP "
+                        "repeating yourself. Take a concrete action: call "
+                        "a tool (read_file, list_files, str_replace, "
+                        "write_file, ...) or emit "
+                        "{\"final_answer\": \"...\"}."
+                    )
+                    if self._native_history_active and self._native_messages is not None:
+                        self._native_messages.append(
+                            ProviderMessage(role="assistant", content=raw))
+                        self._native_messages.append(
+                            ProviderMessage(role="user", content=note))
+                    else:
+                        current_user_prompt = initial_user_prompt + "\n\n" + note
+                    all_steps.append(step)
+                    self._emit(AgentEvent.ITERATION_END, iteration=iteration,
+                               reason="repetition_guard")
                     continue
                 # Iteration 3+ with no tool call: accept the prose as
                 # the final answer. The model isn't cooperating, and
                 # looping further just wastes the user's time.
-                # v2.4.x: mark the run as DEGRADED — no tool was ever
-                # executed, so whatever the prose claims was done, it
-                # wasn't. The UI shows a warning banner instead of a
-                # clean "task complete".
-                self._degraded_prose = True
-                logger.warning(
-                    "[agent] iter %d: accepting prose as final answer "
-                    "(model not emitting tool calls) — run DEGRADED, no "
-                    "tools executed", iteration,
-                )
+                # v2.3.4: mark the run as DEGRADED only when NO tool was
+                # ever executed during the WHOLE run. The previous code
+                # set the flag whenever iteration 3+ emitted prose — even
+                # after earlier iterations had already run tools — so a
+                # run that created files / executed commands was wrongly
+                # flagged as "prose-without-tools" and the UI warned
+                # "verify the result" over real, completed work.
+                # (Reproduced deterministically with a scripted provider:
+                #  write_file + read_file iterations followed by one prose
+                #  iteration previously produced degraded_prose=True.)
                 final_output = raw
                 step.is_final = True
                 all_steps.append(step)
-                self._emit(AgentEvent.DONE, output=final_output, iterations=iteration,
-                           degraded=True)
+                if not any(s.action is not None for s in all_steps):
+                    self._degraded_prose = True
+                    logger.warning(
+                        "[agent] iter %d: accepting prose as final answer "
+                        "(model not emitting tool calls) — run DEGRADED, no "
+                        "tools executed", iteration,
+                    )
+                    self._emit(AgentEvent.DONE, output=final_output, iterations=iteration,
+                               degraded=True)
+                else:
+                    logger.info(
+                        "[agent] iter %d: no tool call this iteration, but "
+                        "tools ran earlier — accepting prose as final answer",
+                        iteration,
+                    )
+                    self._emit(AgentEvent.DONE, output=final_output, iterations=iteration)
                 break
 
             all_steps.append(step)
@@ -1760,7 +2159,7 @@ class AgentRuntime:
                 "task_type": task.type.value,
                 "total_tokens_in": self._run_tokens_in,
                 "total_tokens_out": self._run_tokens_out,
-                # v2.4.x: True when the run ended by accepting prose as the
+                # v2.3.4: True when the run ended by accepting prose as the
                 # final answer without executing any tool — the UI must not
                 # present this as a completed task.
                 "degraded_prose": self._degraded_prose,
@@ -1802,7 +2201,7 @@ class AgentRuntime:
             if not provider.is_loaded:
                 provider.load()
             messages = [
-                ProviderMessage(role="system", content=PromptBuilder.system()),
+                ProviderMessage(role="system", content=self._system_prompt()),
                 ProviderMessage(role="user", content=PromptBuilder.task_prompt(task)),
             ]
             for chunk in provider.stream(messages, **gen_kwargs):
@@ -1833,7 +2232,24 @@ class AgentRuntime:
         logger.debug("[agent] pending plan cleared")
 
     def set_workspace(self, path: str):
+        # v2.3.5-fix (context isolation): switching to a DIFFERENT
+        # workspace must not leak the previous task's conversation into
+        # the new one. The runtime is a process-wide singleton reused
+        # across HTTP requests (api_server.get_agent_runtime), and
+        # ContextMemory persists to agent_memory.json — so without this,
+        # a task run in workspace A would see the previous task's tool
+        # observations in ``initial_user_prompt`` (memory.to_prompt_history())
+        # and chase files from the old repo (observed: the fix-config-
+        # loader task tried to read ``discount.py`` from an earlier task;
+        # small models can't recover from that and degrade into a
+        # read_file loop). Same-workspace calls keep the history (that's
+        # a continuing chat); a changed workspace starts clean.
+        prev_ws = str(self.tools.workspace) if self.tools.workspace else None
         self.tools.set_workspace(path)
+        if prev_ws and os.path.realpath(prev_ws) != os.path.realpath(path):
+            self.memory.clear()
+            self.task_history.clear()
+            logger.info("[agent] workspace changed — cleared conversation memory")
         # v1.0.9: update project context so TERA_PILOT.md is re-read for
         # the new project root.
         self._project_context.set_root(path)

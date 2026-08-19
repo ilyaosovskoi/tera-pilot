@@ -120,6 +120,11 @@
 
   // ── Tool metadata ──────────────────────────────────────────────────
   var TOOL_META = {
+    // v2.3.4: Heavy Code / Office open their full panes (see app.js
+    // __teraPilotOpenHeavyCode / __teraPilotOpenOffice) — the metadata
+    // only feeds the Settings Tools grid cards.
+    heavy_code:     {title: 'Heavy Code', subtitle: 'Multi-agent coding — subagents + parallel execution'},
+    office:         {title: 'Office Worker', subtitle: 'Create and edit .docx / .xlsx / .pptx files'},
     capabilities:   {title: 'Capability Catalog', subtitle: 'Pre-built prompt templates — run with one click'},
     hooks:          {title: 'Hooks', subtitle: 'Intercept, modify, or block tool calls'},
     checkpoints:    {title: 'Checkpoints', subtitle: 'Snapshot state and rewind agent mistakes'},
@@ -887,11 +892,13 @@
       '<div id="soOutput" class="tools-output" style="display:none"></div></div>';
     root.innerHTML = html;
     root.querySelector('#soCfgBtn').addEventListener('click', function(){
-      var p = prompt('Default reviewer provider:', cfg.default_provider || '');
+      // v2.3.4: the backend bridge expects provider_id/model (not the old
+      // default_provider/default_model keys, which were silently ignored).
+      var p = prompt('Default reviewer provider:', cfg.provider_id || '');
       if (p === null) return;
-      var m = prompt('Default reviewer model:', cfg.default_model || '');
+      var m = prompt('Default reviewer model:', cfg.model || '');
       if (m === null) return;
-      _post('/api/second_opinion/config', {default_provider: p, default_model: m}).then(function(){ _toast('Saved', 'success'); render(); }).catch(function(e){ _toast(e.message, 'error'); });
+      _post('/api/second_opinion/config', {provider_id: p, model: m}).then(function(){ _toast('Saved', 'success'); render(); }).catch(function(e){ _toast(e.message, 'error'); });
     });
     root.querySelector('#soRunBtn').addEventListener('click', async function(){
       var prompt = document.getElementById('soPrompt').value;
@@ -1269,9 +1276,11 @@
     var bodyEl = document.getElementById('providerWizardBody');
     document.getElementById('providerWizardTitle').textContent = existing ? 'Edit provider' : (template ? 'Add: ' + template.name : 'Add custom provider');
     var presets = {
-      nvidia_nim: {provider_type: 'nvidia_nim', base_url: 'https://integrate.api.nvidia.com/v1', model: 'meta/llama-3.1-8b-instruct', env_var: 'NVIDIA_API_KEY', context_window: 131072},
-      openai_compat: {provider_type: 'openai_compat', base_url: 'https://api.example.com/v1', model: 'gpt-3.5-turbo', env_var: '', context_window: 16384},
-      ollama_local: {provider_type: 'openai_compat', base_url: 'http://127.0.0.1:11434', model: 'llama3.1', env_var: '', context_window: 32768},
+      // v2.3.4: model examples refreshed to current (2026) models — the
+      // previous defaults (llama-3.1, gpt-3.5-turbo) were years old.
+      nvidia_nim: {provider_type: 'nvidia_nim', base_url: 'https://integrate.api.nvidia.com/v1', model: 'meta/llama-4-scout-17b-16e-instruct', env_var: 'NVIDIA_API_KEY', context_window: 131072},
+      openai_compat: {provider_type: 'openai_compat', base_url: 'https://api.example.com/v1', model: 'gpt-5.5', env_var: '', context_window: 16384},
+      ollama_local: {provider_type: 'openai_compat', base_url: 'http://127.0.0.1:11434', model: 'llama4', env_var: '', context_window: 32768},
       lmstudio_local: {provider_type: 'openai_compat', base_url: 'http://127.0.0.1:1234/v1', model: 'local-model', env_var: '', context_window: 32768},
     };
     var preset = template ? (presets[template.id] || {}) : {};

@@ -26,6 +26,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args[0] == "audit":
             from tera_pilot.audit_cli import run_audit_cli
             return run_audit_cli(args[1:])
+        if args[0] == "license":
+            from tera_pilot.license_cli import run_license_cli
+            return run_license_cli(args[1:])
     from tera_pilot.web_server import main as web_main
     return web_main(argv)
 

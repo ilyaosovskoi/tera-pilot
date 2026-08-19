@@ -4,11 +4,15 @@ For enterprise deployments where prompt templates must be shipped encrypted on
 disk and decrypted on demand. The encryption key is provided via env var
 `TERA_PILOT_PROMPT_KEY` (a 32-byte base64-encoded key) or via a keyfile.
 
-Algorithms:
-- ChaCha20-Poly1305 (preferred) — needs `cryptography` package.
-- If `cryptography` is not installed, fall back to a simple XOR-based scheme
-  (NOT cryptographically secure — for development only). A loud warning is
-  logged in that case.
+Algorithm:
+- ChaCha20-Poly1305 (AEAD) — needs the `cryptography` package (a hard
+  dependency in requirements.txt/pyproject.toml).
+
+v2.3.4-security: the old XOR-based fallback for missing `cryptography` was
+removed. It was NOT authenticated (ciphertext tampering was undetectable),
+so shipping secrets through it would have been worse than failing. The
+store now raises `EncryptedPromptError` instead of silently degrading to an
+insecure scheme.
 
 The decrypted plaintext is held in memory only for the duration of the call
 and is explicitly zeroed after use (best-effort — Python strings are immutable,
@@ -87,7 +91,12 @@ class EncryptedPromptStore:
         return secrets.token_bytes(32)
 
     def encrypt(self, plaintext: str) -> bytes:
-        """Encrypt a plaintext string. Returns bytes with magic prefix."""
+        """Encrypt a plaintext string. Returns bytes with magic prefix.
+
+        v2.3.4-security: fail closed — without the `cryptography` package
+        we raise instead of falling back to the (unauthenticated) XOR
+        scheme.
+        """
         nonce = secrets.token_bytes(12)
         try:
             from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
@@ -95,11 +104,10 @@ class EncryptedPromptStore:
             ct = aead.encrypt(nonce, plaintext.encode("utf-8"), None)
             return _MAGIC + nonce + ct
         except ImportError:
-            logger.warning(
-                "cryptography package not available; using XOR fallback (NOT secure). "
-                "Install with: pip install cryptography"
-            )
-            return _MAGIC + nonce + _xor(plaintext.encode("utf-8"), self._key, nonce)
+            raise EncryptedPromptError(
+                "cryptography package not available — refusing to encrypt with the "
+                "insecure XOR fallback. Install: pip install cryptography"
+            ) from None
 
     def decrypt(self, blob: bytes) -> str:
         """Decrypt a previously encrypted blob."""
@@ -115,7 +123,10 @@ class EncryptedPromptStore:
             aead = ChaCha20Poly1305(self._key)
             pt = aead.decrypt(nonce, ct, None)
         except ImportError:
-            pt = _xor(ct, self._key, nonce)
+            raise EncryptedPromptError(
+                "cryptography package not available — refusing to decrypt with the "
+                "insecure XOR fallback. Install: pip install cryptography"
+            ) from None
         except Exception as e:
             raise EncryptedPromptError(f"decrypt failed: {e}") from e
         return pt.decode("utf-8")
@@ -160,11 +171,3 @@ class _DecryptedPromptContext:
             del self._plaintext
             self._plaintext = None
 
-
-def _xor(data: bytes, key: bytes, nonce: bytes) -> bytes:
-    """XOR-based pseudo-encryption. NOT secure — dev fallback only."""
-    if not key:
-        return data
-    # Mix the nonce into the key so each encryption is unique.
-    mixed = bytes((key[i] ^ nonce[i % len(nonce)]) for i in range(len(key)))
-    return bytes(b ^ mixed[i % len(mixed)] for i, b in enumerate(data))

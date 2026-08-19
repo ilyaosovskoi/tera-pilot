@@ -15,7 +15,7 @@ class InfoBox(Static):
         self._model: str = "unknown"
         self._provider: str = "unknown"
         self._directory: str = "~"
-        self._version: str = "2.3.3"
+        self._version: str = "2.3.4"
 
     def update_info(
         self,
@@ -41,7 +41,7 @@ class InfoBox(Static):
             f"[bold]> tera_pilot[/bold] (v{self._version})",
             f"| model:     [white]{self._model:<20}[/white]  /model to change",
             f"| provider:  [white]{self._provider:<20}[/white]  /provider to change",
-            f"| directory: [white]{self._directory:<20}[/white]  /open to browse",
+            f"| directory: [white]{self._directory:<20}[/white]  /cd to change",
         ]
         return Panel(
             Text.from_markup("\n".join(lines)),

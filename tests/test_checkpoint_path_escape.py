@@ -75,6 +75,56 @@ def test_rewind_refuses_escaping_manifest_path(isolated):
     assert any("outside workspace" in e for e in result["errors"])
 
 
+def test_rewind_restores_file_modified_before_target_but_not_at_target(isolated):
+    """Regression: rewind must restore the LATEST backup at-or-before the
+    target checkpoint, not just the target's own manifest.
+
+    Scenario: a.txt is written at cp1 ("v1"), untouched at cp2, then
+    modified at cp3 ("v2"). Rewinding one step (to cp2) must restore
+    a.txt to "v1" — the old code restored nothing from cp2 (empty
+    manifest) and then DELETED a.txt because it appeared in a later
+    checkpoint but not in the target's manifest.
+    """
+    workspace, home = isolated
+    mgr = cp.CheckpointManager(session_id="s1", workspace=str(workspace))
+
+    a = workspace / "a.txt"
+    a.write_text("v1")
+    mgr.create_checkpoint(message_count=5, touched_files=["a.txt"])
+    mgr.create_checkpoint(message_count=8, touched_files=[])  # turn 2: untouched
+    a.write_text("v2")
+    mgr.create_checkpoint(message_count=12, touched_files=["a.txt"])
+
+    result = mgr.rewind(1)  # back to after cp2
+
+    assert result["ok"]
+    assert a.read_text() == "v1", f"expected a.txt restored to v1, got {a.read_text()!r}"
+    assert a.exists()
+    assert "a.txt" in result["files_restored"]
+
+
+def test_rewind_restores_all_files_to_latest_pre_target_backup(isolated):
+    """Rewinding further back restores every touched file, including ones
+    whose only backup predates the target (they must be restored, not
+    deleted as "new").
+    """
+    workspace, home = isolated
+    mgr = cp.CheckpointManager(session_id="s1", workspace=str(workspace))
+
+    a = workspace / "a.txt"
+    a.write_text("v1")
+    mgr.create_checkpoint(message_count=5, touched_files=["a.txt"])  # cp1
+    a.write_text("v2")
+    mgr.create_checkpoint(message_count=8, touched_files=["a.txt"])  # cp2
+    a.write_text("v3")
+    mgr.create_checkpoint(message_count=12, touched_files=["a.txt"])  # cp3
+
+    result = mgr.rewind(2)  # back to after cp1 → a.txt = "v1"
+
+    assert result["ok"]
+    assert a.read_text() == "v1"
+
+
 def test_rewind_refuses_backup_outside_checkpoints_dir(isolated):
     workspace, _ = isolated
     mgr = cp.CheckpointManager(session_id="s1", workspace=str(workspace))

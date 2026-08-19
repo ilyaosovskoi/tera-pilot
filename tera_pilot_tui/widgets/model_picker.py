@@ -123,7 +123,11 @@ class ModelPickerModal(ModalScreen[str]):
     def action_dismiss_picker(self) -> None:
         self.dismiss()
 
-    def on_option_list_selected(self, event: OptionList.OptionSelected) -> None:
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """v2.3.4-fix: renamed from ``on_option_list_selected`` — Textual
+        8.x dispatches to ``on_option_list_option_selected``; the old
+        name never fired, so clicking an option did nothing.
+        """
         self._highlighted = event.option_index
         self.action_select()
 

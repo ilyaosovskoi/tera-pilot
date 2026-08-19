@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""Микро-бенчмарки горячих путей Tera Pilot (локально, без сети, без API).
+"""Tera Pilot hot-path microbenchmarks (local, no network, no API).
 
-Покрывает пути, которые исполняются на КАЖДОМ вызове провайдера / MCP /
-на каждой файловой операции агента:
+Covers paths that run on EVERY provider/MCP call and on every agent
+file operation:
 
-  native vs python fallback (где применимо):
-    - sandbox.path_would_be_writable    — на каждую запись файла агентом
-    - circuit_breaker record+try_claim  — на каждый LLM/MCP-вызов
-    - interjection push+drain           — mid-turn сообщения (TUI)
+  native vs python fallback (where applicable):
+    - sandbox.path_would_be_writable    — per agent file write
+    - circuit_breaker record+try_claim  — per LLM/MCP call
+    - interjection push+drain           — mid-turn messages (TUI)
 
-  pure Python (нет native-аналога — замер абсолютной стоимости):
-    - command_policy.is_allowed         — на каждый execute_command
-    - _sanitize_command                 — парсинг + whitelist + dangerous flags
-    - diff apply (_apply_unified_diff)  — на каждый apply_diff
-    - activity_log record_tool_call     — на каждый tool-вызов (audit trail)
-    - sanitise_args                     — очистка args перед записью в лог
-    - compaction chunking (inter, без LLM) — оркестрация без вызова модели
+  pure Python (no native counterpart — measures the absolute cost):
+    - command_policy.is_allowed         — per execute_command
+    - _sanitize_command                 — parsing + whitelist + dangerous flags
+    - diff apply (_apply_unified_diff)  — per apply_diff
+    - activity_log record_tool_call     — per tool call (audit trail)
+    - sanitise_args                     — cleaning args before logging
+    - compaction chunking (inter, without LLM) — orchestration without a model call
 
-Запуск:
+Run:
     python3 benchmarks/bench_hot_paths.py
 """
 
@@ -28,15 +28,15 @@ import sys
 import time
 from pathlib import Path
 
-# Замеряем код, а не логирование: блокируем warning-спам из
-# _sanitize_command и др. на время прогона.
+# Measure code, not logging: silence warning spam from
+# _sanitize_command etc. for the duration of the run.
 logging.disable(logging.CRITICAL)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# Наличие native-расширения определяем один раз; при отсутствии колонка
-# native показывается как "n/a" (fallback'и — легитимный режим работы).
+# Detect the native extension once; when absent the native column
+# shows "n/a" (fallbacks are a legitimate supported mode).
 try:
     import tera_pilot_native as native  # type: ignore
     NATIVE = True
@@ -48,8 +48,8 @@ ROWS: list[dict] = []
 
 
 def _timeit(fn, n: int) -> float:
-    """Прогрев + замер; возвращает µs на операцию."""
-    fn(10)  # прогрев (JIT-кэши, ленивые импорты)
+    """Warm-up + measurement; returns µs per operation."""
+    fn(10)  # warm-up (JIT caches, lazy imports)
     start = time.perf_counter()
     fn(n)
     elapsed = time.perf_counter() - start
@@ -142,13 +142,13 @@ def bench_interjection() -> None:
     add_row("interjection push+drain", n, n_us, p_us)
 
 
-# ── pure-Python hot paths (без native-аналога) ────────────────────────
+# ── pure-Python hot paths (no native counterpart) ─────────────────────
 
 def bench_command_policy() -> None:
     from tera_pilot.command_policy import CommandPolicy, resolve
 
     n = 200_000
-    policy = resolve(project_root=None)  # base + user config (кэшруется в get_global_policy)
+    policy = resolve(project_root=None)  # base + user config (cached in get_global_policy)
 
     def is_allowed_run(count: int) -> None:
         for i in range(count):
@@ -159,11 +159,11 @@ def bench_command_policy() -> None:
     us = _timeit(is_allowed_run, n)
     add_row("command_policy is_allowed/is_dangerous_flag", n, None, us)
 
-    # Отдельно: повторный resolve() (ре-резолв после invalidate) —
-    # читает конфиг с диска, это реальная цена смены проекта.
+    # Separately: repeated resolve() (re-resolve after invalidate) —
+    # reads config from disk; this is the real cost of switching projects.
     n_resolve = 2_000
     us = _timeit(lambda c: [resolve(project_root=None) for _ in range(c)], n_resolve)
-    add_row("command_policy resolve() (с чтением конфига)", n_resolve, None, us)
+    add_row("command_policy resolve() (reads config from disk)", n_resolve, None, us)
 
 
 def bench_sanitize_command() -> None:
@@ -195,7 +195,7 @@ def bench_diff_apply() -> None:
             _apply_unified_diff(original, diff)
 
     us = _timeit(run, n)
-    add_row("diff apply (_apply_unified_diff, 2 хунка)", n, None, us)
+    add_row("diff apply (_apply_unified_diff, 2 hunks)", n, None, us)
 
 
 def bench_activity_log() -> None:
@@ -233,7 +233,7 @@ def bench_activity_log() -> None:
 
 
 def bench_compaction_chunking() -> None:
-    """Оркестрация inter-компакции БЕЗ вызова LLM (дешёвый sampler)."""
+    """Inter-compaction orchestration WITHOUT an LLM call (cheap sampler)."""
     from tera_pilot.agent._fallback_compaction import CompactionEngine, ConversationItem
 
     n = 2_000
@@ -248,15 +248,15 @@ def bench_compaction_chunking() -> None:
             engine.inter_compact(items, chunk_size=10, keep_recent=6)
 
     us = _timeit(run, n)
-    add_row("compaction inter_compact (chunking, без LLM)", n, None, us)
+    add_row("compaction inter_compact (chunking, no LLM)", n, None, us)
 
 
-# ── вывод ──────────────────────────────────────────────────────────────
+# ── output ─────────────────────────────────────────────────────────────
 
 def render_table() -> None:
-    print("Tera Pilot — горячие пути (hot-path microbenchmarks)")
+    print("Tera Pilot — hot-path microbenchmarks")
     print("=" * 92)
-    hdr = f"{'Операция':<44} {'ops':>8}  {'native, µs/op':>14} {'python, µs/op':>14} {'выигрыш':>9}"
+    hdr = f"{'Operation':<44} {'ops':>8}  {'native, µs/op':>14} {'python, µs/op':>14} {'speedup':>9}"
     print(hdr)
     print("-" * 92)
     for r in ROWS:
@@ -270,11 +270,11 @@ def render_table() -> None:
         )
     print("-" * 92)
     print(
-        "native = Rust (tera_pilot_native), python = pure-Python fallback/реализация.\n"
-        "pure-Python строки (n/a) — нет native-аналога, это абсолютная стоимость пути."
+        "native = Rust (tera_pilot_native), python = pure-Python fallback/implementation.\n"
+        "Pure-Python rows (n/a) — no native counterpart; this is the absolute path cost."
     )
     if not NATIVE:
-        print("\n⚠ tera_pilot_native не установлен — колонка native пустая (n/a).")
+        print("\n⚠ tera_pilot_native is not installed — the native column is empty (n/a).")
 
 
 def main() -> None:

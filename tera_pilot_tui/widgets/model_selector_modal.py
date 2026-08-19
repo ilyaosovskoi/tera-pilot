@@ -204,7 +204,13 @@ class ModelSelectorModal(ModalScreen):
         event.stop()
         self.action_select()
 
-    def on_option_list_selected(self, event) -> None:
-        """Handle provider selection."""
+    def on_option_list_option_selected(self, event) -> None:
+        """Handle provider selection.
+
+        v2.3.4-fix: renamed from ``on_option_list_selected`` — Textual
+        8.x dispatches ``OptionList.OptionSelected`` to
+        ``on_option_list_option_selected``; the old name never fired, so
+        clicking a provider in this modal did nothing.
+        """
         self._highlighted = event.option_index
         self.action_select()

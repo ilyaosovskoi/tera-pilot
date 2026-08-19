@@ -105,18 +105,31 @@ def test_context_reload(api):
 
 
 def test_context_pin_unpin(api):
-    st, data = _get(api, "/api/context/pin?path=src/app.py")
+    # v2.3.4-security: pin/unpin moved from GET to POST (bearer-auth)
+    st, data = _post(api, "/api/context/pin", {"path": "src/app.py"})
     assert st == 200
     assert data.get("ok") is True
-    st, data = _get(api, "/api/context/unpin?path=src/app.py")
+    st, data = _post(api, "/api/context/unpin", {"path": "src/app.py"})
     assert st == 200
     assert data.get("ok") is True
 
 
 def test_context_pin_requires_path(api):
-    st, data = _get(api, "/api/context/pin")
+    st, data = _post(api, "/api/context/pin", {})
     assert st == 200
     assert data.get("ok") is False
+
+
+def test_context_pin_requires_token(api):
+    import urllib.request as _ur
+    url = f"http://127.0.0.1:{api['port']}/api/context/pin"
+    req = _ur.Request(url, data=b"{}", method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with _ur.urlopen(req, timeout=10) as r:
+            st = r.status
+    except Exception as e:
+        st = getattr(e, "code", 500)
+    assert st == 401
 
 
 # ── Memory file editor ──────────────────────────────────────────────
@@ -211,6 +224,142 @@ def test_open_project_switches_config_project_root(api):
     assert data.get("ok") is False
 
 
+def test_open_project_large_dir_is_fast(api):
+    """Regression (v2.3.4): picking a big folder must NOT block the
+    /api/open_project request for ~20s. AgentRuntime.__init__ used to walk
+    the ENTIRE picked directory synchronously via
+    ContextManager.set_root → _index_project — on ~/Documents (or any
+    large folder) that was 346k files ≈ 20s, so the GUI's change-directory
+    button appeared frozen and the picker "opened but no directory and an
+    error". The index is now built lazily (first agent use) and bounded."""
+    import time
+    import tera_pilot.context_manager as cm_mod
+
+    big = tempfile.mkdtemp(prefix="tera_pilot_open_proj_big_")
+    # 15k files — enough that the old synchronous walk was visibly slow.
+    for i in range(300):
+        d = os.path.join(big, f"dir{i}")
+        os.makedirs(d, exist_ok=True)
+        for j in range(50):
+            with open(os.path.join(d, f"f{j}.txt"), "w") as f:
+                f.write("x" * 100)
+
+    # Force the pre-fix behaviour to be measurable: a synchronous full
+    # walk of 15k files takes long enough that the old code would hang;
+    # with lazy indexing the open_project call itself does zero walking.
+    old_ensure = cm_mod.ContextManager._ensure_indexed
+
+    def counting_ensure(self):
+        # Mirror the real implementation (index once per set_root) but
+        # count how many times the walk actually runs.
+        if not self._index_dirty:
+            return
+        self._index_dirty = False
+        self._index_project()
+
+    cm_mod.ContextManager._ensure_indexed = counting_ensure
+    try:
+        t0 = time.time()
+        st, data = _post(api, "/api/open_project", {"path": big})
+        elapsed = time.time() - t0
+        assert st == 200
+        assert data.get("ok") is True
+        # The request itself must not index anything (that's deferred).
+        assert elapsed < 5.0, f"open_project took {elapsed:.1f}s — index should be lazy"
+    finally:
+        cm_mod.ContextManager._ensure_indexed = old_ensure
+
+    # The index still gets built (bounded) on first agent use.
+    from tera_pilot.context_manager import get_context_manager
+    cm = get_context_manager()
+    cm.set_root(big)
+    sel = cm.select_context()
+    assert sel["total_indexed"] > 0
+
+
+def test_native_file_picker_cancel_and_error(api, monkeypatch):
+    """Regression (v2.3.4): the GUI's change-directory button calls
+    /api/native_file_picker. The OLD implementation created a tkinter
+    dialog from the HTTP daemon thread, which on macOS aborts the whole
+    process (AppKit: "NSWindow should only be instantiated on the main
+    thread!") — the picker either crashed the backend or, on cancel,
+    returned ``{ok: false, error: ...}`` which the GUI turned into an
+    error toast. Now:
+      * cancellation returns ``{ok: false, cancelled: true}`` (no error),
+      * a REAL picker failure (osascript automation permission denied,
+        missing dialog binary) returns ``{ok: false, error: ...}`` so the
+        GUI can fall back to the manual path-entry modal instead of
+        silently doing nothing,
+      * success returns the picked path.
+    """
+    import tera_pilot.api_extended as ae
+
+    # Cancel — must be distinguishable from a real error.
+    monkeypatch.setattr(ae, "_pick_directory", lambda initial_dir="": None)
+    st, data = _post(api, "/api/native_file_picker")
+    assert st == 200
+    assert data == {"ok": False, "cancelled": True}
+
+    # Success.
+    monkeypatch.setattr(ae, "_pick_directory", lambda initial_dir="": "/tmp/project_x")
+    st, data = _post(api, "/api/native_file_picker")
+    assert st == 200
+    assert data.get("ok") is True
+    assert data.get("path") == "/tmp/project_x"
+
+    # No usable picker -> structured error (GUI falls back to modal).
+    def _boom(initial_dir=""):
+        raise RuntimeError("no usable native directory picker")
+    monkeypatch.setattr(ae, "_pick_directory", _boom)
+    st, data = _post(api, "/api/native_file_picker")
+    assert st == 200
+    assert data.get("ok") is False
+    assert "picker" in data.get("error", "")
+
+
+def test_pick_directory_distinguishes_cancel_from_failure(monkeypatch):
+    """Regression (v2.3.4): _pick_directory must NOT swallow a real
+    osascript failure as if the user cancelled. Previously BOTH cases
+    returned None, so when macOS denied automation permission (-1743) or
+    osascript was missing the GUI silently did nothing — no dialog, no
+    error toast, no fallback modal. Cancel (-128 / "User canceled") must
+    stay None, any other failure must raise."""
+    import shutil
+    import subprocess
+    import sys
+    import tera_pilot.api_extended as ae
+
+    # Force the macOS branch regardless of the test host. The function
+    # imports shutil/subprocess/sys locally, so patch the real modules.
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/osascript")
+    monkeypatch.setattr(ae.os.path, "isfile", lambda p: True)
+
+    def _fake_run(proc):
+        def run(args, **kwargs):
+            return proc
+        return run
+
+    # Successful dialog → returns the path (newline stripped).
+    proc_ok = type("P", (), {"returncode": 0, "stdout": "/Users/x/proj\n", "stderr": ""})()
+    monkeypatch.setattr(subprocess, "run", _fake_run(proc_ok))
+    assert ae._pick_directory() == "/Users/x/proj"
+
+    # User cancel → None (exit -128 reported inside stderr).
+    proc_cancel = type("P", (), {"returncode": 1, "stdout": "", "stderr": "execution error: User canceled. (-128)"})()
+    monkeypatch.setattr(subprocess, "run", _fake_run(proc_cancel))
+    assert ae._pick_directory() is None
+
+    # Real failure (automation permission denied) → must RAISE, not cancel.
+    proc_denied = type("P", (), {"returncode": 1, "stdout": "", "stderr": "execution error: Not authorized to send Apple events to System Events. (-1743)"})()
+    monkeypatch.setattr(subprocess, "run", _fake_run(proc_denied))
+    try:
+        ae._pick_directory()
+        assert False, "expected RuntimeError for a real osascript failure"
+    except RuntimeError as e:
+        assert "-1743" in str(e) or "choose-folder failed" in str(e)
+
+
 def test_providers_health_no_import_crash(api):
     """Regression (v2.3.2): /api/providers/health crashed with
     ``ImportError: No module named 'tera_pilot.providers.types'`` on EVERY
@@ -226,7 +375,7 @@ def test_providers_health_no_import_crash(api):
 
 
 def test_providers_health_does_not_cripple_provider_config(api):
-    """Regression (v2.4.x): the health probe runs with max_tokens=100. If
+    """Regression (v2.3.4): the health probe runs with max_tokens=100. If
     that temp config leaks into the registry, the NEXT ``registry.get(pid)``
     builds a provider capped at 100 output tokens — agent tool calls (which
     carry file content) get truncated mid-JSON, the parser sees prose, and
@@ -267,7 +416,7 @@ def test_providers_health_does_not_cripple_provider_config(api):
 
 
 def test_providers_models_returns_live_list(api, monkeypatch):
-    """v2.4.x: /api/providers/models fetches the provider's /models list."""
+    """v2.3.4: /api/providers/models fetches the provider's /models list."""
     import urllib.request as _u
 
     class _FakeResp:

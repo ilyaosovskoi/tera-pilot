@@ -76,7 +76,7 @@ class ToolBlock(Static):
         self._border_color = _TOOL_BORDER_COLORS.get(
             tool_name, _TOOL_BORDER_COLORS["default"]
         )
-        self._render()
+        self._redraw()
 
     def append_output(self, line: str) -> None:
         """Append a line of output (for streaming)."""
@@ -84,20 +84,30 @@ class ToolBlock(Static):
             self._content += "\n" + line
         else:
             self._content = line
-        self._render()
+        self._redraw()
 
     def set_content(self, content: str) -> None:
         """Set the full content at once."""
         self._content = content
-        self._render()
+        self._redraw()
 
     def toggle_collapse(self) -> None:
         """Toggle collapsed state."""
         self._collapsed = not self._collapsed
-        self._render()
+        self._redraw()
 
-    def _render(self) -> None:
-        """Render the tool block with Unicode borders.
+    def _redraw(self) -> None:
+        """Rebuild the widget's content via Static.update().
+
+        v2.3.4-fix: this method was previously named ``_render``, which
+        SHADOWED Textual's internal ``Widget._render()`` (the layout
+        engine's cache/visual hook, called from get_content_width /
+        get_content_height / _render_content). Overriding it broke the
+        render pipeline — the engine got ``None`` where it expected a
+        ``Visual`` and crashed with ``AttributeError: 'NoneType' object
+        has no attribute 'get_height'`` on the first layout pass. The
+        method is a manual refresh helper, so it must NOT use the
+        reserved ``_render`` name.
 
         v2.2.4-fix: body content is now rendered as a Text object
         instead of Rich markup, so literal brackets in tool output
@@ -134,7 +144,7 @@ class ToolBlock(Static):
             self.update(header_text)
 
     def on_mount(self) -> None:
-        self._render()
+        self._redraw()
 
     def on_click(self) -> None:
         """Click to toggle collapse/expand."""

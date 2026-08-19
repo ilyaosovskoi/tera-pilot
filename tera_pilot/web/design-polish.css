@@ -53,7 +53,7 @@
   border-radius:var(--r-composer);
 }
 [data-theme="noir"] .composer:focus-within{
-  box-shadow:0 0 0 1px rgba(255,255,255,0.28);
+  border-color:rgba(255,255,255,0.45);
 }
 [data-theme="noir"] .composer-meta{
   font-family:'JetBrains Mono',monospace;
@@ -96,7 +96,9 @@
 }
 [data-theme="noir"] .provider-trigger,
 [data-theme="noir"] .model-selector-chip{border-radius:var(--r-sm)}
-[data-theme="noir"] .msg{--msg-font-size:15px}
+/* v2.3.4: removed the fixed --msg-font-size on .msg here — it shadowed
+   the Settings → Appearance → Text size (data-textsize) variable, so
+   Small/Large did nothing in the default noir theme. */
 [data-theme="noir"] .msg-role{
   font-family:'JetBrains Mono',monospace;
   font-size:9.5px;
@@ -164,7 +166,7 @@
    token optimizations, router indicator…). Advanced mode shows all. */
 [data-ui-mode="basic"] .advanced-only{display:none !important}
 
-/* v2.4.x: the top-bar Basic/Advanced pill toggle was REMOVED — the mode
+/* v2.3.4: the top-bar Basic/Advanced pill toggle was REMOVED — the mode
    is now switched in Settings → Appearance (.uimode-seg) and the Settings
    button opens the right modal for the current mode. */
 
@@ -189,14 +191,14 @@
 }
 [data-theme="noir"] .brand-mark:hover{opacity:0.85}
 [data-theme="noir"] .composer:focus-within{
-  box-shadow:0 0 0 1px rgba(255,255,255,0.28);
-  transition:box-shadow var(--m-med) var(--ease);
+  border-color:rgba(255,255,255,0.45);
+  transition:border-color var(--m-med) var(--ease);
 }
 [data-theme="noir"] .activity-panel{transition:all var(--m-slow) var(--ease)}
 [data-theme="noir"] .activity-header{transition:opacity var(--m-fast) var(--ease)}
 
 /* ────────────────────────────────────────────────────────────────────
-   v2.4 VISUAL POLISH — theme-agnostic (uses CSS vars)
+   v2.3.4 VISUAL POLISH — theme-agnostic (uses CSS vars)
    ──────────────────────────────────────────────────────────────────── */
 
 /* Degraded-run warning banner (agent produced prose but no tool calls) */
@@ -231,14 +233,21 @@
 }
 ::-webkit-scrollbar-thumb:hover{background:var(--text-muted);background-clip:padding-box;border:2px solid transparent}
 
-/* Keyboard focus rings — visible but quiet */
-button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible{
+/* Keyboard focus rings — visible but quiet. Inputs/textarea get NO
+   outline ring (the composer already glows on :focus-within); only
+   clickable controls keep a keyboard-visible ring. v2.3.4: the ring
+   around the composer textarea was reported as an unwanted "frame"
+   when typing/pressing Enter. */
+button:focus-visible, select:focus-visible{
   outline:2px solid var(--accent, #F4B942);
   outline-offset:1px;
 }
+input:focus-visible, textarea:focus-visible{
+  outline:none;
+}
 
 /* Interactive controls — consistent hover lift */
-.icon-btn, .btn-primary, .btn-secondary, .send-btn, .qs-provider-btn, .catalog-card, .template-card, .skill-card{
+.icon-btn, .btn-primary, .btn-secondary, .send-btn, .catalog-card, .template-card, .skill-card{
   transition:background var(--m-fast) var(--ease), border-color var(--m-fast) var(--ease),
     color var(--m-fast) var(--ease), box-shadow var(--m-fast) var(--ease), transform var(--m-fast) var(--ease);
 }
@@ -302,7 +311,7 @@ pre{
 }
 
 /* ────────────────────────────────────────────────────────────────────
-   NOIR THEME — extra polish (v2.4)
+   NOIR THEME — extra polish (v2.3.4)
    ──────────────────────────────────────────────────────────────────── */
 [data-theme="noir"] .brand-mark{
   box-shadow:0 0 0 1px rgba(255,255,255,0.08), 0 0 18px -4px rgba(255,255,255,0.25);
@@ -318,7 +327,73 @@ pre{
 }
 
 /* ────────────────────────────────────────────────────────────────────
-   v2.4 — catalog count badge contrast fix
+   v2.3.4 — Jump-to-latest pill (smart auto-scroll)
+   Modern chat apps only force-scroll when the user is at the bottom;
+   scrolling up while the agent streams shows a floating pill instead.
+   ──────────────────────────────────────────────────────────────────── */
+.jump-latest{
+  position:absolute;
+  bottom:calc(100% + 14px);
+  left:50%;
+  transform:translateX(-50%) translateY(8px);
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:8px 15px;
+  border-radius:999px;
+  background:var(--bg-floating);
+  border:1px solid var(--border-strong);
+  color:var(--text-secondary);
+  font-size:11.5px;
+  font-weight:600;
+  font-family:'JetBrains Mono',monospace;
+  letter-spacing:0.02em;
+  box-shadow:0 10px 30px -8px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.3);
+  opacity:0;
+  pointer-events:none;
+  cursor:pointer;
+  z-index:20;
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  transition:opacity var(--m-med) var(--ease), transform var(--m-med) var(--ease),
+    background var(--m-fast) var(--ease), color var(--m-fast) var(--ease),
+    border-color var(--m-fast) var(--ease), box-shadow var(--m-fast) var(--ease);
+}
+.jump-latest.show{
+  opacity:1;
+  pointer-events:auto;
+  transform:translateX(-50%) translateY(0);
+}
+.jump-latest:hover{
+  color:var(--text-primary);
+  border-color:var(--border-strong);
+  background:var(--bg-hover);
+  box-shadow:0 14px 36px -10px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
+}
+.jump-latest:active{transform:translateX(-50%) translateY(1px) scale(0.98)}
+.jump-latest .jl-count{
+  min-width:17px;
+  height:17px;
+  padding:0 5px;
+  border-radius:999px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-size:9.5px;
+  font-weight:700;
+  background:var(--accent);
+  color:var(--bg-primary);
+  opacity:0;
+  transform:scale(0.7);
+  transition:opacity var(--m-fast) var(--ease), transform var(--m-fast) var(--ease);
+}
+.jump-latest .jl-count.show{opacity:1;transform:scale(1)}
+[data-theme="noir"] .jump-latest{background:rgba(10,10,12,0.92)}
+[data-theme="noir"] .jump-latest:hover{background:rgba(20,20,22,0.95)}
+[data-theme="light"] .jump-latest{box-shadow:0 10px 28px -10px rgba(0,0,0,0.25)}
+
+/* ────────────────────────────────────────────────────────────────────
+   v2.3.4 — catalog count badge contrast fix
    ──────────────────────────────────────────────────────────────────── */
 /* In the noir/dark theme --accent is WHITE, so the old hover state
    (white text on a faint white wash) made the chat-count badge on the
@@ -338,7 +413,7 @@ pre{
 }
 
 /* ────────────────────────────────────────────────────────────────────
-   v2.4 — Interface-mode segmented control (Settings → Appearance)
+   v2.3.4 — Interface-mode segmented control (Settings → Appearance)
    ──────────────────────────────────────────────────────────────────── */
 .uimode-seg{
   display:inline-flex;
@@ -366,7 +441,7 @@ pre{
 }
 
 /* ────────────────────────────────────────────────────────────────────
-   v2.4 — provider model picker (Settings → Providers)
+   v2.3.4 — provider model picker (Settings → Providers)
    ──────────────────────────────────────────────────────────────────── */
 .model-fetch-btn{
   float:right;

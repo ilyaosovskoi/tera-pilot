@@ -297,91 +297,141 @@ def run_api_driver(task, workspace, api_base, api_token=None, request_timeout=No
                 resp.read()
         except Exception:
             pass
-    tokens = 0
-    cost = 0.0
-    iterations = 0
-    tools = []
-    final = ""
-    status = "error"
-    provider = None
-    model = None
-    cancelled = False
-    read_timeout = request_timeout or (task.get("timeout_secs", 300) + 120)
-    try:
-        with urllib.request.urlopen(req, timeout=read_timeout) as resp:
-            for raw in resp:
-                line = raw.decode("utf-8", "replace").strip()
-                if not line.startswith("data: "):
-                    continue
-                try:
-                    evt = json.loads(line[6:])
-                except json.JSONDecodeError:
-                    continue
-                etype = evt.get("type")
-                if etype == "token":
-                    tokens += 1
-                    final += evt.get("content", "")
-                elif etype == "step":
-                    # Count REAL agent iterations, not every SSE step:
-                    # the server emits a 'step' event for plan_created /
-                    # thought / tool_called / tool_result / done too, so
-                    # counting all of them inflated `iterations` ~4-6x.
-                    if evt.get("detail") == "iteration_start":
-                        iterations += 1
-                    elif evt.get("detail") == "tool_called" and evt.get("tool"):
-                        tools.append(evt["tool"])
-                elif etype == "diff_review":
-                    # Headless driver: auto-accept so the agent never
-                    # stalls on the 300 s review timeout.
-                    _auto_accept_diff_review(evt.get("review_id", ""))
-                elif etype == "router_decision":
-                    provider = evt.get("provider_id") or evt.get("provider")
-                    model = evt.get("model")
-                elif etype == "done":
-                    status = "success" if evt.get("ok", True) else "failed"
-                    cancelled = bool(evt.get("cancelled"))
-                    final = final or evt.get("output") or evt.get("text") or ""
-                elif etype == "error":
-                    status = "error"
-                    final = evt.get("message", "")
-    except urllib.error.HTTPError as exc:
+
+    def _stream_once() -> dict:
+        """One SSE stream attempt; never raises (returns an error dict on
+        transport failures). ``_collision`` is True when the server rejected
+        the request because another agent run was in progress (parallel
+        launches collide on the single-agent server)."""
+        tokens = 0
+        cost = 0.0
+        iterations = 0
+        tools = []
+        final = ""
         status = "error"
-        final = f"HTTP {exc.code}: {exc.reason}"
-    except urllib.error.URLError as exc:
-        status = "error"
-        final = f"cannot reach {api_base}: {exc.reason}"
-    except TimeoutError:
-        status = "error"
-        final = f"request timed out after {read_timeout}s"
-    except Exception as exc:  # pragma: no cover - defensive
-        status = "error"
-        final = f"unexpected driver error: {exc}"
+        provider = None
+        model = None
+        cancelled = False
+        # v2.3.4-fix: set True once a TERMINAL SSE event (`done` / `error`) has
+        # been parsed. A late read-timeout AFTER a real terminal event must not
+        # overwrite the terminal state (see the TimeoutError handler below).
+        terminal_seen = False
+        collision = False
+        read_timeout = request_timeout or (task.get("timeout_secs", 300) + 120)
+        try:
+            with urllib.request.urlopen(req, timeout=read_timeout) as resp:
+                for raw in resp:
+                    line = raw.decode("utf-8", "replace").strip()
+                    if not line.startswith("data: "):
+                        continue
+                    try:
+                        evt = json.loads(line[6:])
+                    except json.JSONDecodeError:
+                        continue
+                    etype = evt.get("type")
+                    if etype == "token":
+                        tokens += 1
+                        final += evt.get("content", "")
+                    elif etype == "step":
+                        # Count REAL agent iterations, not every SSE step:
+                        # the server emits a 'step' event for plan_created /
+                        # thought / tool_called / tool_result / done too, so
+                        # counting all of them inflated `iterations` ~4-6x.
+                        if evt.get("detail") == "iteration_start":
+                            iterations += 1
+                        elif evt.get("detail") == "tool_called" and evt.get("tool"):
+                            tools.append(evt["tool"])
+                    elif etype == "diff_review":
+                        # Headless driver: auto-accept so the agent never
+                        # stalls on the 300 s review timeout.
+                        _auto_accept_diff_review(evt.get("review_id", ""))
+                    elif etype == "router_decision":
+                        provider = evt.get("provider_id") or evt.get("provider")
+                        model = evt.get("model")
+                    elif etype == "done":
+                        terminal_seen = True
+                        status = "success" if evt.get("ok", True) else "failed"
+                        cancelled = bool(evt.get("cancelled"))
+                        final = final or evt.get("output") or evt.get("text") or ""
+                    elif etype == "error":
+                        # v2.3.4-fix: a parallel launch collides on the
+                        # single-agent server BEFORE the run starts (0
+                        # iterations). Don't treat that as a terminal error —
+                        # signal the caller to retry instead.
+                        if iterations == 0 and "already running" in evt.get("message", ""):
+                            collision = True
+                            final = evt.get("message", "")
+                            break
+                        terminal_seen = True
+                        status = "error"
+                        final = evt.get("message", "")
+        except urllib.error.HTTPError as exc:
+            status = "error"
+            final = f"HTTP {exc.code}: {exc.reason}"
+        except urllib.error.URLError as exc:
+            status = "error"
+            final = f"cannot reach {api_base}: {exc.reason}"
+        except TimeoutError:
+            # v2.3.4-fix: a stream that already delivered `done`/`error` can
+            # still hit the read timeout when the server fails to close the
+            # connection (the api_server.py SSE close bug used to leave the
+            # socket open after `done`, so a client reading until EOF blocked
+            # here until ITS timeout). The run DID complete — a late timeout
+            # after a real terminal event must not rewrite a genuine
+            # success/failure into an `error`. Only fall back to the timeout
+            # verdict when no terminal event was ever seen.
+            if not terminal_seen:
+                status = "error"
+                final = f"request timed out after {read_timeout}s"
+        except Exception as exc:  # pragma: no cover - defensive
+            status = "error"
+            final = f"unexpected driver error: {exc}"
+        return {
+            "provider": provider,
+            "model": model,
+            "tokens": tokens,
+            "iterations": iterations,
+            "tools_used": sorted(set(tools)),
+            "final_output": final,
+            "status": status,
+            "cancelled": cancelled,
+            "_collision": collision,
+        }
+
+    # v2.3.4-fix: the server accepts ONE agent request at a time and rejects
+    # a parallel launch with an immediate error event. Retry with a short
+    # backoff so accidentally parallel eval launches serialize instead of
+    # failing the task (bounded, so a genuinely stuck server still fails).
+    max_attempts = 3
+    driver_out = {}
+    for attempt in range(1, max_attempts + 1):
+        driver_out = _stream_once()
+        if not driver_out.pop("_collision", False) or attempt == max_attempts:
+            break
+        time.sleep(5 * attempt)
 
     after = _usage_stats(api_base, api_token)
     tokens_in = tokens_out = request_count = 0
+    cost = 0.0
     if before and after:
         tokens_in = max(0, after["tokens_in"] - before["tokens_in"])
         tokens_out = max(0, after["tokens_out"] - before["tokens_out"])
         cost = max(0.0, round(after["cost"] - before["cost"], 6))
         request_count = max(0, after["requests"] - before["requests"])
-        tokens = tokens_in + tokens_out if tokens == 0 else tokens
-    if cancelled and status == "success":
-        status = "failed"
+        tokens = driver_out.get("tokens", 0)
+        if tokens == 0:
+            tokens = tokens_in + tokens_out
+    else:
+        tokens = driver_out.get("tokens", 0)
+    if driver_out.get("cancelled") and driver_out["status"] == "success":
+        driver_out["status"] = "failed"
 
-    return {
-        "provider": provider,
-        "model": model,
-        "tokens": tokens,
-        "tokens_in": tokens_in,
-        "tokens_out": tokens_out,
-        "request_count": request_count,
-        "cost_usd": cost,
-        "iterations": iterations,
-        "tools_used": sorted(set(tools)),
-        "final_output": final,
-        "status": status,
-        "cancelled": cancelled,
-    }
+    driver_out["tokens"] = tokens
+    driver_out["tokens_in"] = tokens_in
+    driver_out["tokens_out"] = tokens_out
+    driver_out["request_count"] = request_count
+    driver_out["cost_usd"] = cost
+    return driver_out
 
 
 DRIVERS = {"fake": run_fake_driver, "api": run_api_driver}
@@ -426,11 +476,21 @@ def build_result(task, driver_out, test_res, base_repo_hash, base_commit, driver
     ``baseline`` is the optional result of running ``test_command`` on the
     pristine repo (recorded for the fake driver always, for the api driver
     with ``--baseline``).
+
+    v2.3.4-fix (status priority): the driver's ``error`` reflects the RUN
+    (e.g. the final LLM response failed after the fix was already applied),
+    while ``test_res`` reflects the WORKSPACE. When the verification tests
+    PASSED and the agent actually ran (iterations > 0), the task is solved —
+    report ``success`` instead of letting the terminal driver error mask a
+    genuine fix. A run that never started (0 iterations, e.g. a parallel-run
+    collision) stays ``error`` even if the pristine tests happen to pass.
     """
-    if driver_out["status"] == "error":
-        status = "error"
-    elif driver_out["status"] == "skipped":
+    if driver_out["status"] == "skipped":
         status = "skipped"
+    elif driver_out["status"] == "error" and (
+        test_res["test_passed"] is not True or driver_out.get("iterations", 0) == 0
+    ):
+        status = "error"
     else:
         status = "success" if test_res["test_passed"] else "failed"
 

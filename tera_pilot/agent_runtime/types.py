@@ -164,6 +164,11 @@ class ToolCall:
     result: Optional[str] = None
     error: Optional[str] = None
     duration_ms: float = 0.0
+    # v2.3.5-fix (small-model support): id of a NATIVE API tool_call
+    # (``tc["id"]``). Kept so the native-history loop can build
+    # ``role="tool"`` messages with the matching ``tool_call_id``.
+    # None for text-JSON tool calls, which have no id.
+    id: Optional[str] = None
 
 
 @dataclass

@@ -150,6 +150,45 @@ Tera Pilot treats autonomy as a policy decision, not a binary marketing label.
 
 These mechanisms provide control and evidence; they are not a claim of formal SOC 2, ISO 27001, or vulnerability-free code. See [`TERA_PILOT_PRODUCT_STRATEGY.md`](TERA_PILOT_PRODUCT_STRATEGY.md) for the security and product roadmap, and [`THREAT_MODEL.md`](THREAT_MODEL.md) for the public threat model and trust boundaries.
 
+## Security Posture & Verification
+
+Security is treated as a continuously tested property, not a one-time claim. Every control below is covered by automated tests (`tests/test_security_suite.py` — 96 tests mapped to `THREAT_MODEL.md` T1–T8 — plus 36 sandbox/command tests in `tests/test_tool_engine_sandbox.py`; the full suite is 448 tests).
+
+**Verified controls:**
+
+| Control | What is tested |
+|---|---|
+| Command sanitization | shell metacharacters (`;`, `&&`, `|`, backtick, `$`, …), disallowed binaries, dangerous flags (`python3 -c`, `pip install`, `git clone`, …) — all blocked before execution; legitimate commands unaffected |
+| Workspace sandbox | absolute paths, `..`, symlink files/dirs, path-prefix lookalikes (`/tmp/ws` vs `/tmp/ws-evil`) — all rejected with `PermissionError`; workspace-root deletion refused |
+| git sandbox | `-C`/`--git-dir`/`--work-tree` escapes, `!`-alias shell execution, exec-capable config keys (`core.fsmonitor`, `core.editor`, `sshCommand`, `pager`, `askpass`, `hooksPath`, `credential.helper`, `diff.*.textconv`, `filter.*.clean/.smudge`) — blocked on the command line AND **neutralized at runtime** when read from a malicious repo's own `.git/config` or `.git/hooks/*` (a plain `git status`/`commit`/`diff` on a hostile repo can no longer execute its commands) |
+| npm scripts | `npm run` **and its aliases** (`test`, `t`, `start`, `exec`, `ci`, `run-script`, `install-test`, `link`, …) — all execute arbitrary `package.json` scripts, all blocked; auto-detected test/lint commands need user approval like any other command |
+| web_fetch | only `http(s)` schemes and **no loopback targets** (`file://`, `ftp://`, `javascript:`, `localhost`/`127.0.0.x` rejected); exfiltration-style URLs blocked before the request — the local API token can't be read via a fetch |
+| Local API | bearer-token required on every mutating endpoint (including extended routes and DELETE); constant-time token comparison (API **and** daemon); request bodies capped (8 MiB / 2 MiB); CORS echoes only exact loopback hosts (`localhost`, `127.0.0.1`, `::1`, any port) — `localhost.evil.com` is NOT echoed |
+| Diff/patches | multi-file diffs with `+++` headers pointing outside the workspace — rejected per-file |
+| Audit trail | record tampering and reordering detected via Ed25519 signatures + SHA-256 hash chain |
+| Encrypted prompts | ChaCha20-Poly1305 round-trip, wrong key, tampered/truncated ciphertext — all detected; fails closed without `cryptography` (insecure XOR fallback removed in v2.3.4) |
+
+**Cost of the controls** (macOS, Python 3.12, `benchmarks/bench_security.py`):
+
+| Operation | µs/op |
+|---|---:|
+| `_sanitize_command` (allowed command) | ~23 |
+| `_validate_command_paths` / `_resolve_path` (sandbox check) | ~20 |
+| `secrets.compare_digest` (token) | 0.03 |
+| `EncryptedPromptStore` encrypt / decrypt | ~3 / ~2.7 |
+
+Security checks add tens of microseconds per operation — well under a percent of the cost of the command or file operation itself.
+
+**Honest findings this cycle (v2.3.4):** five real vulnerabilities were found by offensive testing and fixed: (1) `git -c alias.x='!<cmd>' x` executed arbitrary shell commands outside the sandbox; (2) the same class via exec-capable git config keys (`core.fsmonitor` runs on `git status`, `core.editor` on `git commit`, …); (3) the CORS check used `startswith('http://localhost')`, so an attacker-controlled domain `localhost.evil.com` was echoed as an allowed origin — combined with the public `/api/status` returning `api_token`, a malicious page could steal the token and drive the agent; (4) a malicious repo's OWN `.git/config`/`.git/hooks` executed commands on a plain `git status`/`commit`/`diff` (now neutralized at runtime for every agent git call); (5) `npm test`/`npm exec` executed arbitrary `package.json` scripts while only `npm run` was blocked (all script-executing npm subcommands are now blocked, and auto-detected test/lint commands require approval). All are closed, regression-tested, and covered above.
+
+**What we are deliberately NOT claiming (yet):** there is no OS-level process sandbox (bubblewrap/firejail/container) around `execute_command`/`run_code` — the sandbox is path-based, which contained the git family above but is not a hard OS boundary. Full OS sandboxing is on the roadmap; until then the git command surface in particular is reviewed and tested continuously. See [`SECURITY_TEST_REPORT.md`](SECURITY_TEST_REPORT.md) for the full methodology, and [`THREAT_MODEL.md`](THREAT_MODEL.md) §7 for acknowledged residual risks.
+
+```bash
+# Reproduce the security checks
+python3 -m pytest tests/test_security_suite.py tests/test_tool_engine_sandbox.py -q
+python3 benchmarks/bench_security.py
+```
+
 ## TUI-First Workflow and Backend Integrations
 
 The **TUI is the primary interactive product**. It is a full-screen Textual application with a chat surface, activity stream, task canvas, provider controls, command palette, approval dialogs and verification feedback. Users type normal requests into the composer; slash commands are available only for advanced controls and settings.
@@ -247,6 +286,12 @@ The **v2.3.2** release is a reliability and version-consistency release: the ver
 
 The **v2.3.3** release improves reliability and usability: quota/rate-limit errors now surface actionable messages with retry/switch guidance instead of raw JSON; the agent runtime gives saturated free-tier pools more time to recover (8 attempts vs 5); health probes no longer cripple subsequent LLM calls (provider config is restored after testing); the "Open Project" action now updates the file tree immediately; provider model lists can be fetched live from the API; chat titles are generated via a short LLM round-trip for better summaries; terminal command output keeps the tail (useful error details) instead of the head; and the eval harness correctly times out HTTP reads independent of the agent's own timeout.
 
+The **v2.3.4** release fixes three silent data-integrity bugs and polishes the GUI: test/lint commands that emit more than the OS pipe buffer (~64 KB) no longer spuriously hit the 60 s timeout with zero captured output (the pipes are now drained while the child runs); **Undo** in the GUI actually works (it now uses the shared process checkpoint manager instead of a fresh empty one) and rewind restores the latest backup at-or-before the target checkpoint instead of only the target's own manifest — files modified before the target but not at it are no longer deleted; and learning-loop entries get a unique `LEARN-YYYYMMDD-NNN` id even after older entries are dismissed. The web GUI gains smart auto-scroll with a "Jump to latest" pill (reading history while the agent streams no longer yanks the viewport), the Settings button always opens the full modal (which hides advanced tabs in Basic mode), and the About tab now shows the real version from the backend instead of a stale hardcoded one.
+
+v2.3.4 also ships a security hardening pass driven by offensive testing (see [Security Posture & Verification](#security-posture--verification) and [`SECURITY_TEST_REPORT.md`](SECURITY_TEST_REPORT.md)): `git` commands can no longer execute arbitrary shell code through `!`-aliases or exec-capable config keys (`core.fsmonitor`, `core.editor`, …) — including when a malicious repo ships those keys in its own `.git/config`/`.git/hooks` (now neutralized at runtime for every agent git call); the CORS check now matches exact loopback hosts instead of a string prefix (an attacker-controlled `localhost.evil.com` used to be echoed as an allowed origin, exposing `api_token`); the encrypted-prompt store fails closed without `cryptography` instead of degrading to an insecure XOR scheme; `/api/context/pin|unpin` moved from GET to POST under the bearer token; `npm test`/`npm exec` and the other `npm run` aliases are blocked (they executed arbitrary `package.json` scripts), and auto-detected test/lint commands require user approval; `web_fetch` refuses loopback targets so the local API token can't be exfiltrated; the daemon's token check is constant-time and request bodies are size-capped on both servers; and the daemon closes SSE streams immediately for already-finished tasks.
+
+v2.3.4 also fixes the GUI's **Open project** flow end-to-end: the directory picker no longer crashes the backend on macOS (it used to create a tkinter dialog from the HTTP daemon thread, which AppKit forbids — the whole process aborted), real picker failures (automation-permission denied, missing dialog binary) are now reported to the GUI so it falls back to a manual path-entry modal **with a working Browse… button** instead of silently doing nothing, and opening a large folder no longer freezes the request for ~20 s — the project context index is now built lazily on first agent use and bounded (50k files / 5 s), not synchronously during `set_root`. The sidebar file-tree panel also refreshes after a project switch, `⌘O`/`Ctrl+O` actually opens the picker (the command palette advertised it but no binding existed), `/cd ~` expands the home directory in the TUI, and the provider wizard's model examples were refreshed to current 2026 models (GPT-5.5, Claude Sonnet 5, Gemini 3.1 Pro, DeepSeek-V4, GLM-5.1, Grok 4.5, Llama 4, …).
+
 ## Reproducible Evaluation
 
 The `eval/` harness (P0.1) runs real repository tasks against the agent and records schema-valid results in `eval/results/`. It ships **43 tasks** across bug fixes, test repair, refactoring, features, code review and documentation (`eval/tasks/`), each with a clean-copy fixture repo and a baseline-verified test command:
@@ -291,6 +336,7 @@ Environment variables are now `TERA_PILOT_*` (e.g. `TERA_PILOT_PROVIDER`, `TERA_
 - Quality depends on the selected model, provider configuration and repository tests.
 - Cloud providers and remote MCP servers still send data outside the machine by design; local-first is not the same as always-offline.
 - Enterprise features such as SSO/SCIM, centralized RBAC, formal compliance certifications and managed fleet control are roadmap work.
+- There is no OS-level process sandbox around `execute_command`/`run_code` yet — the sandbox is path-based (bubblewrap/firejail-style isolation is roadmap work; see [Security Posture & Verification](#security-posture--verification)).
 - Benchmark claims are limited to the reproducible evaluation harness (`eval/`, 43 repository tasks). Known harness limitation: the api driver records a run as `error` if the 300 s SSE stream times out even when the agent's fix already passes the task's tests.
 
 ## License

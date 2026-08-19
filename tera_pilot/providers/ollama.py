@@ -11,7 +11,7 @@ from .base import ProviderCapability
 class OllamaProvider(OpenAICompatProvider):
     provider_id: str = "ollama"
     label: str = "Ollama"
-    default_model: str = "llama3.1"
+    default_model: str = "llama4"
     api_base: str = "http://localhost:11434/v1"
     env_var: str = ""  # Ollama requires no API key
     capabilities: frozenset = frozenset({

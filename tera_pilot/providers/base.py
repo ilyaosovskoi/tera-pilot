@@ -194,7 +194,7 @@ class Provider(ABC):
         provider's config). Subclasses MUST accept it and use it in
         place of ``self.config.model`` when non-None.
 
-        v2.4.1-fix: several callers (consensus_engine, guardian,
+        v2.3.4-fix: several callers (consensus_engine, guardian,
         second_opinion, persona_memory, task_decomposition_router, and
         AgentRuntime's G20b override path) were passing ``model=`` here
         — but no provider implemented the kwarg, so every one of those

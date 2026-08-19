@@ -49,7 +49,7 @@ class TeraPilotTUIApp(App):
         self._last_prompt: str = ""
         self._suggestions_active: bool = False
         self._dark_theme: bool = True  # Start with dark theme
-        # v2.4.0-fix: track the open approval/guardian modal so it can be
+        # v2.3.4-fix: track the open approval/guardian modal so it can be
         # popped when the turn ends, errors, or is interrupted. Previously
         # the modal stayed on screen forever once the agent moved on
         # (stale dialog over an idle app).
@@ -70,7 +70,7 @@ class TeraPilotTUIApp(App):
         try:
             from tera_pilot import __version__ as _tera_pilot_version
         except Exception:
-            _tera_pilot_version = "2.3.3"
+            _tera_pilot_version = "2.3.4"
 
         # Initialize InfoBox with current state
         info = self.query_one(InfoBox)
@@ -1223,11 +1223,15 @@ class TeraPilotTUIApp(App):
             if len(parts) < 2:
                 chat.add_system("Usage: /second_opinion pro on|off")
             else:
+                # v2.3.4: Pro is license-based — the toggle no longer grants
+                # access; show the REAL status and a hint when it's off.
                 v = parts[1].lower() in ("on", "1", "true", "yes")
                 r = self.bridge.set_pro_enabled(v)
                 if r.get("ok"):
                     state = "ON" if r.get("pro") else "OFF"
                     chat.add_system(f"Tera Pilot Pro: [b]{state}[/b]")
+                    if not r.get("pro") and r.get("note"):
+                        chat.add_system(f"[yellow]Note:[/yellow] {r['note']}")
                 else:
                     chat.add_error(f"Failed: {r.get('error', 'unknown')}")
         elif sub == "provider":
@@ -2464,7 +2468,7 @@ class TeraPilotTUIApp(App):
         chat = self.query_one(ChatLog)
         was_streaming = chat._streaming_active
 
-        # v2.4.0-fix: the agent thread may have moved on (or the run ended)
+        # v2.3.4-fix: the agent thread may have moved on (or the run ended)
         # while an approval dialog was still open — close the stale dialog.
         self._close_stale_approval()
 
@@ -2516,7 +2520,7 @@ class TeraPilotTUIApp(App):
 
     @work(thread=True, exclusive=True)
     def _run_turn_with_plan_approval(self) -> None:
-        # v2.4.0-fix: mark the turn as running BEFORE the LLM work starts.
+        # v2.3.4-fix: mark the turn as running BEFORE the LLM work starts.
         # Previously _turn_running stayed False after the user approved the
         # plan, so: a second prompt submitted while the approved plan was
         # executing queued silently behind the busy lock (no "thinking"
@@ -2540,7 +2544,7 @@ class TeraPilotTUIApp(App):
         # half-written plain text above the error message.
         if chat._streaming_active:
             chat.abort_streaming()
-        # v2.4.0-fix: a run that crashed must not leave a stale approval
+        # v2.3.4-fix: a run that crashed must not leave a stale approval
         # dialog on screen.
         self._close_stale_approval()
         chat.add_error(message)
@@ -2572,7 +2576,7 @@ class TeraPilotTUIApp(App):
     def action_interrupt(self) -> None:
         if self._turn_running:
             self.bridge.request_stop()
-            # v2.4.0-fix: if an approval dialog is open, close it — the
+            # v2.3.4-fix: if an approval dialog is open, close it — the
             # stop request already released the agent's confirmation wait.
             self._close_stale_approval()
             self.query_one(ChatLog).add_system("interrupt requested...")

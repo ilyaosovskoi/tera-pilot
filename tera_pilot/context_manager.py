@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -26,6 +27,17 @@ IGNORED_DIRS = {
 
 # Approximate chars per token (conservative for mixed content)
 CHARS_PER_TOKEN = 4.0
+
+# v2.3.4-fix: hard bounds for the project index walk. The OLD code walked
+# the ENTIRE project synchronously inside set_root()/AgentRuntime.__init__
+# with no cap — opening a large folder (e.g. the GUI's "Open project"
+# picking ~ or ~/Documents) indexed 346k files and blocked the HTTP
+# request for ~20s (the web GUI appeared frozen, and the picker dialog
+# "opened but no directory and an error"). The index is only consumed at
+# agent-run time (select_context / build_context_block), so we build it
+# lazily on first use and stop early on pathological trees.
+_MAX_INDEX_FILES = 50_000     # stop after this many files
+_INDEX_TIME_BUDGET = 5.0      # stop after this many seconds
 
 # Common file extensions and their "information density" (higher = more compact)
 EXT_PRIORITY = {
@@ -70,6 +82,10 @@ class ContextManager:
         self._pinned_files: Set[str] = set()  # user-pinned files always included
         self._recently_accessed: List[str] = []  # last N files accessed by agent
         self._max_recent = 20
+        # v2.3.4-fix: index building is deferred until first use (see
+        # _ensure_indexed). set_root() clears this flag so a workspace
+        # switch re-indexes lazily instead of blocking the caller.
+        self._index_dirty = False
         # v1.1.4-fix: 128K was the entire context window of most models,
         # which left no room for the system prompt, MCP catalog, skills,
         # or conversation history once this block is actually injected
@@ -87,6 +103,27 @@ class ContextManager:
         self._file_index = {}
         self._pinned_files.clear()
         self._recently_accessed.clear()
+        # v2.3.4-fix: do NOT walk the tree here. set_root() is called from
+        # AgentRuntime.__init__ and set_workspace() — i.e. on every
+        # workspace switch and on the GUI's "Open project" request. The old
+        # synchronous _index_project() walked every file under the new
+        # root, which froze the request for ~20s on large folders. The
+        # index is only read when the agent actually runs, so mark it
+        # dirty and build it lazily in _ensure_indexed() (bounded).
+        self._index_dirty = True
+
+    def _ensure_indexed(self) -> None:
+        """Build the file index on first use, at most once per set_root().
+
+        v2.3.4-fix: set_root() used to index synchronously (a 20s+ block on
+        large folders). Now the walk is deferred until the index is actually
+        needed (score_files / stats) and is bounded by _MAX_INDEX_FILES and
+        _INDEX_TIME_BUDGET so a pathological tree (e.g. a whole home
+        directory) can never freeze an HTTP request or agent turn.
+        """
+        if not self._index_dirty:
+            return
+        self._index_dirty = False
         self._index_project()
 
     def set_token_budget(self, tokens: int) -> None:
@@ -155,23 +192,44 @@ class ContextManager:
     # ── Project indexing ───────────────────────────────────────────
 
     def _index_project(self) -> None:
-        """Walk the project and build a lightweight file index."""
+        """Walk the project and build a lightweight file index (bounded).
+
+        v2.3.4-fix: the walk is now capped by _MAX_INDEX_FILES and
+        _INDEX_TIME_BUDGET. Previously this walked every file under the
+        root with no limit — opening ~ or ~/Documents indexed 346k files
+        and blocked the caller for ~20s. A partial index is fine: the
+        agent can always read_file/grep for files the index missed.
+        """
         if not self._root:
             return
         self._file_index = {}
+        start = time.monotonic()
+        indexed = 0
         try:
             for root, dirs, files in os.walk(self._root):
                 dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
                 for name in files:
                     if name.startswith("."):
                         continue
-                    p = Path(root) / name
+                    indexed += 1
+                    if indexed > _MAX_INDEX_FILES:
+                        logger.info(
+                            "[context] index truncated at %d files (limit %d)",
+                            len(self._file_index), _MAX_INDEX_FILES,
+                        )
+                        return
+                    if time.monotonic() - start > _INDEX_TIME_BUDGET:
+                        logger.info(
+                            "[context] index stopped after %.1fs (%d files)",
+                            time.monotonic() - start, len(self._file_index),
+                        )
+                        return
                     try:
-                        size = p.stat().st_size
+                        size = os.stat(os.path.join(root, name)).st_size
                     except OSError:
                         size = 0
-                    rel = str(p.relative_to(self._root))
-                    ext = p.suffix.lower()
+                    rel = os.path.relpath(os.path.join(root, name), self._root)
+                    ext = Path(name).suffix.lower()
                     self._file_index[rel] = {
                         "size": size,
                         "approx_tokens": int(size / CHARS_PER_TOKEN),
@@ -193,6 +251,7 @@ class ContextManager:
         Score all indexed files by relevance to the query.
         Returns sorted list (highest score first).
         """
+        self._ensure_indexed()
         if not self._file_index:
             return []
 
@@ -336,6 +395,7 @@ class ContextManager:
     # ── Stats ──────────────────────────────────────────────────────
 
     def stats(self) -> Dict[str, Any]:
+        self._ensure_indexed()
         return {
             "total_files": len(self._file_index),
             "pinned_files": list(self._pinned_files),

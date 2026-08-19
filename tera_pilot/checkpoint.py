@@ -363,26 +363,38 @@ class CheckpointManager:
                 return {"ok": False, "error": f"Cannot rewind {n} steps — only {len(self._checkpoints)} checkpoints"}
             target_cp = self._checkpoints[target_index]
 
-        # Restore files from all checkpoints AFTER target to target
-        # We need to restore files that were modified between target_cp and
-        # the current state.  The simplest approach: for each checkpoint
-        # after target_index, restore its backup files.
+        # Restore the workspace to the state at target_cp.
+        #
+        # v2.3.4-fix: the previous implementation only restored files from
+        # the TARGET checkpoint's own manifest, which is wrong. A file that
+        # was modified at an EARLIER checkpoint (say cp1), left untouched at
+        # the target (cp2), and modified again AFTER the target (cp3) would:
+        #   - not be restored at all (it isn't in cp2's manifest), AND
+        #   - be treated as "created after target" and DELETED (it's in
+        #     cp3's manifest but not cp2's) — destroying the file instead
+        #     of reverting it to its cp1 state.
+        #
+        # Correct semantics: the state at target_cp is the LATEST backup of
+        # every file touched in ANY checkpoint up to and including the
+        # target (checkpoint backups hold the file's content at that turn).
+        # Files that only appear in checkpoints AFTER the target were
+        # created after the target state and must be deleted.
         files_restored: List[str] = []
         errors: List[str] = []
 
         with self._lock:
             checkpoints_to_restore = self._checkpoints[target_index + 1:]
-            # Also include the target checkpoint's own manifest (those files
-            # represent the state AT the target checkpoint).
-            # Actually, we need to restore the state at target_cp.
-            # The files backed up in target_cp represent the state at that turn.
-            # Files backed up in later checkpoints represent changes AFTER that turn.
-            # So we restore from target_cp's backups, and remove files that
-            # were added in later checkpoints (if they didn't exist at target_cp).
+            # Build path -> latest-backup map from all checkpoints up to
+            # and including the target. Later checkpoints overwrite earlier
+            # ones, so each path maps to its most recent backup at-or-before
+            # the target state.
+            target_manifest: Dict[str, FileManifestEntry] = {}
+            for cp in self._checkpoints[:target_index + 1]:
+                for entry in cp.file_manifest:
+                    target_manifest[entry.path] = entry
 
-            # Strategy: restore all files from target checkpoint's backups.
             checkpoints_root = (_tera_pilot_home() / "checkpoints").resolve()
-            for entry in target_cp.file_manifest:
+            for entry in target_manifest.values():
                 # v2.3.1-security: never restore (or delete) a path that
                 # escapes the workspace, and never copy from a backup that
                 # lives outside the checkpoints directory.
@@ -404,15 +416,14 @@ class CheckpointManager:
                 else:
                     errors.append(f"Backup missing for {entry.path}")
 
-            # For files that appear in later checkpoints but NOT in target,
-            # we need to check if they existed at the target state.
-            # If they didn't exist at target, delete them.
+            # For files that appear in later checkpoints but NOT in any
+            # checkpoint up to and including the target, they did not exist
+            # at the target state — delete them.
             later_paths = set()
             for cp in checkpoints_to_restore:
                 for entry in cp.file_manifest:
                     later_paths.add(entry.path)
-            target_paths = {e.path for e in target_cp.file_manifest}
-            new_files = later_paths - target_paths
+            new_files = later_paths - set(target_manifest)
             for raw_path in new_files:
                 # v2.3.1-security: deletion is destructive — only touch
                 # paths that are guaranteed to be inside the workspace.

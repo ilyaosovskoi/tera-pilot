@@ -29,6 +29,14 @@ EventSink = Callable[[str, Dict[str, Any]], None]
 ConfirmHandler = Callable[[Dict[str, Any]], None]
 
 
+def _spend_pro_required_msg() -> str:
+    """v2.3.4: Spend Dashboard is Pro-licensed — same wording on every surface."""
+    return (
+        "Spend Dashboard requires a Pro license — run: tera-pilot license activate <key> "
+        "(see LICENSING.md)"
+    )
+
+
 @dataclass
 class ProviderChoice:
     """Optional provider overrides. Anything left None falls back to the
@@ -351,7 +359,7 @@ class TeraPilotBridge:
             self._registry = self._build_registry()
         try:
             from tera_pilot.providers import ProviderConfig
-            # v2.4.0-fix: set_active raises ProviderError for unknown
+            # v2.3.4-fix: set_active raises ProviderError for unknown
             # provider ids. It used to be swallowed here ("Ignore registry
             # errors"), so `/model bogus` returned {"ok": True} while the
             # registry silently kept the previous provider — the UI claimed
@@ -431,7 +439,10 @@ class TeraPilotBridge:
     def change_workspace(self, new_path: str) -> Dict[str, Any]:
         """Change the workspace directory. Forces agent rebuild."""
         try:
-            path = Path(new_path).resolve()
+            # v2.3.4-fix: expand ~ and ~user BEFORE resolving — Path('~')
+            # resolves against CWD, so `/cd ~` used to fail with "Not a
+            # directory: .../~".
+            path = Path(new_path).expanduser().resolve()
             if not path.is_dir():
                 return {"ok": False, "error": f"Not a directory: {path}"}
             self.workspace = str(path)
@@ -782,11 +793,26 @@ class TeraPilotBridge:
             return False
 
     def set_pro_enabled(self, enabled: bool) -> Dict[str, Any]:
-        """Toggle the ``tera_pilot_pro`` flag (env var takes priority on read)."""
+        """DEPRECATED (v2.3.4): Pro is now license-based.
+
+        Flipping this toggle no longer grants access — Pro requires a
+        valid signed license (``tera-pilot license activate <key>``).
+        Returns the REAL current status so callers never show a false
+        "Pro: ON" when no license is active.
+        """
         try:
-            from tera_pilot.second_opinion import set_pro_enabled as _set_pro
+            from tera_pilot.second_opinion import (
+                set_pro_enabled as _set_pro,
+                is_pro_enabled as _is_pro,
+            )
             _set_pro(enabled)
-            return {"ok": True, "pro": enabled}
+            actual = _is_pro()
+            out = {"ok": True, "pro": actual}
+            if not actual:
+                out["note"] = (
+                    "Pro requires a valid license — run: tera-pilot license activate <key>"
+                )
+            return out
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
@@ -860,16 +886,16 @@ class TeraPilotBridge:
         with ``error='pro_required'`` so the UI can prompt the user.
         """
         try:
+            from tera_pilot.licensing import is_feature_licensed
             from tera_pilot.second_opinion import (
                 get_second_opinion_config,
                 should_run_second_opinion,
                 review_with_second_model,
-                is_pro_enabled,
             )
-            if not is_pro_enabled():
+            if not is_feature_licensed("second_opinion"):
                 return {
                     "verdict": "APPROVE",
-                    "rationale": "Second Opinion requires Tera Pilot Pro.",
+                    "rationale": "Second Opinion requires Tera Pilot Pro (activate a license).",
                     "error": "pro_required",
                     "provider_id": "",
                     "model": "",
@@ -1628,10 +1654,17 @@ class TeraPilotBridge:
             return {"ok": False, "error": str(e)}
 
     def get_team_spend_report(self, days: int = 30) -> Dict[str, Any]:
-        """Aggregate the local token history into a team spend report."""
+        """Aggregate the local token history into a team spend report.
+
+        v2.3.4: Spend Dashboard is Pro-licensed; without a license the
+        module returns error="pro_required" and this bridge surfaces it
+        as an explicit failure instead of zeros.
+        """
         try:
             from tera_pilot.spend_dashboard import get_spend_dashboard
             report = get_spend_dashboard().report(days=days)
+            if report.error:
+                return {"ok": False, "error": _spend_pro_required_msg(), "pro_required": True}
             return {"ok": True, **report.to_dict()}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -1656,6 +1689,9 @@ class TeraPilotBridge:
     def export_spend_report_json(self, days: int = 30) -> Dict[str, Any]:
         try:
             from tera_pilot.spend_dashboard import get_spend_dashboard
+            report = get_spend_dashboard().report(days=days)
+            if report.error:
+                return {"ok": False, "error": _spend_pro_required_msg(), "pro_required": True}
             return {"ok": True, "json": get_spend_dashboard().export_report_json(days=days)}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -1663,6 +1699,9 @@ class TeraPilotBridge:
     def export_spend_report_csv(self, days: int = 30) -> Dict[str, Any]:
         try:
             from tera_pilot.spend_dashboard import get_spend_dashboard
+            report = get_spend_dashboard().report(days=days)
+            if report.error:
+                return {"ok": False, "error": _spend_pro_required_msg(), "pro_required": True}
             return {"ok": True, "csv": get_spend_dashboard().export_report_csv(days=days)}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -1751,7 +1790,7 @@ class TeraPilotBridge:
         """Return the process-wide CheckpointManager, synced to THIS bridge's
         workspace.
 
-        v2.4.0-fix: the manager is a process singleton whose workspace
+        v2.3.4-fix: the manager is a process singleton whose workspace
         defaults to ``Path.cwd()``. When the TUI workspace differs from the
         process cwd, checkpoint backups were taken from / restored to the
         WRONG directory (silent no-op backups, or rewinds writing to cwd

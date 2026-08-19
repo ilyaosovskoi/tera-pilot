@@ -63,7 +63,7 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -373,7 +373,7 @@ def _provider_templates(handler, body=None):
             "name": "Ollama (local)",
             "provider_type": "ollama",
             "base_url": "http://127.0.0.1:11434",
-            "model": "llama3.1",
+            "model": "llama4",
             "description": (
                 "Run models locally via Ollama. No API key required when "
                 "Ollama is on the same machine."
@@ -396,7 +396,7 @@ def _provider_templates(handler, body=None):
             "name": "vLLM (local)",
             "provider_type": "openai_compat",
             "base_url": "http://127.0.0.1:8000/v1",
-            "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "model": "meta-llama/Meta-Llama-4-Maverick-17B-128E-Instruct",
             "description": (
                 "Self-hosted OpenAI-compatible server with PagedAttention. "
                 "Start vLLM with --api-key <key> if you want auth."
@@ -433,9 +433,9 @@ def _provider_templates(handler, body=None):
             "name": "OpenAI",
             "provider_type": "openai_compat",
             "base_url": "https://api.openai.com/v1",
-            "model": "gpt-4o",
+            "model": "gpt-5.5",
             "env_var": "OPENAI_API_KEY",
-            "description": "Official OpenAI API. GPT-4o, GPT-4 Turbo, GPT-3.5 Turbo, o1.",
+            "description": "Official OpenAI API. GPT-5.5, GPT-5.2, o4-mini.",
             "docs_url": "https://platform.openai.com/api-keys",
         },
         {
@@ -443,9 +443,9 @@ def _provider_templates(handler, body=None):
             "name": "Anthropic",
             "provider_type": "anthropic",
             "base_url": "https://api.anthropic.com/v1",
-            "model": "claude-3-5-sonnet-20241022",
+            "model": "claude-sonnet-5",
             "env_var": "ANTHROPIC_API_KEY",
-            "description": "Claude 3.5 Sonnet, Haiku, Opus. Best for coding and long-context tasks.",
+            "description": "Claude Sonnet 5 / Opus 5 / Haiku 4.5. Best for coding and long-context tasks.",
             "docs_url": "https://console.anthropic.com/settings/keys",
         },
         {
@@ -453,9 +453,9 @@ def _provider_templates(handler, body=None):
             "name": "Google Gemini (AI Studio)",
             "provider_type": "openai_compat",
             "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-            "model": "gemini-1.5-pro",
+            "model": "gemini-3.1-pro",
             "env_var": "GEMINI_API_KEY",
-            "description": "Gemini 1.5 Pro / Flash via the OpenAI-compatible endpoint. Free tier.",
+            "description": "Gemini 3.1 Pro / 3.5 Flash via the OpenAI-compatible endpoint. Free tier.",
             "docs_url": "https://aistudio.google.com/apikey",
         },
         {
@@ -463,9 +463,9 @@ def _provider_templates(handler, body=None):
             "name": "DeepSeek",
             "provider_type": "openai_compat",
             "base_url": "https://api.deepseek.com/v1",
-            "model": "deepseek-chat",
+            "model": "deepseek-v4-pro",
             "env_var": "DEEPSEEK_API_KEY",
-            "description": "Low-cost, strong coding performance. DeepSeek-V3, DeepSeek-Coder.",
+            "description": "Low-cost, strong coding performance. DeepSeek-V4-Pro / V4-Flash.",
             "docs_url": "https://platform.deepseek.com/api_keys",
         },
         {
@@ -473,9 +473,9 @@ def _provider_templates(handler, body=None):
             "name": "Z.ai (GLM)",
             "provider_type": "openai_compat",
             "base_url": "https://open.bigmodel.cn/api/paas/v4",
-            "model": "glm-4",
+            "model": "glm-5.1",
             "env_var": "ZAI_API_KEY",
-            "description": "GLM-4, GLM-4-Flash (free), GLM-4V from Z.ai.",
+            "description": "GLM-5.1, GLM-5 (flagship), GLM-4.5-Flash (free) from Z.ai.",
             "docs_url": "https://open.bigmodel.cn/usercenter/apikeys",
         },
         {
@@ -493,9 +493,9 @@ def _provider_templates(handler, body=None):
             "name": "xAI (Grok)",
             "provider_type": "openai_compat",
             "base_url": "https://api.x.ai/v1",
-            "model": "grok-2-latest",
+            "model": "grok-4.5",
             "env_var": "XAI_API_KEY",
-            "description": "Grok models from xAI.",
+            "description": "Grok 4.5 / 4.3 models from xAI.",
             "docs_url": "https://console.x.ai",
         },
         {
@@ -513,9 +513,9 @@ def _provider_templates(handler, body=None):
             "name": "Perplexity",
             "provider_type": "openai_compat",
             "base_url": "https://api.perplexity.ai",
-            "model": "llama-3.1-sonar-large-128k-online",
+            "model": "sonar-pro",
             "env_var": "PPLX_API_KEY",
-            "description": "Online models with built-in web search.",
+            "description": "Online models (Sonar Pro / Sonar) with built-in web search.",
             "docs_url": "https://www.perplexity.ai/settings/api",
         },
         {
@@ -534,9 +534,9 @@ def _provider_templates(handler, body=None):
             "name": "Groq",
             "provider_type": "openai_compat",
             "base_url": "https://api.groq.com/openai/v1",
-            "model": "llama-3.3-70b-versatile",
+            "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
             "env_var": "GROQ_API_KEY",
-            "description": "Generous free tier, extremely fast responses.",
+            "description": "Generous free tier, extremely fast responses. Llama 4 Maverick / Scout.",
             "docs_url": "https://console.groq.com/keys",
         },
         {
@@ -544,9 +544,9 @@ def _provider_templates(handler, body=None):
             "name": "Cerebras",
             "provider_type": "openai_compat",
             "base_url": "https://api.cerebras.ai/v1",
-            "model": "llama-3.3-70b",
+            "model": "llama-4-scout-17b-16e-instruct",
             "env_var": "CEREBRAS_API_KEY",
-            "description": "Fastest inference speeds available anywhere. Free tier.",
+            "description": "Fastest inference speeds available anywhere. Free tier. Llama 4 Scout.",
             "docs_url": "https://cloud.cerebras.ai",
         },
         {
@@ -554,9 +554,9 @@ def _provider_templates(handler, body=None):
             "name": "SambaNova",
             "provider_type": "openai_compat",
             "base_url": "https://api.sambanova.ai/v1",
-            "model": "Meta-Llama-3.1-70B-Instruct",
+            "model": "Meta-Llama-4-Maverick-17B-128E-Instruct",
             "env_var": "SAMBANOVA_API_KEY",
-            "description": "Free tier with no credit card required.",
+            "description": "Free tier with no credit card required. Llama 4 Maverick.",
             "docs_url": "https://cloud.sambanova.ai/apis",
         },
         # ── Open-model hosting / aggregators ────────────────────────
@@ -565,7 +565,7 @@ def _provider_templates(handler, body=None):
             "name": "OpenRouter",
             "provider_type": "openai_compat",
             "base_url": "https://openrouter.ai/api/v1",
-            "model": "anthropic/claude-3.5-sonnet",
+            "model": "anthropic/claude-sonnet-5",
             "env_var": "OPENROUTER_API_KEY",
             "description": "One key, access to almost every model from every provider.",
             "docs_url": "https://openrouter.ai/keys",
@@ -575,9 +575,9 @@ def _provider_templates(handler, body=None):
             "name": "Together AI",
             "provider_type": "openai_compat",
             "base_url": "https://api.together.xyz/v1",
-            "model": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
+            "model": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
             "env_var": "TOGETHER_API_KEY",
-            "description": "Wide catalog of open-source models.",
+            "description": "Wide catalog of open-source models. Llama 4 Maverick / Scout.",
             "docs_url": "https://api.together.ai/settings/api-keys",
         },
         {
@@ -585,9 +585,9 @@ def _provider_templates(handler, body=None):
             "name": "Fireworks AI",
             "provider_type": "openai_compat",
             "base_url": "https://api.fireworks.ai/inference/v1",
-            "model": "accounts/fireworks/models/llama-v3p1-70b-instruct",
+            "model": "accounts/fireworks/models/llama4-maverick-instruct-basic",
             "env_var": "FIREWORKS_API_KEY",
-            "description": "Fast hosted inference for open models.",
+            "description": "Fast hosted inference for open models. Llama 4 Maverick.",
             "docs_url": "https://app.fireworks.ai/settings/users/api-keys",
         },
         {
@@ -595,7 +595,7 @@ def _provider_templates(handler, body=None):
             "name": "Novita AI",
             "provider_type": "openai_compat",
             "base_url": "https://api.novita.ai/v3/openai",
-            "model": "meta-llama/llama-3.1-70b-instruct",
+            "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
             "env_var": "NOVITA_API_KEY",
             "description": "Cheap hosted open models. Free trial credits.",
             "docs_url": "https://novita.ai/get-key",
@@ -605,9 +605,9 @@ def _provider_templates(handler, body=None):
             "name": "Hyperbolic",
             "provider_type": "openai_compat",
             "base_url": "https://api.hyperbolic.xyz/v1",
-            "model": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+            "model": "meta-llama/Meta-Llama-4-Maverick-17B-128E-Instruct",
             "env_var": "HYPERBOLIC_API_KEY",
-            "description": "Low-cost GPU inference for open models.",
+            "description": "Low-cost GPU inference for open models. Llama 4 Maverick.",
             "docs_url": "https://app.hyperbolic.xyz/settings",
         },
         {
@@ -615,7 +615,7 @@ def _provider_templates(handler, body=None):
             "name": "Lepton AI",
             "provider_type": "openai_compat",
             "base_url": "https://api.lepton.ai/api/v1",
-            "model": "llama3-8b",
+            "model": "meta-llama/Llama-4-Maverick-17B-128E-Instruct",
             "env_var": "LEPTON_API_KEY",
             "description": "Serverless open-model inference.",
             "docs_url": "https://dashboard.lepton.ai/tokens",
@@ -625,9 +625,9 @@ def _provider_templates(handler, body=None):
             "name": "SiliconFlow",
             "provider_type": "openai_compat",
             "base_url": "https://api.siliconflow.cn/v1",
-            "model": "Qwen/Qwen2.5-72B-Instruct",
+            "model": "Qwen/Qwen3-235B-A22B-Instruct",
             "env_var": "SILICONFLOW_API_KEY",
-            "description": "Chinese aggregator with many open models. Free tier.",
+            "description": "Chinese aggregator with many open models. Free tier. Qwen3.",
             "docs_url": "https://cloud.siliconflow.cn/account/ak",
         },
         {
@@ -635,7 +635,7 @@ def _provider_templates(handler, body=None):
             "name": "Friendli AI",
             "provider_type": "openai_compat",
             "base_url": "https://api.friendli.ai/api/v1",
-            "model": "meta-llama-3.1-8b-instruct",
+            "model": "meta-llama/Llama-4-Maverick-17B-128E-Instruct",
             "env_var": "FRIENDLI_API_KEY",
             "description": "High-throughput inference engine for open models.",
             "docs_url": "https://friendli.ai/webapp-api-keys",
@@ -646,7 +646,7 @@ def _provider_templates(handler, body=None):
             "name": "Hugging Face",
             "provider_type": "openai_compat",
             "base_url": "https://api-inference.huggingface.co/v1",
-            "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "model": "meta-llama/Meta-Llama-4-Maverick-17B-128E-Instruct",
             "env_var": "HF_TOKEN",
             "description": "Serverless inference API for thousands of models. Free tier.",
             "docs_url": "https://huggingface.co/docs/api-inference",
@@ -656,7 +656,7 @@ def _provider_templates(handler, body=None):
             "name": "Replicate",
             "provider_type": "openai_compat",
             "base_url": "https://api.replicate.com/v1",
-            "model": "meta/llama-3.1-8b-instruct",
+            "model": "meta/llama-4-maverick-17b-128e-instruct",
             "env_var": "REPLICATE_API_TOKEN",
             "description": "Per-second billing for open models. Free trial credit.",
             "docs_url": "https://replicate.com/account/api-tokens",
@@ -667,7 +667,7 @@ def _provider_templates(handler, body=None):
             "name": "Azure OpenAI",
             "provider_type": "openai_compat",
             "base_url": "https://YOUR-RESOURCE.openai.azure.com/openai/deployments/YOUR-DEPLOYMENT",
-            "model": "gpt-4o",
+            "model": "gpt-5.5",
             "env_var": "AZURE_OPENAI_API_KEY",
             "description": "Your own Azure deployment of OpenAI models. Replace YOUR-RESOURCE and YOUR-DEPLOYMENT in the URL.",
             "docs_url": "https://learn.microsoft.com/azure/ai-services/openai",
@@ -678,11 +678,11 @@ def _provider_templates(handler, body=None):
             "name": "Nvidia NIM",
             "provider_type": "nvidia_nim",
             "base_url": "https://integrate.api.nvidia.com/v1",
-            "model": "meta/llama-3.1-8b-instruct",
+            "model": "meta/llama-4-scout-17b-16e-instruct",
             "env_var": "NVIDIA_API_KEY",
             "description": (
                 "Nvidia NIM (No Infrastructure Models) — run Nvidia-hosted "
-                "Llama, Mistral, and Nemotron models via an OpenAI-compatible "
+                "Llama 4, GLM-5, and Nemotron models via an OpenAI-compatible "
                 "endpoint. Get a free API key at https://build.nvidia.com/."
             ),
             "docs_url": "https://docs.nvidia.com/nim/",
@@ -693,7 +693,7 @@ def _provider_templates(handler, body=None):
             "name": "OpenAI-compatible (generic)",
             "provider_type": "openai_compat",
             "base_url": "https://api.example.com/v1",
-            "model": "gpt-3.5-turbo",
+            "model": "gpt-5.5",
             "description": (
                 "Any endpoint that exposes POST /v1/chat/completions with "
                 "the OpenAI request/response schema."
@@ -776,11 +776,26 @@ def _so_config_set(handler, body=None):
 def _so_run(handler, body=None):
     body = body or {}
     try:
+        # v2.3.4-fix: the bridge's run_second_opinion() takes the TOOL-CALL
+        # shape (tool_name + args + risk), not prompt/response — the old
+        # call raised "unexpected keyword argument 'prompt'", so this
+        # endpoint (used by the web GUI panel) silently failed for everyone.
+        # The web panel sends prompt/response; map them into the review
+        # shape. A requested reviewer provider/model is honoured by pinning
+        # it in the config first (same code path the TUI /second_opinion
+        # provider command uses).
+        provider_id = body.get("provider_id")
+        model = body.get("model")
+        if provider_id or model:
+            _bridge().set_second_opinion_config(provider_id=provider_id, model=model)
         result = _bridge().run_second_opinion(
-            prompt=body.get("prompt", ""),
-            response=body.get("response", ""),
-            provider_id=body.get("provider_id"),
-            model=body.get("model"),
+            tool_name="manual_review",
+            args={
+                "prompt": body.get("prompt", ""),
+                "response": body.get("response", ""),
+            },
+            risk_level="medium",
+            risk_reasons=["manual review request"],
         )
         return _ok(result)
     except Exception as e:
@@ -1075,10 +1090,9 @@ def _cost_cap_set(handler, body=None):
 def _cost_route(handler, body=None):
     body = body or {}
     try:
-        return _ok(_bridge().cost_route(
-            prompt=body.get("prompt", ""),
-            complexity=body.get("complexity", "medium"),
-        ))
+        # v2.3.4-fix: cost_route() takes only prompt (complexity was an
+        # unexpected kwarg that made this endpoint always error).
+        return _ok(_bridge().cost_route(prompt=body.get("prompt", "")))
     except Exception as e:
         return _err(str(e))
 
@@ -1087,7 +1101,9 @@ def _cost_route(handler, body=None):
 def _cost_apply(handler, body=None):
     body = body or {}
     try:
-        return _ok(_bridge().apply_cost_route_decision(decision=body.get("decision", {})))
+        # v2.3.4-fix: apply_cost_route_decision() takes prompt (it re-runs
+        # the route and applies the pick); decision was an unexpected kwarg.
+        return _ok(_bridge().apply_cost_route_decision(prompt=body.get("prompt", "")))
     except Exception as e:
         return _err(str(e))
 
@@ -1740,39 +1756,186 @@ def _mcp_server_status(handler, body=None):
 
 
 # ════════════════════════════════════════════════════════════════════
-# Native File Picker (server-side with tkinter)
+# Native File Picker (thread-safe, cross-platform)
 # ════════════════════════════════════════════════════════════════════
+
+
+def _pick_directory(initial_dir: str = "") -> Optional[str]:
+    """Open a native directory picker from ANY thread.
+
+    Returns the selected absolute path, or ``None`` if the user cancelled.
+    Raises ``RuntimeError`` when no usable picker exists on this platform.
+
+    v2.3.4-fix: the previous implementation created a ``tkinter.Tk()``
+    window from the HTTP handler thread. The web server handles every
+    request in a daemon thread (``ThreadingMixIn``), and on macOS AppKit
+    forbids creating windows off the main thread — ``Tk()`` aborted the
+    WHOLE process (``NSWindow should only be instantiated on the main
+    thread!``), so the "Open project" / change-directory button crashed
+    the backend instead of showing a dialog. tkinter is also unusable in
+    headless/SSH environments. We now prefer subprocess-based system
+    pickers that work from any thread, and only fall back to tkinter on
+    the main thread.
+
+    v2.3.4-fix 2: the macOS branch now distinguishes a REAL dialog
+    failure (automation permission denied, no GUI session, osascript
+    missing from PATH when running under launchd) from a plain user
+    cancel — both used to return ``None``, so a genuine failure was
+    silently swallowed and the GUI did nothing (no directory, no error
+    toast, no fallback modal). ``osascript`` is also tried at its
+    absolute location (``/usr/bin/osascript``) because daemon/launchd
+    contexts often have a stripped ``PATH`` where ``shutil.which``
+    returns ``None``.
+    """
+    import shutil
+    import subprocess
+    import sys
+    import threading
+
+    initial = initial_dir or str(Path.home() / "Documents")
+
+    # macOS — `osascript` runs the native `choose folder` dialog from any
+    # thread (exit code -128 = user cancelled).
+    if sys.platform == "darwin":
+        osascript = shutil.which("osascript") or "/usr/bin/osascript"
+        if os.path.isfile(osascript):
+            try:
+                script = 'POSIX path of (choose folder with prompt "Select Project Directory")'
+                proc = subprocess.run(
+                    [osascript, "-e", script],
+                    capture_output=True, text=True, timeout=300,
+                )
+                if proc.returncode == 0:
+                    out = proc.stdout.strip()
+                    return out if out else None
+                stderr = (proc.stderr or "").lower()
+                # -128 = the user dismissed the dialog (genuine cancel).
+                # Anything else (e.g. -1743 automation permission denied,
+                # -1728 "can't get the folder", osascript not authorized)
+                # is a REAL failure the GUI must know about, not a cancel.
+                if "cancel" in stderr or "-128" in stderr:
+                    return None
+                raise RuntimeError(
+                    f"osascript choose-folder failed (exit {proc.returncode}): "
+                    f"{(proc.stderr or '').strip()[:200]}"
+                )
+            except (subprocess.TimeoutExpired, OSError) as e:
+                raise RuntimeError(f"osascript choose-folder failed: {e}") from e
+
+    # Linux — zenity / kdialog (GTK/Qt system dialogs, thread-safe).
+    # Exit-code conventions: zenity 0 = OK, 1 = cancel, other = error;
+    # kdialog 0 = OK, 1 = cancel, 2 = error.
+    if sys.platform.startswith("linux"):
+        if shutil.which("zenity"):
+            try:
+                proc = subprocess.run(
+                    ["zenity", "--file-selection", "--directory",
+                     "--title=Select Project Directory", f"--filename={initial}/"],
+                    capture_output=True, text=True, timeout=300,
+                )
+                if proc.returncode == 0:
+                    out = proc.stdout.strip()
+                    return out if out else None
+                if proc.returncode == 1:
+                    return None  # user cancelled
+                raise RuntimeError(
+                    f"zenity failed (exit {proc.returncode}): "
+                    f"{(proc.stderr or '').strip()[:200]}"
+                )
+            except (subprocess.TimeoutExpired, OSError) as e:
+                raise RuntimeError(f"zenity choose-folder failed: {e}") from e
+        if shutil.which("kdialog"):
+            try:
+                proc = subprocess.run(
+                    ["kdialog", "--getexistingdirectory", initial],
+                    capture_output=True, text=True, timeout=300,
+                )
+                if proc.returncode == 0:
+                    out = proc.stdout.strip()
+                    return out if out else None
+                if proc.returncode == 1:
+                    return None  # user cancelled
+                raise RuntimeError(
+                    f"kdialog failed (exit {proc.returncode}): "
+                    f"{(proc.stderr or '').strip()[:200]}"
+                )
+            except (subprocess.TimeoutExpired, OSError) as e:
+                raise RuntimeError(f"kdialog choose-folder failed: {e}") from e
+
+    # Windows — PowerShell FolderBrowserDialog (thread-safe).
+    if sys.platform == "win32":
+        try:
+            ps = (
+                "Add-Type -AssemblyName System.Windows.Forms; "
+                "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
+                "$f.Description = 'Select Project Directory'; "
+                "$f.SelectedPath = $env:USERPROFILE; "
+                "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) "
+                "{ Write-Output $f.SelectedPath }"
+            )
+            proc = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                capture_output=True, text=True, timeout=300,
+            )
+            if proc.returncode == 0:
+                out = proc.stdout.strip()
+                return out if out else None
+            # PowerShell returns non-zero only on a real failure; a
+            # cancelled FolderBrowserDialog exits 0 with empty stdout
+            # (already handled above).
+            raise RuntimeError(
+                f"powershell picker failed (exit {proc.returncode}): "
+                f"{(proc.stderr or '').strip()[:200]}"
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            raise RuntimeError(f"powershell picker failed: {e}") from e
+
+    # Last resort: tkinter, ONLY from the main thread (see the macOS crash
+    # above — Tk must not be created off the main thread).
+    if threading.current_thread() is threading.main_thread():
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                root.attributes("-topmost", True)
+            except Exception:
+                pass
+            try:
+                path = filedialog.askdirectory(
+                    title="Select Project Directory",
+                    initialdir=initial,
+                )
+            finally:
+                root.destroy()
+            return path if path else None
+        except ImportError:
+            pass
+
+    raise RuntimeError(
+        "no usable native directory picker on this platform "
+        "(osascript/zenity/kdialog/powershell not found)"
+    )
+
 
 @_post_route("/api/native_file_picker")
 def _native_file_picker(handler, body=None):
-    """Open a native file picker dialog on the server to select a project directory.
-    Uses tkinter which is available on most Python installations.
-    Returns the selected directory path.
+    """Open a native file picker dialog to select a project directory.
+
+    v2.3.4-fix: runs the picker via a subprocess system dialog (thread-safe)
+    instead of tkinter in the HTTP thread, which crashed the backend on
+    macOS. Returns ``{cancelled: true}`` when the user dismisses the dialog
+    so the web GUI can stay silent instead of showing an error toast.
     """
     try:
-        import tkinter as tk
-        from tkinter import filedialog
-
-        # Create a hidden root window
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes('-topmost', True)  # Bring dialog to front
-
-        # Open directory picker
-        path = filedialog.askdirectory(
-            title="Select Project Directory",
-            initialdir=str(Path.home() / "Documents")
-        )
-
-        root.destroy()
-
-        if not path:
-            return _err("No directory selected")
-
+        path = _pick_directory()
+        if path is None:
+            return {"ok": False, "cancelled": True}
         return _ok({"path": path})
-    except ImportError:
-        return _err("tkinter not available on this system")
     except Exception as e:
+        logger.warning("[api_ext] native_file_picker failed: %s", e)
         return _err(f"File picker failed: {str(e)}")
 
 
@@ -2084,9 +2247,13 @@ def _context_reload(handler, body=None):
         return _err(str(e))
 
 
-@_get_route("/api/context/pin")
+@_post_route("/api/context/pin")
 def _context_pin(handler, body=None):
-    path = (handler._query("path") or "").strip() if handler else ""
+    """v2.3.4-security: converted from GET to POST so it falls under the
+    bearer-token auth (install() extends MUTATING_PATHS with every POST
+    route). A GET with side effects was reachable cross-origin via
+    `<img src=...>` and bypassed the token entirely."""
+    path = ((body or {}).get("path") or "").strip()
     if not path:
         return _err("path is required")
     try:
@@ -2099,9 +2266,10 @@ def _context_pin(handler, body=None):
         return _err(str(e))
 
 
-@_get_route("/api/context/unpin")
+@_post_route("/api/context/unpin")
 def _context_unpin(handler, body=None):
-    path = (handler._query("path") or "").strip() if handler else ""
+    """v2.3.4-security: converted from GET to POST (see _context_pin)."""
+    path = ((body or {}).get("path") or "").strip()
     if not path:
         return _err("path is required")
     try:
@@ -2291,12 +2459,22 @@ def _chat_stop(handler, body=None):
 def _agent_undo(handler, body=None):
     """Undo the most recent agent changes via the checkpoint system."""
     try:
-        from .checkpoint import CheckpointManager
+        # v2.3.4-fix: a brand-new ``CheckpointManager(session_id="gui")``
+        # starts with an EMPTY in-memory checkpoint list and never loads
+        # from disk, so ``rewind(1)`` always returned "No checkpoints
+        # available" — the undo endpoint could never undo anything. Use
+        # the same process singleton the checkpoint API endpoints and
+        # the TUI bridge use (session_id="default"), and re-sync its
+        # workspace to the current project root (mirrors
+        # TeraPilotBridge._checkpoint_manager).
+        from .checkpoint import get_checkpoint_manager
         base = _workspace_root(handler)
-        cm = CheckpointManager(session_id="gui", workspace=str(base) if base else None)
+        cm = get_checkpoint_manager(session_id="default", workspace=str(base) if base else None)
+        if base:
+            cm.set_workspace(base)
         result = cm.rewind(n=1)
         if result.get("ok"):
-            return _ok({"method": "rewind", "restored": result.get("restored", [])})
+            return _ok({"method": "rewind", "restored": result.get("files_restored", [])})
         return _err(result.get("error") or "Nothing to revert")
     except Exception as e:
         return _err(str(e))
@@ -2452,7 +2630,7 @@ def _providers_health(handler, body=None):
                 "error": str(exc),
             }
         finally:
-            # v2.4.x-fix (root cause of the "agent reports success but did
+            # v2.3.4-fix (root cause of the "agent reports success but did
             # nothing" bug): the probe runs with max_tokens=100, and if we
             # left that config applied, EVERY subsequent agent/chat LLM call
             # would be capped at 100 output tokens — tool calls (which carry
@@ -2481,7 +2659,7 @@ def _providers_health(handler, body=None):
 def _providers_models(handler, body=None):
     """Fetch the LIVE model list from a provider's /models endpoint.
 
-    v2.4.x: the hardcoded model lists went stale, so the GUI can now ask
+    v2.3.4: the hardcoded model lists went stale, so the GUI can now ask
     the provider itself. Works for every OpenAI-compatible provider
     (GET ``{api_base}/models`` — OpenAI, Groq, DeepSeek, Mistral, xAI,
     Together, Fireworks, Cerebras, SambaNova, Ollama, LM Studio,
@@ -2719,7 +2897,7 @@ def _oneshot_enhance(handler, body=None):
 def _llm_chat_title(handler, first_user: str) -> str:
     """Short LLM round-trip to name a chat; returns "" on any failure.
 
-    v2.4.x: chat titles used to be a raw truncation of the first message
+    v2.3.4: chat titles used to be a raw truncation of the first message
     (``> Создай в папке  mini_project  небольшой Python-модуль  uti...``).
     Now we ask the active provider for a short title, mirroring the
     oneshot pattern (temp config with a tiny max_tokens, original config
@@ -2773,7 +2951,7 @@ def _llm_chat_title(handler, first_user: str) -> str:
 def _chat_generate_title(handler, body=None):
     """Derive a chat title from its first user message.
 
-    v2.4.x: tries a short LLM round-trip for a meaningful title and falls
+    v2.3.4: tries a short LLM round-trip for a meaningful title and falls
     back to the cleaned truncation when the LLM is unavailable/fails.
     """
     body = body or {}

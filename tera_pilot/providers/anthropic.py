@@ -49,6 +49,9 @@ class AnthropicProvider(Provider):
     # Claude 4 / 3.7 / 3.5 family = 200K, Claude 3 Opus = 200K,
     # Claude 3 Haiku = 200K, Claude 2.x = 100K (legacy).
     _MODEL_CONTEXT_WINDOWS = {
+        "claude-opus-5": 200_000,
+        "claude-sonnet-5": 200_000,
+        "claude-haiku-4": 200_000,
         "claude-opus-4": 200_000,
         "claude-sonnet-4": 200_000,
         "claude-3-7": 200_000,
@@ -131,7 +134,7 @@ class AnthropicProvider(Provider):
 
         # If there are tool_use blocks, serialize them as structured
         # text that the agent runtime's OutputParser can parse.
-        # v2.4.1-fix: the old format was
+        # v2.3.4-fix: the old format was
         # ``⌘{"name": ..., "id": ..., "arguments": ...}⌠`` which the
         # OutputParser never understood (it looks for ``"tool"`` /
         # ``"args"`` keys), so every Anthropic tool call was silently

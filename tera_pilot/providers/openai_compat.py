@@ -126,11 +126,11 @@ class OpenAICompatProvider(Provider):
         ``finish_reason`` instead of crashing the agent loop
         (BUGS_REPORT M-AUTO-5).
 
-        v2.4.1-fix: ``model`` (per-call override, G20b) is now accepted
+        v2.3.4-fix: ``model`` (per-call override, G20b) is now accepted
         and threaded into the payload. Before, callers passing
         ``model=...`` crashed with TypeError.
 
-        v2.4.1-fix: tool_calls returned by the API are ALSO serialized
+        v2.3.4-fix: tool_calls returned by the API are ALSO serialized
         into ``text`` (as ``{"tool": ..., "args": ...}`` JSON) so the
         agent runtime's OutputParser — which only parses text — can
         see them. Native ``tool_calls`` alone were previously invisible
@@ -165,7 +165,7 @@ class OpenAICompatProvider(Provider):
         if not text and not message.get("tool_calls"):
             text = f"[{finish_reason}] no content returned"
 
-        # v2.4.1-fix: serialize native tool_calls into the text-based
+        # v2.3.4-fix: serialize native tool_calls into the text-based
         # JSON format the agent runtime's OutputParser understands
         # ({"tool": name, "args": {...}}), appended after any text.
         native_tool_calls = message.get("tool_calls")
@@ -207,6 +207,13 @@ class OpenAICompatProvider(Provider):
         messages = self._inject_skill(messages, skill)
 
         payload = self._build_payload(messages, tools, stop, stream=True, model=model)
+        # v2.3.5-fix (overall agent quality): strip reasoning/thinking
+        # blocks (``<think>...</think>`` etc.) that some models stream
+        # inside the content delta. A per-delta state machine keeps
+        # partial tags at chunk boundaries from leaking reasoning into
+        # the visible chat/TUI.
+        from .think_scrubber import StreamingThinkScrubber
+        scrubber = StreamingThinkScrubber()
         for line in self._post_stream(payload):
             if not line or not line.startswith("data: "):
                 continue
@@ -217,9 +224,16 @@ class OpenAICompatProvider(Provider):
                 chunk = json.loads(payload_str)
                 delta = chunk["choices"][0].get("delta", {}).get("content", "")
                 if delta:
-                    yield delta
+                    visible = scrubber.feed(delta)
+                    if visible:
+                        yield visible
             except (json.JSONDecodeError, KeyError, IndexError) as e:
                 logger.warning(f"[{self.provider_id}] bad SSE chunk: {e}")
+        # End-of-stream: release any held-back partial-tag tail that
+        # turned out not to be a real reasoning block.
+        tail = scrubber.flush()
+        if tail:
+            yield tail
 
     # ── Helpers ───────────────────────────────────────────────────
 
@@ -251,7 +265,32 @@ class OpenAICompatProvider(Provider):
             payload["tools"] = tools
         if stop:
             payload["stop"] = stop
+        # v2.3.5-fix (overall agent quality): optional reasoning-effort
+        # control for reasoning models, configured per-provider via
+        # config.json (providers.<id>.reasoning_effort). Omitted entirely
+        # when unset, so the provider's default effort applies — no
+        # behavior change for existing setups. Values are validated by
+        # the concrete provider (LM Studio accepts none/minimal/low/
+        # medium/high/xhigh).
+        effort = self._resolved_reasoning_effort()
+        if effort:
+            payload["reasoning_effort"] = effort
         return payload
+
+    def _resolved_reasoning_effort(self) -> Optional[str]:
+        """Return the validated ``reasoning_effort`` for this call, or None.
+
+        Reads ``reasoning_effort`` from the provider config's ``extra``
+        dict. Subclasses (e.g. LM Studio) override this to clamp the
+        value to the provider's supported vocabulary; the base class
+        passes the raw value through (OpenAI-compatible endpoints are
+        expected to validate it themselves).
+        """
+        extra = getattr(self.config, "extra", None) or {}
+        raw = extra.get("reasoning_effort") if isinstance(extra, dict) else None
+        if not raw:
+            return None
+        return str(raw).strip().lower() or None
 
     def _url(self) -> str:
         base = self.config.api_base or self.api_base

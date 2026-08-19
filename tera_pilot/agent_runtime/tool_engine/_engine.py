@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..types import AgentEvent, Task, TaskType, ToolCall, ToolName
-from .._helpers import _sanitize_command
+from .._helpers import _sanitize_command, _command_blocked_reason
 from ..diff_utils import (
     _split_multi_file_diff,
     _apply_unified_diff,
@@ -112,7 +112,7 @@ class ToolEngine:
     MAX_OUTPUT = 2000
 
     def __init__(self, workspace: Optional[str] = None):
-        # v2.4.1-fix: resolve the workspace here, exactly like
+        # v2.3.4-fix: resolve the workspace here, exactly like
         # set_workspace() does. The old code kept the path unresolved,
         # so on macOS (where /var is a symlink to /private/var) a
         # workspace under /var/folders/... made `_resolve_path` resolve
@@ -1265,7 +1265,13 @@ class ToolEngine:
         if not self.workspace or not self.workspace.is_dir():
             return None
         try:
-            from .git_service import GitService
+            # v2.3.4-fix: the OLD relative import `from .git_service import
+            # GitService` resolved to tera_pilot/agent_runtime/tool_engine/
+            # git_service.py, which does NOT exist — so the agent's git
+            # tools (status/diff/stage/commit) ALWAYS failed with
+            # "not a git repository (or git not installed)" even on a
+            # valid repo. git_service.py lives at tera_pilot/git_service.py.
+            from tera_pilot.git_service import GitService
             git = GitService(str(self.workspace))
             if not git.is_available:
                 return None
@@ -1301,7 +1307,7 @@ class ToolEngine:
         if not git:
             return "[GIT ERROR] not a git repository"
         try:
-            # v2.4.0-security: validate the pathspec against the workspace
+            # v2.3.4-security: validate the pathspec against the workspace
             # sandbox like _git_stage/_git_commit do. `git diff -- <path>`
             # resolves pathspecs relative to the repo root / cwd, so an
             # unvalidated `../outside` or an absolute path could show
@@ -2309,13 +2315,34 @@ class ToolEngine:
         a formatted result string. Uses the same Popen + polling pattern
         as ``_execute_command`` so Stop cancels it. The result is
         truncated to fit in the agent's observation budget.
+
+        v2.3.4-security: require user confirmation before running the
+        detected test/lint command. This path previously ran the repo's
+        OWN test command (``npm test`` executes whatever the repo's
+        package.json "test" script says; ``pytest`` executes the repo's
+        test files) with NO confirmation gate — a malicious repo could
+        ship a package.json whose test script runs arbitrary commands
+        (T2). Mirror _execute_command/_run_code.
         """
+        if not self._request_confirmation(
+            "execute_command",
+            "Run detected test/lint command: " + " ".join(args),
+        ):
+            return "[REJECTED BY USER] test/lint command cancelled"
         try:
             proc = subprocess.Popen(
                 args, shell=False,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 cwd=self.workspace,
             )
+            # Drain the pipes in daemon threads WHILE the child runs — the
+            # old code read them only after exit, which is a pipe-buffer
+            # deadlock: a test emitting more than the OS pipe buffer
+            # (~64KB) blocks on write, never exits, and gets killed by the
+            # 60s deadline — a 1-second test with 100KB of output appeared
+            # as a timeout with no captured output. Same fix as
+            # _execute_command / _run_code (see module docstring).
+            stdout_buf, stderr_buf, t_out, t_err = _spawn_pipe_drain(proc)
             deadline = time.time() + 60  # 60s cap for test/lint in verify
             try:
                 while proc.poll() is None:
@@ -2328,8 +2355,7 @@ class ToolEngine:
                         proc.wait()
                         return f"[TIMEOUT] test/lint exceeded 60s"
                     time.sleep(0.25)
-                stdout = proc.stdout.read() if proc.stdout else b""
-                stderr = proc.stderr.read() if proc.stderr else b""
+                stdout, stderr = _collect_pipe_drain(stdout_buf, stderr_buf, t_out, t_err)
             except Exception:
                 proc.kill()
                 proc.wait()
@@ -2825,6 +2851,41 @@ class ToolEngine:
         "grep", "mkdir", "touch", "git",
     }
 
+    # v2.3.4-security: git config keys whose value git EXECUTES as a
+    # command. ``git -c <key>=<value>`` / ``git config <key> <value>``
+    # with these keys is a workspace-sandbox escape to arbitrary shell
+    # execution — the value is never a path, so the path checks can't
+    # see it (confirmed live: ``-c core.fsmonitor='touch /tmp/x'`` runs
+    # on ``git status``; ``-c core.editor='touch /tmp/x'`` runs on
+    # ``git commit``). Keys are matched case-insensitively; driver keys
+    # (diff.*.textconv, filter.*.clean/.smudge, credential.*.helper)
+    # are matched by pattern.
+    _GIT_EXEC_KEYS_EXACT = frozenset({
+        "core.fsmonitor",
+        "core.editor",
+        "core.sshcommand",
+        "core.pager",
+        "core.askpass",
+        "core.hookspath",
+        "sequence.editor",
+        "credential.helper",
+        "interactive.difffilter",
+    })
+    _GIT_EXEC_KEYS_PATTERNS = (
+        ("diff.", ".textconv"),
+        ("filter.", ".clean"),
+        ("filter.", ".smudge"),
+        ("credential.", ".helper"),
+    )
+
+    @staticmethod
+    def _git_key_is_exec_capable(key: str) -> bool:
+        k = key.lower()
+        if k in ToolEngine._GIT_EXEC_KEYS_EXACT:
+            return True
+        return any(k.startswith(pre) and k.endswith(suf)
+                    for pre, suf in ToolEngine._GIT_EXEC_KEYS_PATTERNS)
+
     def _validate_command_paths(self, args: List[str]) -> Optional[str]:
         """For commands that take file/dir paths as arguments, make sure
         every path-like argument resolves inside the workspace sandbox.
@@ -2839,7 +2900,7 @@ class ToolEngine:
             return None
         # v1.0.6-security: git -C <path> changes the working directory
         # to <path> which is not the workspace — validate it.
-        # v2.4.0-security: also validate `--git-dir=<path>` /
+        # v2.3.4-security: also validate `--git-dir=<path>` /
         # `--work-tree=<path>` (both the `--flag=path` and `--flag path`
         # forms). These override where git reads its repository / work
         # tree from, so an unvalidated `git --git-dir=/home/user/.git log`
@@ -2850,6 +2911,53 @@ class ToolEngine:
         # workspace blocks the command.
         if base_cmd == "git":
             for i, arg in enumerate(args[1:], 1):
+                # v2.3.4-security: `git -c alias.x='!<shell>' x` — git
+                # executes any alias whose value starts with '!' through
+                # the shell. The value is never a path, so it sailed
+                # straight through _resolve_path: a prompt-injected agent
+                # (or instructions from a malicious repo) could run
+                # `git -c alias.x='!rm -rf ~/Documents' x` — a sandbox
+                # escape that bypasses the workspace path checks entirely.
+                # Same for `git config alias.x '!<shell>'`. Fail closed.
+                if arg.startswith("!"):
+                    return (
+                        f"[SECURITY ERROR] 'git' argument starting with '!' is a "
+                        f"shell-executing alias: {arg!r}"
+                    )
+                if arg == "-c" and i + 1 < len(args):
+                    value = args[i + 1]
+                    rhs = value.split("=", 1)[1] if "=" in value else ""
+                    if rhs.startswith("!"):
+                        return (
+                            f"[SECURITY ERROR] 'git -c' value {value!r} starts with "
+                            f"'!' — git aliases with a '!' prefix execute shell "
+                            f"commands; blocked"
+                        )
+                    # v2.3.4-security: exec-capable config keys — git runs
+                    # these values as commands (core.fsmonitor/editor/
+                    # sshCommand/pager/askpass, hooks, credential helpers,
+                    # textconv/filter drivers). Fail closed.
+                    key = value.split("=", 1)[0]
+                    if self._git_key_is_exec_capable(key):
+                        return (
+                            f"[SECURITY ERROR] 'git -c {key}=...' configures a "
+                            f"value git executes as a command; blocked"
+                        )
+                if arg == "config":
+                    # `git config <key> <value>` — writing an exec-capable
+                    # key is the two-step form of the same escape (define
+                    # the alias/hook, then run it). The key is the first
+                    # non-flag argument after "config".
+                    for j in range(i + 1, len(args)):
+                        a = args[j]
+                        if a.startswith("-"):
+                            continue
+                        if self._git_key_is_exec_capable(a):
+                            return (
+                                f"[SECURITY ERROR] 'git config {a}' writes an "
+                                f"exec-capable config key; blocked"
+                            )
+                        break
                 # Two-arg forms: -C <path> / --git-dir <path> / --work-tree <path>.
                 if arg in ("-C", "--git-dir", "--work-tree") and i + 1 < len(args):
                     target = args[i + 1]
@@ -2897,7 +3005,17 @@ class ToolEngine:
         """
         args, is_safe = _sanitize_command(command, project_root=str(self.workspace) if self.workspace else None)
         if not is_safe:
-            return f"[SECURITY ERROR] Command blocked: {command}"
+            # v2.3.4-fix: tell the model WHY the command was blocked and
+            # how to do the same thing legally (e.g. bare `pytest`), so
+            # it adapts instead of retrying the same blocked command
+            # until it runs out of iterations.
+            reason = _command_blocked_reason(
+                command,
+                project_root=str(self.workspace) if self.workspace else None,
+            )
+            return (f"[SECURITY ERROR] Command blocked: {command} — "
+                    f"{reason or 'not allowed by the security policy'}. "
+                    f"Do not retry this command; use an allowed alternative.")
 
         path_error = self._validate_command_paths(args)
         if path_error:
@@ -2910,12 +3028,30 @@ class ToolEngine:
         # v2.1.0 (Loop 2): configurable per-call timeout with bounds.
         timeout = max(self.MIN_TIMEOUT, min(timeout, self.MAX_TIMEOUT))
 
+        # v2.3.4-security: for raw `git ...` commands, inject neutralization
+        # flags that disable exec-capable config keys and repo hooks. A
+        # malicious repo's OWN `.git/config` can set `core.fsmonitor`
+        # (runs on `git status`), `diff.*.textconv` (runs on `git diff`),
+        # `core.editor` (runs on `git commit`) etc., and its `.git/hooks/*`
+        # run on the matching operation — none of that is visible to
+        # _validate_command_paths because nothing is passed on the command
+        # line. Injecting `-c key=` overrides neutralizes it regardless of
+        # what the repo config contains (confirmed live exploit → fixed).
+        exec_args = list(args)
+        try:
+            base_cmd = os.path.basename(str(args[0])).lower() if args else ""
+            if base_cmd == "git":
+                from tera_pilot.git_service import git_neutralization_args
+                exec_args = [args[0]] + git_neutralization_args(self.workspace) + list(args[1:])
+        except Exception:
+            pass  # never break execution on hardening failure
+
         try:
             # v1.0.6: use Popen + polling so Stop can abort the
             # subprocess (M-RT-7). subprocess.run blocks up to
             # timeout with no cancellation path.
             proc = subprocess.Popen(
-                args, shell=False,
+                exec_args, shell=False,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 cwd=self.workspace,
             )
@@ -2968,7 +3104,7 @@ class ToolEngine:
                     sub_cmd = str(args[1]).lower() if len(args) > 1 else ""
                     if bin_name == "git" and sub_cmd in {"init", "clone"}:
                         try:
-                            from .git_service import GitService
+                            from tera_pilot.git_service import GitService
                             GitService.invalidate_cache(str(self.workspace))
                         except Exception:
                             pass
@@ -3122,6 +3258,23 @@ class ToolEngine:
                 f"[WEB_FETCH ERROR] only http(s) URLs are allowed "
                 f"(got {url[:80]!r})"
             )
+        # v2.3.4-security: block loopback targets. The local API server
+        # exposes its bearer token at GET /api/status (and other local
+        # services may hold secrets) — a prompt-injected agent could
+        # fetch http://127.0.0.1:<port>/api/status to read api_token and
+        # exfiltrate it (T5). The agent never needs to fetch localhost.
+        try:
+            from urllib.parse import urlparse as _urlparse
+            _host = (_urlparse(url).hostname or "").lower()
+            _loopback = {"localhost", "127.0.0.1", "::1"}
+            if _host in _loopback or _host.startswith("127."):
+                return (
+                    f"[WEB_FETCH REJECTED] loopback address {_host!r} — "
+                    f"the agent cannot fetch local services (prevents "
+                    f"reading the local API token)"
+                )
+        except Exception:
+            pass
         # Heuristic: reject URLs with very long base64-like query
         # params — these are often exfiltration attempts (secret
         # embedded as a query param) or prompt-injection vectors.

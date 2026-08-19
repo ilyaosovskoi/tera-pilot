@@ -4,8 +4,20 @@ LM Studio exposes an OpenAI-compatible endpoint at /v1/chat/completions.
 No API key required — auth is handled by LM Studio's local server.
 """
 
+from typing import Optional
+
 from .openai_compat import OpenAICompatProvider
 from .base import ProviderCapability
+
+
+# LM Studio accepts these top-level reasoning_effort values via its
+# OpenAI-compatible chat.completions endpoint (ported from Hermes Agent's
+# lmstudio_reasoning module, MIT). Toggle-style models publish
+# allowed_options as ["off", "on"] — map them onto the request
+# vocabulary.
+_LM_VALID_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh"})
+_LM_EFFORT_ALIASES = {"off": "none", "on": "medium"}
+_LM_EFFORT_CLAMP = {"max": "xhigh", "ultra": "xhigh"}
 
 
 class LMStudioProvider(OpenAICompatProvider):
@@ -22,6 +34,24 @@ class LMStudioProvider(OpenAICompatProvider):
         ProviderCapability.SKILLS,
         ProviderCapability.OFFLINE,
     })
+
+    def _resolved_reasoning_effort(self) -> Optional[str]:
+        """LM Studio vocabulary clamp for ``reasoning_effort``.
+
+        Generic levels beyond LM Studio's ladder ("max", "ultra") are
+        clamped to its ceiling; "off"/"on" (toggle-style models) are
+        mapped to "none"/"medium". Anything outside the supported set
+        is dropped (None) so the server's default effort applies rather
+        than a 400.
+        """
+        effort = super()._resolved_reasoning_effort()
+        if not effort:
+            return None
+        effort = _LM_EFFORT_ALIASES.get(effort, effort)
+        effort = _LM_EFFORT_CLAMP.get(effort, effort)
+        if effort not in _LM_VALID_EFFORTS:
+            return None
+        return effort
 
     def _ensure_loaded(self) -> None:
         """Skip API key check — LM Studio doesn't use keys."""

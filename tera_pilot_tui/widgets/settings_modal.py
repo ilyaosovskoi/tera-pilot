@@ -97,7 +97,16 @@ class QuickSettingsModal(ModalScreen[None]):
     def __init__(self, bridge, **kwargs):
         super().__init__(**kwargs)
         self.bridge = bridge
-        self._selected_provider = bridge.get_provider() or "openai"
+        # v2.3.4-fix: bridge has no get_provider() — it used to crash
+        # with AttributeError every time the modal opened (so /settings
+        # was completely broken). Read the active provider from status().
+        self._selected_provider = "openai"
+        try:
+            status = bridge.status()
+            if status.get("provider"):
+                self._selected_provider = status["provider"]
+        except Exception:
+            pass
 
     def compose(self) -> ComposeResult:
         with Vertical(id="qs-container"):
@@ -143,7 +152,8 @@ class QuickSettingsModal(ModalScreen[None]):
         entrance(self.query_one("#qs-container"))
         # Pre-fill model from bridge
         try:
-            status = self.bridge.get_status()
+            # v2.3.4-fix: bridge has no get_status() — use status().
+            status = self.bridge.status()
             model = status.get("model", "")
             if model:
                 self.query_one("#qs-model-input", Input).value = model

@@ -57,6 +57,23 @@ Tera Pilot v2.0.2 — Team Spend Dashboard (Goal M3).
 
 5.  **Export.** ``TeamSpendDashboard.export_report_json()`` and
     ``export_report_csv()`` for sharing with finance / ops.
+
+Status & known limitations (v2.3.4 — honest, matching README's
+"deliberately NOT claiming" section):
+- Spend Dashboard is a **Pro-licensed feature** (M3). Without a valid
+  license (or the local-dev ``TERA_PILOT_PRO`` override) ``report()``
+  returns an empty report with ``error="pro_required"`` — it fails
+  CLOSED and never fabricates zeros as real spend. The gate is enforced
+  in :meth:`TeamSpendDashboard.report`, which every surface funnels
+  through: TUI ``/spend``, ``/api/spend/report`` and the ``/api/spend/
+  export_*`` endpoints.
+- The dashboard is purely local (no network). ``identity.json`` is a
+  local file; the "multi-machine" aggregation only works when team
+  members' ``token_history.jsonl`` files are reachable on disk (shared
+  drive / copied over) — there is deliberately no sync service.
+- Settings storage (team name, budget, sources) is NOT itself gated;
+  only the report/export (the feature's output) is. An unlicensed user
+  can set a team name, but cannot see spend data.
 """
 
 from __future__ import annotations
@@ -74,6 +91,11 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+# v2.3.4: Spend Dashboard is a Pro-licensed feature (M3). License checks
+# are fully offline and fail closed (report() returns an empty report with
+# error="pro_required" instead of crashing).
+from .licensing import is_feature_licensed as _is_feature_licensed
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +303,10 @@ class TeamSpendReport:
     sources_scanned: int = 0
     entries_processed: int = 0
     generated_at_iso: str = ""
+    # v2.3.4: set to "pro_required" when the spend_dashboard feature is not
+    # licensed — the report body is empty and callers must surface the gate
+    # instead of presenting zeros as real spend data.
+    error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -330,7 +356,18 @@ class TeamSpendDashboard:
         totals (total_cost_usd, by_user, by_provider, by_model) cover
         ALL entries in the sources, not just the last N days — this
         matches what a finance team would want to see.
+
+        v2.3.4: Spend Dashboard is a Pro-licensed feature (M3). Without a
+        valid license the report fails CLOSED — an empty report with
+        ``error="pro_required"`` is returned (never raises, never returns
+        fabricated zeros as real spend).
         """
+        if not _is_feature_licensed("spend_dashboard"):
+            return TeamSpendReport(
+                team=self._identity.team,
+                error="pro_required",
+                generated_at_iso=_now_iso(),
+            )
         cutoff_ts = time.time() - (days * 86400.0)
         team = self._identity.team
 

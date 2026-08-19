@@ -191,8 +191,14 @@ class CommandSuggestions(Widget):
         if 0 <= self._highlighted < list_w.option_count:
             list_w.highlighted = self._highlighted
 
-    def on_option_list_selected(self, event: OptionList.Selected) -> None:
-        """Handle mouse click on a suggestion item."""
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Handle mouse click on a suggestion item.
+
+        v2.3.4-fix: renamed from ``on_option_list_selected`` — Textual
+        8.x dispatches ``OptionList.OptionSelected`` to
+        ``on_option_list_option_selected``, so the old name was never
+        called and clicks on suggestions did nothing.
+        """
         idx = event.option_index
         if 0 <= idx < len(self._items):
             item = self._items[idx]

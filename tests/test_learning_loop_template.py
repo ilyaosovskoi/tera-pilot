@@ -1,4 +1,4 @@
-"""Regression tests for learning_loop template formatting (v2.4.1-fix).
+"""Regression tests for learning_loop template formatting (v2.3.4-fix).
 
 Previously ``create_learning_entry`` called ``template.format(**kwargs)``
 outside any try/except. A project's custom ``Learnings.md`` template with

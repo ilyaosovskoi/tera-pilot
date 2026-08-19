@@ -149,6 +149,47 @@ def test_non_streaming_turn_no_token_deltas(tmp_path, fake):
     assert result.output == "done-non-streaming"
 
 
+# ── degraded flag (v2.3.4-fix) ─────────────────────────────────────────
+
+
+def test_degraded_flag_false_when_tools_ran_then_prose(tmp_path, fake):
+    """Regression: tools executed in earlier iterations, then the model
+    wrapped up in prose on iteration 3+. The run DID real work, so
+    ``degraded_prose`` must be False — the old code set it whenever
+    iteration 3+ emitted prose, warning the UI "verify the result" over
+    a completed run (reproduced deterministically)."""
+    fake._script = [
+        FakeProvider.tool_call("write_file", {"path": "a.txt", "content": "hello"}),
+        FakeProvider.tool_call("read_file", {"path": "a.txt"}),
+        "I wrote the file, it contains hello.",
+    ]
+    bridge, _, _, _ = make_bridge(tmp_path, fake, streaming=False)
+    _auto_approve(bridge)
+    t, holder = run_in_thread(bridge, "write a file a.txt with 'hello' and read it back")
+    result = _wait_result(t, holder)
+
+    assert result.success is True
+    assert [tc.name.value for tc in (result.tool_calls or [])] == ["write_file", "read_file"]
+    assert (tmp_path / "a.txt").read_text() == "hello"
+    assert (result.metadata or {}).get("degraded_prose") is False
+
+
+def test_degraded_flag_true_when_no_tool_ever_ran(tmp_path, fake):
+    """Pure-prose run (no tool call in any iteration) must still be
+    flagged degraded — the flag exists precisely to catch this."""
+    fake._script = [
+        "I'll write the code: print('x')",
+        "Here is the solution: print('x')",
+        "The file is created.",
+    ]
+    bridge, _, _, _ = make_bridge(tmp_path, fake, streaming=False)
+    _auto_approve(bridge)
+    t, holder = run_in_thread(bridge, "write a file x.py")
+    result = _wait_result(t, holder)
+
+    assert (result.metadata or {}).get("degraded_prose") is True
+
+
 # ── cancel ─────────────────────────────────────────────────────────────
 
 
@@ -257,7 +298,7 @@ def test_timeout_is_retried_then_fails(tmp_path, fake):
 
 def test_rate_limit_is_retried(tmp_path, fake):
     err = ProviderError("HTTP 429 Too Many Requests (rate limit exceeded)")
-    # v2.4.x: quota/429 errors get _RETRY_QUOTA_MAX_ATTEMPTS attempts (the
+    # v2.3.4: quota/429 errors get _RETRY_QUOTA_MAX_ATTEMPTS attempts (the
     # upstream explicitly asks us to retry shortly) — exhaust every one so
     # the run fails instead of succeeding on the scripted final answer.
     from tera_pilot.agent_runtime.runtime import AgentRuntime

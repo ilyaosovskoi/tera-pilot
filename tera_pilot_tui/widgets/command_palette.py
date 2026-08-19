@@ -150,7 +150,7 @@ class CommandPalette(ModalScreen):
         custom_commands: Optional[List[CommandEntry]] = None,
         sub_options: Optional[List[Dict[str, Any]]] = None,
         sub_prompt: Optional[str] = None,
-        on_select: Optional[Callable[[str, Optional[str]], None]] = None,
+        on_select: Optional[Callable[[str, bool], None]] = None,
     ) -> None:
         super().__init__()
         self._custom_commands = custom_commands or []
@@ -306,8 +306,15 @@ class CommandPalette(ModalScreen):
         if first_real_index < list_widget.option_count:
             list_widget.highlighted = first_real_index
 
-    def on_option_list_selected(self, event: OptionList.Selected) -> None:
-        """Handle mouse click on an option."""
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Handle mouse click on an option.
+
+        v2.3.4-fix: the handler was named ``on_option_list_selected``,
+        which Textual 8.x never calls — the real dispatch name for
+        ``OptionList.OptionSelected`` is ``on_option_list_option_selected``.
+        Mouse clicks on palette options were dead; only keyboard Enter
+        worked.
+        """
         idx = event.option_index
         if idx is None or idx < 0 or idx >= len(self._option_ids):
             return
@@ -344,8 +351,9 @@ class CommandPalette(ModalScreen):
         ``action_select_item`` binding — call ``action_select_item()``
         so the highlighted option is selected.
 
-        Mouse clicks go through ``on_option_list_selected`` and are
-        unaffected.
+        Mouse clicks go through ``on_option_list_option_selected`` and are
+        unaffected (v2.3.4-fix: the old ``on_option_list_selected`` name
+        never fired in Textual 8.x).
         """
         # Don't let Input's default Submitted handler also fire
         # (which would close the palette via the parent App's

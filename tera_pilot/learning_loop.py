@@ -249,10 +249,20 @@ class LearningEntry:
 
 def _run_git(project_path: str, args: List[str], timeout: float = 5.0) -> Tuple[int, str, str]:
     """Run git inside ``project_path`` with shell=False. Returns
-    (exit_code, stdout, stderr). Never raises."""
+    (exit_code, stdout, stderr). Never raises.
+
+    v2.3.4-security: inject the exec-key/hook neutralization flags so a
+    malicious repo's own .git/config (core.fsmonitor, diff.*.textconv, …)
+    cannot execute on the learning loop's git reads.
+    """
+    try:
+        from .git_service import git_neutralization_args
+        cmd = ["git"] + git_neutralization_args(Path(project_path)) + list(args)
+    except Exception:
+        cmd = ["git"] + list(args)
     try:
         proc = subprocess.Popen(
-            ["git"] + args,
+            cmd,
             shell=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -489,16 +499,32 @@ def detect_ci_failure(project_path: str) -> Optional[CIFailureSignal]:
 
 
 def _next_learning_id(learnings_dir: Path, date_str: str) -> str:
-    """Pick the next LEARN-YYYYMMDD-XXX id that isn't taken."""
-    # Scan existing files for IDs on this date.
-    existing: set = set()
-    for f in learnings_dir.glob(f"*-{date_str}-*.md"):
-        # Filenames look like "LOOP-...-LEARN-20260731-001.md" or just
-        # "2026-07-31-slug.md". We only care about LEARN- IDs in body.
-        pass
-    # Simpler: just pick 001, 002, ... based on count of files today.
-    today_files = list(learnings_dir.glob(f"{date_str}-*.md"))
-    return f"LEARN-{date_str.replace('-', '')}-{len(today_files) + 1:03d}"
+    """Pick the next LEARN-YYYYMMDD-XXX id that isn't taken.
+
+    v2.3.4-fix: the old implementation counted today's files and used
+    ``len(today_files) + 1`` as the sequence number, but it never
+    scanned for EXISTING LEARN ids (the loop body was a ``pass``). If
+    an entry was deleted/dismissed, the count dropped and a NEW entry
+    created the same day could reuse the old entry's id — so a later
+    ``dismiss LEARN-...-001`` would silently hit the wrong entry. We
+    now scan the ``id: LEARN-YYYYMMDD-NNN`` frontmatter line inside
+    every entry file (the id lives in the BODY, not the filename) and
+    return the next free sequence number.
+    """
+    stamp = date_str.replace("-", "")
+    highest = 0
+    for f in learnings_dir.glob("*.md"):
+        try:
+            head = f.read_text(encoding="utf-8", errors="replace")[:2048]
+        except OSError:
+            continue
+        m = re.search(rf"\bLEARN-{stamp}-(\d{{3}})\b", head)
+        if m:
+            try:
+                highest = max(highest, int(m.group(1)))
+            except ValueError:
+                continue
+    return f"LEARN-{stamp}-{highest + 1:03d}"
 
 
 def create_learning_entry(
@@ -537,7 +563,7 @@ def create_learning_entry(
     # Fill in the template. We use simple {field} placeholders so we
     # don't need a templating engine.
     #
-    # v2.4.1-fix: template.format() was previously called OUTSIDE any
+    # v2.3.4-fix: template.format() was previously called OUTSIDE any
     # try/except — a project's custom Learnings.md template containing a
     # placeholder we don't provide (or a literal brace) raised KeyError /
     # ValueError and crashed the whole /learnings scan (and the auto

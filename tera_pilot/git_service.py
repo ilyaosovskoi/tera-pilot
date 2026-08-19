@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,133 @@ logger = logging.getLogger(__name__)
 # what's actually on disk, and `git add <path>` would silently fail
 # (BUGS_REPORT H-GIT-1).
 _OCTAL_ESCAPE_RE = re.compile(rb'\\([0-7]{3})')
+
+
+# ── v2.3.4-security: neutralize exec-capable git config keys + hooks ──
+# A repository is UNTRUSTED input (threat model T1). git will execute
+# the values of a whole family of config keys read from the REPO's own
+# ``.git/config`` (no ``-c`` flag needed): ``core.fsmonitor`` runs on
+# plain ``git status``, ``core.editor`` on ``git commit``, ``diff.*.textconv``
+# on ``git diff``, ``filter.*.clean/.smudge`` on ``git add``/``checkout``,
+# ``credential.*.helper`` on auth, and every ``.git/hooks/*`` script runs
+# on the matching git operation. Confirmed live: a malicious repo whose
+# ``.git/config`` contains ``[core] fsmonitor = touch /tmp/pwned`` executes
+# that command on a routine ``git status`` — a workspace-sandbox escape
+# that the command-line arg checks in ``ToolEngine._validate_command_paths``
+# cannot see, because nothing is passed on the command line.
+#
+# Fix: for every git invocation made by the agent, inject ``-c`` overrides
+# that (a) empty out every exec-capable key and (b) point ``core.hooksPath``
+# at a directory that cannot contain hooks — so repo-supplied commands and
+# hooks are neutralized regardless of what the repo's config contains.
+_GIT_NEUTRALIZE_FIXED = [
+    "-c", "core.fsmonitor=",          # runs on `git status`
+    "-c", "core.editor=true",         # runs on `git commit` (true = no-op)
+    "-c", "core.sshcommand=",         # runs on fetch/push
+    "-c", "core.pager=",              # runs when paging
+    "-c", "core.askpass=",            # runs on credential prompts
+    "-c", "core.hookspath=" + str(Path(tempfile.gettempdir()) / "tera_pilot_no_hooks"),
+    "-c", "sequence.editor=true",     # runs on rebase
+    "-c", "credential.helper=",       # runs on credential prompts
+    "-c", "interactive.difffilter=",  # runs on interactive diff
+]
+
+# Driver keys are per-name (``diff.<name>.textconv`` etc.) so they can't
+# be enumerated in a fixed list — scan the repo's own config for them.
+_GIT_EXEC_KEY_EXACT = frozenset({
+    "core.fsmonitor", "core.editor", "core.sshcommand", "core.pager",
+    "core.askpass", "core.hookspath", "sequence.editor",
+    "credential.helper", "interactive.difffilter",
+})
+_GIT_EXEC_KEY_PATTERNS = (
+    ("diff.", ".textconv"),
+    ("filter.", ".clean"),
+    ("filter.", ".smudge"),
+    ("credential.", ".helper"),
+)
+
+
+def _git_key_is_exec_capable(key: str) -> bool:
+    k = key.lower()
+    if k in _GIT_EXEC_KEY_EXACT:
+        return True
+    return any(k.startswith(pre) and k.endswith(suf)
+                for pre, suf in _GIT_EXEC_KEY_PATTERNS)
+
+
+def _git_repo_exec_config_keys(root: Path) -> List[str]:
+    """Return exec-capable config keys that git would read from the repo's
+    own ``.git/config`` (driver keys with arbitrary names).
+
+    Handles both a ``.git`` directory and a ``.git`` file (worktrees).
+    Returns an empty list on any parse problem — the fixed neutralization
+    set above still applies, so a malformed config cannot weaken it.
+    """
+    git_dir = root / ".git"
+    config_path: Optional[Path] = None
+    try:
+        if git_dir.is_dir():
+            config_path = git_dir / "config"
+        elif git_dir.is_file():
+            # Worktree: `.git` is a file containing `gitdir: <path>`.
+            text = git_dir.read_text(encoding="utf-8", errors="replace")
+            for line in text.splitlines():
+                line = line.strip()
+                if line.startswith("gitdir:"):
+                    target = Path(line[len("gitdir:"):].strip())
+                    if not target.is_absolute():
+                        target = (root / target).resolve()
+                    config_path = target / "config"
+                    break
+    except OSError:
+        return []
+    if config_path is None or not config_path.is_file():
+        return []
+    try:
+        text = config_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    keys: List[str] = []
+    section = ""
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        m = re.match(r"^\[([^\]]+)\]$", line)
+        if m:
+            section = m.group(1).strip().lower()
+            continue
+        if "=" not in line:
+            continue
+        opt = line.split("=", 1)[0].strip().lower()
+        # section like `diff "evil"` → key `diff.evil.textconv`
+        sm = re.match(r"^([a-z0-9.-]+)\s+\"([^\"]+)\"$", section)
+        if sm:
+            full = f"{sm.group(1)}.{sm.group(2)}.{opt}"
+        elif section:
+            full = f"{section}.{opt}"
+        else:
+            continue
+        if _git_key_is_exec_capable(full):
+            keys.append(full)
+    return keys
+
+
+def git_neutralization_args(root: Optional[Path]) -> List[str]:
+    """``-c`` flags that neutralize exec-capable git config keys and repo
+    hooks for a git invocation rooted at *root* (may be None).
+
+    These flags must be placed BEFORE the git subcommand
+    (``git <flags> status``), which is exactly how git parses ``-c``.
+    """
+    flags = list(_GIT_NEUTRALIZE_FIXED)
+    if root is not None:
+        try:
+            for key in _git_repo_exec_config_keys(root):
+                flags += ["-c", f"{key}="]
+        except Exception:
+            pass  # fixed set still applies
+    return flags
 
 
 def _git_unquote_path(path: str) -> str:
@@ -157,8 +285,9 @@ class GitService:
     # status refresh.
     NEGATIVE_CACHE_TTL_SECONDS = 30.0
 
-    def __init__(self, root: Optional[str] = None):
+    def __init__(self, root: Optional[str] = None, *, neutralize_exec: bool = True):
         self._root: Optional[Path] = None
+        self._neutralize_exec = neutralize_exec
         if root:
             self.set_root(root)
 
@@ -524,11 +653,19 @@ class GitService:
 
     # ── Internal ───────────────────────────────────────────────────
 
-    @staticmethod
-    def _run_git(cwd: Path, args: List[str], *, check: bool = True) -> subprocess.CompletedProcess:
+    def _run_git(self, cwd: Path, args: List[str], *, check: bool = True) -> subprocess.CompletedProcess:
         try:
+            cmd: List[str] = ["git"]
+            # v2.3.4-security: neutralize repo-supplied exec config keys and
+            # hooks for every git invocation (agent tools AND GUI status).
+            # A malicious .git/config (core.fsmonitor on status, diff.*.textconv
+            # on diff) or .git/hooks/* (pre-commit on commit) would otherwise
+            # execute arbitrary commands. See git_neutralization_args().
+            if self._neutralize_exec:
+                cmd += git_neutralization_args(cwd)
+            cmd += args
             return subprocess.run(
-                ["git"] + args,
+                cmd,
                 cwd=str(cwd),
                 capture_output=True,
                 text=True,

@@ -2,6 +2,11 @@
    TERA_PILOT v2.0.0 — REAL frontend logic (English)
    =================================================================== */
 
+// v2.3.4: single frontend version constant. The About tab and the ready
+// toast prefer the LIVE backend version (status.version, from
+// tera_pilot/__init__.py) and fall back to this when opened standalone.
+const APP_VERSION = '2.3.4';
+
 window.__apiBase = null;  // Set by __teraPilotReady from the local API server
 // v1.0.5-security: bearer token for mutating endpoints on the local HTTP
 // API server (CSRF-to-localhost defense, BUGS_REPORT C-API-1).
@@ -49,7 +54,7 @@ const state = {
 const PROVIDER_META = {
   // ── Local (no key) ───────────────────────────────────────────────
   lmstudio:   { label:'LM Studio', model:'',                              needsKey:false, statusLabel:'LM Studio',         modelDisplay:'LM Studio', keyHint:'Download LM Studio, load a model, and start its local server — no account or key needed.', keyUrl:'https://lmstudio.ai' },
-  ollama:     { label:'Ollama',     model:'llama3.3',                    needsKey:false, statusLabel:'Ollama · Llama 3.3',       modelDisplay:'Llama 3.3', keyHint:'Install Ollama and pull a model — runs fully on your machine, no key needed.', keyUrl:'https://ollama.com/download' },
+  ollama:     { label:'Ollama',     model:'llama4',                      needsKey:false, statusLabel:'Ollama · Llama 4',         modelDisplay:'Llama 4', keyHint:'Install Ollama and pull a model — runs fully on your machine, no key needed.', keyUrl:'https://ollama.com/download' },
   vllm:       { label:'vLLM',       model:'meta-llama/Meta-Llama-3.1-8B-Instruct', needsKey:false, statusLabel:'vLLM · Llama 3.1 8B', modelDisplay:'Llama 3.1 8B', keyHint:'Self-hosted OpenAI-compatible server. Set TERA_PILOT_VLLM_BASE_URL env var to point at your server.', keyUrl:'https://docs.vllm.ai' },
   koboldcpp:  { label:'KoboldCpp',  model:'local-model',                 needsKey:false, statusLabel:'KoboldCpp · Local',        modelDisplay:'KoboldCpp local', keyHint:'Local GGUF server with an OpenAI-compatible API. Start KoboldCpp and load any model.', keyUrl:'https://github.com/LostRuins/koboldcpp' },
   llamafile:  { label:'llamafile',  model:'local-model',                 needsKey:false, statusLabel:'llamafile · Local',        modelDisplay:'llamafile local', keyHint:'Mozilla\'s single-file LLM runner. Start with --server and load any .llamafile.', keyUrl:'https://github.com/Mozilla-Ocho/llamafile' },
@@ -69,7 +74,7 @@ const PROVIDER_META = {
   cerebras:   { label:'Cerebras',   model:'llama-4-scout-17b-16e-instruct', needsKey:true,  statusLabel:'Cerebras · Llama 4 Scout',  modelDisplay:'Llama 4 Scout', keyHint:'Free tier; the fastest inference speeds available anywhere.', keyUrl:'https://cloud.cerebras.ai' },
   sambanova:  { label:'SambaNova',  model:'Meta-Llama-4-Maverick-17B-128E-Instruct', needsKey:true,  statusLabel:'SambaNova · Llama 4 Maverick', modelDisplay:'Llama 4 Maverick', keyHint:'Free tier with no credit card required.', keyUrl:'https://cloud.sambanova.ai/apis' },
   // ── Open-model hosting / aggregators ─────────────────────────────
-  openrouter: { label:'OpenRouter', model:'anthropic/claude-sonnet-4.6', needsKey:true,  statusLabel:'OpenRouter · Claude Sonnet 4.6', modelDisplay:'Claude Sonnet 4.6', keyHint:'One key, access to almost every model. Free credits for new accounts.', keyUrl:'https://openrouter.ai/keys' },
+  openrouter: { label:'OpenRouter', model:'anthropic/claude-sonnet-5',   needsKey:true,  statusLabel:'OpenRouter · Claude Sonnet 5', modelDisplay:'Claude Sonnet 5', keyHint:'One key, access to almost every model. Free credits for new accounts.', keyUrl:'https://openrouter.ai/keys' },
   together:   { label:'Together AI',model:'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', needsKey:true, statusLabel:'Together · Llama 4 Maverick', modelDisplay:'Llama 4 Maverick', keyHint:'Wide catalog of open-source models.', keyUrl:'https://api.together.ai/settings/api-keys' },
   fireworks:  { label:'Fireworks',  model:'accounts/fireworks/models/llama4-maverick-instruct-basic', needsKey:true, statusLabel:'Fireworks · Llama 4 Maverick', modelDisplay:'Llama 4 Maverick', keyHint:'Fast hosted inference for open models.', keyUrl:'https://app.fireworks.ai/settings/users/api-keys' },
   novita:     { label:'Novita AI',  model:'meta-llama/llama-3.1-70b-instruct', needsKey:true, statusLabel:'Novita · Llama 3.1 70B', modelDisplay:'Llama 3.1 70B', keyHint:'Cheap hosted open models. Free trial credits for new accounts.', keyUrl:'https://novita.ai/get-key' },
@@ -372,6 +377,58 @@ const templateChip=document.getElementById('templateChip');
 const templateChipText=document.getElementById('templateChipText');
 const skillChip=document.getElementById('skillChip');
 const skillChipText=document.getElementById('skillChipText');
+
+// ── v2.3.4: Smart auto-scroll ───────────────────────────────────────
+// Modern chat UX: only force-scroll to bottom while the user is already
+// near the bottom. If the user scrolls up to read while the agent is
+// streaming, leave them alone and show a floating "Jump to latest" pill
+// with a count of new content events that arrived while they were away.
+let _chatNearBottom=true;          // is the user at/near the bottom of chatView?
+let _pendingScrollEvents=0;        // content events that arrived while scrolled up
+const _jumpLatestBtn=document.getElementById('jumpLatestBtn');
+const _jumpLatestCount=document.getElementById('jumpLatestCount');
+const _CHAT_BOTTOM_MARGIN=120;     // px from bottom treated as "at bottom"
+function updateChatNearBottom(){
+  const el=chatView;
+  _chatNearBottom=(el.scrollHeight-el.scrollTop-el.clientHeight)<_CHAT_BOTTOM_MARGIN;
+  if(_chatNearBottom){
+    _pendingScrollEvents=0;
+    if(_jumpLatestBtn)_jumpLatestBtn.classList.remove('show');
+    if(_jumpLatestCount)_jumpLatestCount.classList.remove('show');
+  }else{
+    updateJumpLatestPill();
+  }
+}
+function updateJumpLatestPill(){
+  if(!_jumpLatestBtn)return;
+  const show=_pendingScrollEvents>0 && !_chatNearBottom;
+  _jumpLatestBtn.classList.toggle('show',show);
+  if(_jumpLatestCount){
+    _jumpLatestCount.textContent=_pendingScrollEvents>99?'99+':String(_pendingScrollEvents);
+    _jumpLatestCount.classList.toggle('show',_pendingScrollEvents>0);
+  }
+}
+function maybeAutoScrollChat(){
+  // Called on every streamed token / agent step. If the user is at the
+  // bottom, keep them pinned to the latest content; otherwise just count
+  // the event and surface the pill (never yank the scroll position).
+  updateChatNearBottom();
+  if(_chatNearBottom){
+    chatView.scrollTop=chatView.scrollHeight;
+  }else{
+    _pendingScrollEvents++;
+    updateJumpLatestPill();
+  }
+}
+function jumpToLatest(){
+  _pendingScrollEvents=0;
+  updateJumpLatestPill();
+  chatView.scrollTo({top:chatView.scrollHeight,behavior:'smooth'});
+}
+if(chatView){
+  chatView.addEventListener('scroll',updateChatNearBottom,{passive:true});
+  if(_jumpLatestBtn)_jumpLatestBtn.addEventListener('click',jumpToLatest);
+}
 
 // Provider dropdown
 const providerDropdown=document.getElementById('providerDropdown');
@@ -952,7 +1009,7 @@ async function handleSend(){
       else{assistantEl.querySelector('.msg-body').textContent='Error: '+(result.error||'unknown');toast(result.error||'Failed to send','error')}
     }catch(e){assistantEl.querySelector('.msg-body').textContent='Error: '+e.message;toast(e.message,'error')}
   }else{
-    setTimeout(()=>{const tokens='Backend not connected. Running in demo mode \u2014 open this HTML inside Tera Pilot to use real providers.'.split(' ');let i=0;const stream=()=>{if(i>=tokens.length){state.isGenerating=false;updateSendButton();composerStatus.textContent='Ready';assistantEl.querySelector('.msg-body').classList.remove('stream-cursor');return}const body=assistantEl.querySelector('.msg-body');body.textContent+=(i===0?'':' ')+tokens[i++];requestAnimationFrame(stream)};stream()},300)
+    setTimeout(()=>{const tokens='Backend not connected. Running in demo mode \u2014 open this HTML inside Tera Pilot to use real providers.'.split(' ');let i=0;const stream=()=>{if(i>=tokens.length){state.isGenerating=false;updateSendButton();composerStatus.textContent='Ready';assistantEl.querySelector('.msg-body').classList.remove('stream-cursor');return}const body=assistantEl.querySelector('.msg-body');body.textContent+=(i===0?'':' ')+tokens[i++];maybeAutoScrollChat();requestAnimationFrame(stream)};stream()},300)
   }
 }
 sendBtn.addEventListener('click',handleSend);
@@ -1136,7 +1193,15 @@ function appendMessage(role,content){
   });
   msg.addEventListener('mouseenter',function(){copyBtn.style.opacity='1';if(revertBtn)revertBtn.style.opacity='1';if(explainBtn)explainBtn.style.opacity='1'});
   msg.addEventListener('mouseleave',function(){copyBtn.style.opacity='0';if(revertBtn)revertBtn.style.opacity='0';if(explainBtn)explainBtn.style.opacity='0'});
-  chatView.appendChild(msg);chatView.scrollTop=chatView.scrollHeight;return msg;
+  chatView.appendChild(msg);
+  // v2.3.4: user-initiated append (sending a message / switching chats) —
+  // force-scroll and reset the jump pill. Streaming updates use
+  // maybeAutoScrollChat() instead so reading history isn't interrupted.
+  _pendingScrollEvents=0;
+  chatView.scrollTop=chatView.scrollHeight;
+  _chatNearBottom=true;
+  updateJumpLatestPill();
+  return msg;
 }
 
 // v1.0.2: Markdown renderer with Apply/Copy buttons on code blocks
@@ -1238,7 +1303,7 @@ function fileTypeBadge(name){
   const meta=FILE_TYPE_META[ext]||{label:(ext.slice(0,2)||'\u2022').toUpperCase(),color:'var(--text-muted)'};
   return `<span class="file-type-badge" style="color:${meta.color};border-color:${meta.color}66">${escapeHtml(meta.label)}</span>`;
 }
-function streamToken(token){const msgs=chatView.querySelectorAll('.msg');const last=msgs[msgs.length-1];if(!last)return;const body=last.querySelector('.msg-body');body._rawText=(body._rawText||'')+token;body.innerHTML=renderMarkdown(body._rawText);chatView.scrollTop=chatView.scrollHeight}
+function streamToken(token){const msgs=chatView.querySelectorAll('.msg');const last=msgs[msgs.length-1];if(!last)return;const body=last.querySelector('.msg-body');body._rawText=(body._rawText||'')+token;body.innerHTML=renderMarkdown(body._rawText);maybeAutoScrollChat()}
 // v1.0.8: append a line of agent reasoning/tool activity to the current
 // assistant message body. This runs ALONGSIDE the activity panel — the
 // panel shows compact step labels, this function shows the full thought
@@ -1268,7 +1333,7 @@ function appendAgentText(text){
   // because the agent doesn't stream tokens — it streams thoughts.
   body._rawText = body._agentText;
   body.innerHTML = renderMarkdown(body._rawText);
-  chatView.scrollTop = chatView.scrollHeight;
+  maybeAutoScrollChat();
 }
 
 // v1.1.1: interactive plan/step rendering. Instead of flattening every
@@ -1327,7 +1392,7 @@ function renderBlocks(msgEl){
     });
   });
   wireCodeButtons(msgEl);
-  chatView.scrollTop=chatView.scrollHeight;
+  maybeAutoScrollChat();
 }
 function pushAgentBlock(msgEl,block){
   const body=msgEl.querySelector('.msg-body');
@@ -1360,7 +1425,7 @@ function finalizeMessage(result){
     body.innerHTML = renderMarkdown(body._rawText);
     wireCodeButtons(last);
   }
-  // v2.4.x: warn when the run degraded to prose-without-tools — the
+  // v2.3.4: warn when the run degraded to prose-without-tools — the
   // agent produced text but never executed a tool, so any claim that
   // work was done is unreliable. Show a banner instead of a clean
   // "task complete" surface.
@@ -1391,10 +1456,14 @@ function finalizeMessage(result){
   state.isGenerating=false;updateSendButton();composerStatus.textContent='Ready';
   if(window.__activateNeuralPixels)window.__activateNeuralPixels(false);
   if(window.__activateSynapse)window.__activateSynapse(false);
+  // v2.3.4: final answer rendered — keep the view pinned if the user is
+  // at the bottom, otherwise keep the jump pill visible.
+  maybeAutoScrollChat();
 }
 
 async function loadChat(chatId){
   state.activeChatId=chatId;chatView.innerHTML='';
+  _pendingScrollEvents=0;_chatNearBottom=true;updateJumpLatestPill();
   if(isBackendAvailable()){
     try{
       const result=await callBridge('load_chat',chatId);
@@ -1436,6 +1505,7 @@ async function newChat(){
   try{
   state.activeChatId=null;
   chatView.innerHTML=emptyStateMarkup();
+  _pendingScrollEvents=0;_chatNearBottom=true;updateJumpLatestPill();
   chatBreadcrumb.textContent='New chat';composerInput.focus();
   document.querySelectorAll('.chat-item').forEach(c=>c.classList.remove('active'));
   bindEmptyStateSuggestions();
@@ -2312,7 +2382,7 @@ document.getElementById('enhanceBtn').addEventListener('click',async()=>{
         for(const line of lines){if(!line.startsWith('data: '))continue;try{const d=JSON.parse(line.slice(6));if(d.type==='oneshot_done'){composerInput.value=d.text;autosize();composerStatus.textContent='Ready';toast('Prompt enhanced','success')}else if(d.type==='oneshot_error'){composerStatus.textContent='Ready';toast('Enhance failed: '+d.error,'error')}}catch(e){}}}
     }catch(e){toast('Enhance failed: '+e.message,'error');composerStatus.textContent='Ready'}
   }else if(isBackendAvailable()){const requestId='enhance_'+Date.now();try{window.bridge.enhance_prompt(requestId,text)}catch(e){toast('Enhance failed: '+e.message,'error');composerStatus.textContent='Ready'}}
-  else{composerInput.value=`[INTENT]\n${text}\n\n[CONTEXT]\n- Project: Tera Pilot v1.0.2\n- Stack: Python 3.11+\n\n[CONSTRAINTS]\n- Production-grade\n- Typed\n\n[DELIVERABLES]\n1. Project structure\n2. Implementation\n3. Tests`;autosize();composerStatus.textContent='Ready';toast('Enhanced (demo mode)')}
+  else{composerInput.value=`[INTENT]\n${text}\n\n[CONTEXT]\n- Project: Tera Pilot v${APP_VERSION}\n- Stack: Python 3.11+\n\n[CONSTRAINTS]\n- Production-grade\n- Typed\n\n[DELIVERABLES]\n1. Project structure\n2. Implementation\n3. Tests`;autosize();composerStatus.textContent='Ready';toast('Enhanced (demo mode)')}
 });
 
 // RAG search
@@ -2862,12 +2932,18 @@ async function _renderToolsGrid(body){
   const renderers = window.__teraPilotToolsRenderers || {};
   // Categorize tools so the grid reads better than a flat 17-card list.
   const groups = [
+    // v2.3.4: Heavy Code / Office were orphaned when the old section
+    // switcher was removed from the sidebar — add them back here as the
+    // entry point (they open their full panes, not a tools renderer).
+    { title: 'Modes', tools: ['heavy_code','office'] },
     { title: 'Agent runtime', tools: ['capabilities','hooks','checkpoints','handoffs','learnings','persona'] },
     { title: 'Code & collaboration', tools: ['github','github_actions','consensus','second_opinion','verify'] },
     { title: 'Operations', tools: ['audit','spend','notify','daemon'] },
     { title: 'Extensions', tools: ['mcp_server','providers'] },
   ];
   const icons = {
+    heavy_code:     '<path d="M8 1.5v13M3 5l5-2 5 2M3 11l5 2 5-2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.1"/>',
+    office:         '<path d="M3 2h7l3 3v9H3V2Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M10 2v3h3M5.5 8h5M5.5 10.5h5M5.5 13h3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>',
     capabilities:   '<path d="M3 2.5h10A1.5 1.5 0 0 1 14.5 4v8A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12V4A1.5 1.5 0 0 1 3 2.5Z" stroke="currentColor" stroke-width="1.2"/><path d="M4 5.5h8M4 8h8M4 10.5h5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>',
     hooks:          '<path d="M5 2.5h6v3a3 3 0 0 1-6 0V2.5Z" stroke="currentColor" stroke-width="1.2"/><path d="M5 4H3a1 1 0 0 0-1 1v3a2 2 0 0 0 2 2h2M11 4h2a1 1 0 0 1 1 1v3a2 2 0 0 1-2 2H9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>',
     checkpoints:    '<path d="M3 8a5 5 0 1 0 1.5-3.5L3 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M3 3v3h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>',
@@ -2909,6 +2985,19 @@ async function _renderToolsGrid(body){
   body.querySelectorAll('.settings-tool-card').forEach(function(card){
     card.addEventListener('click', async function(){
       const id = card.dataset.tool;
+      // v2.3.4: Heavy Code / Office open their full panes (they are not
+      // tools-panel renderers). Close settings first so the pane isn't
+      // stacked underneath the modal.
+      if (id === 'heavy_code' || id === 'office') {
+        closeSettings();
+        if (id === 'heavy_code') {
+          if (window.__teraPilotOpenHeavyCode) { window.__teraPilotOpenHeavyCode(); return; }
+        } else {
+          if (window.__teraPilotOpenOffice) { window.__teraPilotOpenOffice(); return; }
+        }
+        toast('Mode not available', 'error');
+        return;
+      }
       if(!renderers[id]){ toast('Tool "'+id+'" not loaded yet','error'); return; }
       state.__toolsSubTab = id;
       // Render the sub-tool content inside the same modal body
@@ -3069,7 +3158,7 @@ function renderAppearanceTab(body){
     <div class="textsize-seg" id="textsizeSeg">${sizes.map(s=>`<button class="textsize-btn${curSize===s.id?' active':''}" data-size="${s.id}">${s.label}</button>`).join('')}</div>
   </div></div>`;
   // Additional settings
-  // v2.4.x: Interface mode (Basic/Advanced) — moved here from the top-bar
+  // v2.3.4: Interface mode (Basic/Advanced) — moved here from the top-bar
   // pill toggle, so the mode is still switchable but doesn't clutter the
   // chrome. The Settings button respects it: Advanced → full settings.
   const curUiMode=document.documentElement.getAttribute('data-ui-mode')||'basic';
@@ -3096,7 +3185,7 @@ function renderAppearanceTab(body){
       card.classList.add('active');
     });
   });
-  // v2.4.x: Wire the Interface-mode segmented control
+  // v2.3.4: Wire the Interface-mode segmented control
   const uiModeSeg=document.getElementById('uiModeSeg');
   if(uiModeSeg){
     uiModeSeg.querySelectorAll('.uimode-btn').forEach(btn=>{
@@ -3189,7 +3278,7 @@ function setUiMode(mode){
     renderSettingsTab(fallback).catch(function(){});
   }
 }
-// v2.4.x: persist the Basic/Advanced choice to the backend config too.
+// v2.3.4: persist the Basic/Advanced choice to the backend config too.
 // localStorage alone is unreliable in some embedded webviews, so the
 // choice now survives a browser/webview reset (restored on next load).
 function persistUiMode(mode){
@@ -3200,7 +3289,7 @@ function persistUiMode(mode){
   let saved='basic';
   try{saved=localStorage.getItem('tera_pilot:uiMode')||'basic'}catch(e){}
   setUiMode(saved);
-  // v2.4.x: prefer the backend-saved mode (authoritative across browsers).
+  // v2.3.4: prefer the backend-saved mode (authoritative across browsers).
   // Only overrides when the backend has an explicit value — so existing
   // localStorage-only users keep their current choice.
   if(isBackendAvailable()){
@@ -3212,13 +3301,12 @@ function persistUiMode(mode){
   }
 })();
 
-// v2.4.x: the Settings button is mode-aware — Advanced mode opens the
-// FULL settings modal immediately, Basic mode opens the quick-settings
-// panel. No more "opens basic first, then I have to switch to advanced".
+// v2.3.4: the Settings button always opens the FULL settings modal.
+// The modal itself adapts to the UI mode — in Basic mode the advanced
+// tabs (Tools/MCP/Agent/Project/Snippets) are hidden by setUiMode, so
+// there is no need for a separate quick-settings popup anymore.
 function openSettingsByMode(){
-  const mode=document.documentElement.getAttribute('data-ui-mode');
-  if(mode==='advanced'){openSettings('providers');}
-  else{openQuickSettings();}
+  openSettings('providers');
 }
 
 async function renderProvidersTab(body){
@@ -3310,7 +3398,7 @@ async function renderProvidersTab(body){
     if(isBackendAvailable()){try{const r=await callBridge('health_check',id);if(r.ok){status.className='field-status ok';status.textContent='\u2713 Connected ('+r.latency_ms+'ms)'}else if(r.rate_limited){status.className='field-status warn';status.textContent='\u26A0 Rate limited'}else if(r.key_valid===false){status.className='field-status warn';status.textContent='\u2717 Invalid API key'}else{status.className='field-status warn';status.textContent='\u2717 '+(r.error||'failed').slice(0,80)}}catch(e){status.className='field-status warn';status.textContent='\u2717 '+e.message}}
     else{status.className='field-status warn';status.textContent='Backend not connected'}
   })});
-  // v2.4.x: Fetch models — pull the LIVE model list from the provider's
+  // v2.3.4: Fetch models — pull the LIVE model list from the provider's
   // /models endpoint and let the user pick one (or keep typing manually).
   body.querySelectorAll('.model-fetch-btn').forEach(btn=>{
     btn.addEventListener('click',async(e)=>{
@@ -3344,7 +3432,7 @@ async function renderProvidersTab(body){
   });
 }
 
-// v2.4.x: render the fetched model list; clicking an item sets the
+// v2.3.4: render the fetched model list; clicking an item sets the
 // provider's model field (manual entry stays possible via the input).
 function renderModelItems(container, models, q, pid){
   if(!container) return;
@@ -3437,7 +3525,7 @@ async function renderAboutTab(body){
     <div class="settings-section">
       <div class="settings-section-title">About Tera Pilot</div>
       <div style="padding:var(--s-24);background:var(--bg-floating);border:1px solid var(--border);border-radius:var(--r-panel);font-size:13px;line-height:1.8;color:var(--text-secondary)">
-        <div style="font-size:18px;font-weight:600;color:var(--text-primary);margin-bottom:var(--s-8)">Tera Pilot v1.1.0</div>
+        <div style="font-size:18px;font-weight:600;color:var(--text-primary);margin-bottom:var(--s-8)">Tera Pilot v${escapeHtml(status.version||APP_VERSION)}</div>
         <div style="color:var(--text-muted);margin-bottom:var(--s-16)">A native, local-first AI workspace. Built for thinking.</div>
         <div><strong>Config:</strong> <code style="font-family:'JetBrains Mono',monospace;color:var(--info)">${escapeHtml(status.config_path||'~/.tera_pilot/config.json')}</code></div>
         <div><strong>Chats:</strong> <code style="font-family:'JetBrains Mono',monospace;color:var(--info)">${escapeHtml(status.chats_dir||'~/.tera_pilot/chats/')}</code></div>
@@ -3506,206 +3594,39 @@ async function refreshProviderState(){
 }
 
 // ═══════════════════════════════════════════════════════════════
-// v2.2.4: QUICK SETTINGS — simplified two-tier settings
-// ═══════════════════════════════════════════════════════════════
-// Only the top 6 most popular providers + API key + model + theme.
-// An "Advanced…" button opens the full 8-tab settings modal.
-const QUICK_PROVIDERS = [
-  { id:'openai',    label:'OpenAI',       icon:'🟢', model:'gpt-4o',           keyUrl:'https://platform.openai.com/api-keys' },
-  { id:'anthropic', label:'Anthropic',    icon:'🟠', model:'claude-sonnet-4',  keyUrl:'https://console.anthropic.com/settings/keys' },
-  { id:'gemini',    label:'Google Gemini',icon:'🔵', model:'gemini-2.5-pro',   keyUrl:'https://aistudio.google.com/apikey' },
-  { id:'deepseek',  label:'DeepSeek',     icon:'🟣', model:'deepseek-chat',    keyUrl:'https://platform.deepseek.com/api_keys' },
-  { id:'groq',      label:'Groq',         icon:'⚡', model:'llama-3.3-70b',    keyUrl:'https://console.groq.com/keys' },
-  { id:'ollama',    label:'Ollama (local)',icon:'🦙', model:'llama3.3',        keyUrl:'https://ollama.com/download', needsKey:false },
-];
-
-const quickSettingsModal = document.getElementById('quickSettingsModal');
-const quickSettingsBackdrop = document.getElementById('quickSettingsBackdrop');
-
-function openQuickSettings() {
-  // v2.3.2-fix: never stack the quick-settings modal on top of the full
-  // settings modal (they used to open together from one click).
-  if (typeof closeSettings === 'function') closeSettings();
-  renderQuickSettings();
-  quickSettingsModal.classList.add('open');
-  quickSettingsBackdrop.classList.add('open');
-}
-function closeQuickSettings() {
-  quickSettingsModal.classList.remove('open');
-  quickSettingsBackdrop.classList.remove('open');
-}
-
-function renderQuickSettings() {
-  const body = document.getElementById('quickSettingsBody');
-  const activeId = state.activeProvider || 'openai';
-  const providers = state.providers || [];
-  const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
-
-  // Find current provider info
-  const activeP = providers.find(p => p.id === activeId) || { id: activeId, model: '', api_key_set: false };
-  const activeMeta = PROVIDER_META[activeId] || { needsKey: true };
-
-  let html = '<div class="qs-section">';
-  html += '<div class="qs-section-title">Provider</div>';
-  html += '<div class="qs-provider-grid">';
-  for (const p of QUICK_PROVIDERS) {
-    const isActive = p.id === activeId;
-    const pState = providers.find(x => x.id === p.id);
-    const hasKey = pState && pState.api_key_set;
-    html += `<button class="qs-provider-btn${isActive ? ' active' : ''}" data-qs-provider="${p.id}">`;
-    html += `<span class="qs-provider-icon">${p.icon}</span>`;
-    html += `<span class="qs-provider-name">${p.label}</span>`;
-    if (p.needsKey !== false) {
-      html += `<span class="qs-provider-key${hasKey ? ' set' : ''}">${hasKey ? '✓' : '—'}</span>`;
-    }
-    html += '</button>';
-  }
-  // v2.3.2-fix: if the ACTIVE provider isn't one of the quick 6 (e.g.
-  // OpenRouter), render it as an extra button anyway — otherwise the
-  // API-key field below silently targets a provider the user can't even
-  // see or select here, and a pasted key appears to "not save".
-  if (!QUICK_PROVIDERS.some(p => p.id === activeId)) {
-    const extraMeta = PROVIDER_META[activeId] || {};
-    const extraState = providers.find(x => x.id === activeId);
-    const extraHasKey = extraState && extraState.api_key_set;
-    html += `<button class="qs-provider-btn active" data-qs-provider="${activeId}">`;
-    html += `<span class="qs-provider-icon">🔌</span>`;
-    html += `<span class="qs-provider-name">${escapeHtml(extraMeta.label || activeId)}</span>`;
-    if (extraMeta.needsKey !== false) {
-      html += `<span class="qs-provider-key${extraHasKey ? ' set' : ''}">${extraHasKey ? '✓' : '—'}</span>`;
-    }
-    html += '</button>';
-  }
-  html += '</div></div>';
-
-  // Model input
-  html += '<div class="qs-section">';
-  html += '<div class="qs-section-title">Model</div>';
-  html += `<input class="field-input qs-model-input" id="qsModel" value="${escapeHtml(activeP.model || activeMeta.model || '')}" placeholder="e.g. gpt-4o, claude-sonnet-4">`;
-  html += '</div>';
-
-  // API key (only if provider needs one)
-  if (activeMeta.needsKey !== false) {
-    html += '<div class="qs-section">';
-    html += `<div class="qs-section-title">API Key — ${escapeHtml(activeMeta.label || activeId)} ${activeP.api_key_set ? '<span style="color:var(--success)">· set</span>' : '<span style="color:var(--danger)">· not set</span>'}</div>`;
-    html += `<input class="field-input qs-key-input" id="qsApiKey" type="password" placeholder="${activeP.api_key_set ? '•••••••• (leave empty to keep)' : 'sk-...'}">`;
-    const quickP = QUICK_PROVIDERS.find(x => x.id === activeId);
-    if (quickP && quickP.keyUrl) {
-      html += `<div class="qs-key-hint"><a href="${quickP.keyUrl}" target="_blank" rel="noopener">Get an API key →</a></div>`;
-    }
-    html += '</div>';
-  }
-
-  // Theme
-  html += '<div class="qs-section">';
-  html += '<div class="qs-section-title">Theme</div>';
-  html += '<div class="qs-theme-toggle">';
-  html += `<button class="qs-theme-btn${currentTheme === 'dark' || currentTheme === 'ember' ? ' active' : ''}" data-qs-theme="dark">🌙 Dark</button>`;
-  html += `<button class="qs-theme-btn${currentTheme === 'light' || currentTheme === 'linen' ? ' active' : ''}" data-qs-theme="light">☀️ Light</button>`;
-  html += `<button class="qs-theme-btn" data-qs-theme="auto">🖥 Auto</button>`;
-  html += '</div></div>';
-
-  body.innerHTML = html;
-
-  // Provider selection
-  body.querySelectorAll('.qs-provider-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = btn.dataset.qsProvider;
-      state.activeProvider = id;
-      // Update model placeholder
-      const meta = PROVIDER_META[id] || {};
-      const modelInput = document.getElementById('qsModel');
-      if (modelInput && !modelInput.value) {
-        modelInput.value = meta.model || '';
-      }
-      renderQuickSettings();
-    });
-  });
-
-  // Theme buttons
-  body.querySelectorAll('.qs-theme-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const theme = btn.dataset.qsTheme;
-      if (theme === 'auto') {
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        setTheme(prefersDark ? 'dark' : 'light');
-      } else {
-        setTheme(theme);
-      }
-      renderQuickSettings();
-    });
-  });
-}
-
-// Wire up Quick Settings buttons
-// v2.3.2-fix: the original handler was an anonymous arrow function, so
-// removeEventListener with a NEW arrow function removed nothing — the
-// Settings button kept BOTH handlers and opened the full settings modal
-// AND the quick-settings modal stacked on top of each other. Remove by
-// the named reference registered above instead.
+// v2.3.4: QUICK SETTINGS REMOVED — the full Settings modal now hides
+// its advanced tabs in Basic mode (see setUiMode), so the simplified
+// two-tier quick-settings popup was redundant. The Settings button
+// always opens the full modal, which adapts to the current UI mode.
 document.getElementById('openSettingsBtn').removeEventListener('click', _openFullSettings);
-// v2.4.x: mode-aware — Advanced mode opens the FULL settings directly,
-// Basic mode opens quick settings (see openSettingsByMode).
 document.getElementById('openSettingsBtn').addEventListener('click', openSettingsByMode);
-document.getElementById('quickSettingsClose').addEventListener('click', closeQuickSettings);
-quickSettingsBackdrop.addEventListener('click', closeQuickSettings);
-document.getElementById('quickSettingsAdvanced').addEventListener('click', () => {
-  closeQuickSettings();
-  openSettings('providers');
-});
-document.getElementById('quickSettingsSave').addEventListener('click', async () => {
-  const activeId = state.activeProvider || 'openai';
-  const model = document.getElementById('qsModel')?.value || '';
-  const apiKey = document.getElementById('qsApiKey')?.value?.trim() || '';
-  const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
 
-  const providers = {};
-  providers[activeId] = { model: model };
-  if (apiKey) providers[activeId].api_key = apiKey;
-
-  if (isBackendAvailable()) {
-    try {
-      const result = await callBridge('save_settings', {
-        active_provider: activeId,
-        providers: providers,
-        ui: { theme: currentTheme }
-      });
-      if (result.ok) {
-        toast('Settings saved', 'success');
-        // Refresh provider state from the backend so the UI shows the
-        // saved key/active provider immediately (v2.3.2-fix).
-        await refreshProviderState();
-        closeQuickSettings();
-      } else {
-        toast(result.error || 'Save failed', 'error');
-      }
-    } catch (e) {
-      toast('Save failed: ' + e.message, 'error');
-    }
-  } else {
-    toast('Saved (demo mode)', 'success');
-    closeQuickSettings();
-  }
-});
-
-// Open project
-document.getElementById('openProjectBtn').addEventListener('click', async () => {
+// Open project — shared by the nav button, the command palette item and
+// the ⌘O / Ctrl+O shortcut (v2.3.4-fix: the palette item used to only
+// toast "Press ⌘+O" and no ⌘+O binding existed — a dead end).
+async function openProjectPicker() {
   if (!isBackendAvailable()) {
     toast('Backend not connected', 'error');
     return;
   }
 
-  // Use the native file picker via backend (tkinter) which gives full paths
+  // v2.3.4-fix: use the native file picker via the backend. The backend
+  // runs a subprocess system dialog (thread-safe) — the old server-side
+  // tkinter dialog crashed the whole backend on macOS because Tk was
+  // created from the HTTP daemon thread. On error or cancel we fall back
+  // gracefully: cancel stays silent, any other failure drops into the
+  // manual path-entry modal instead of dead-ending on an error toast.
   try {
     const result = await callBridge('native_file_picker');
     if (result && result.ok && result.path) {
       await openProject(result.path);
-    } else if (result && result.error) {
-      toast('File picker error: ' + result.error, 'error');
     } else if (result && result.cancelled) {
       // User cancelled, do nothing
+    } else if (result && result.error) {
+      console.warn('Native file picker error, falling back to manual path:', result.error);
+      showOpenProjectModal();
     } else {
-      // Fallback to manual path entry modal
+      // No usable picker on this platform — fallback to manual path entry
       showOpenProjectModal();
     }
   } catch (e) {
@@ -3713,7 +3634,9 @@ document.getElementById('openProjectBtn').addEventListener('click', async () => 
     // Fallback to manual path entry modal
     showOpenProjectModal();
   }
-});
+}
+
+document.getElementById('openProjectBtn').addEventListener('click', openProjectPicker);
 
 function showOpenProjectModal() {
   // Create a simple modal for path input
@@ -3731,6 +3654,7 @@ function showOpenProjectModal() {
         </p>
         <div style="display:flex;gap:8px;margin-bottom:12px">
           <input type="text" id="openProjectPathInput" class="input" placeholder="/path/to/project" style="flex:1" />
+          <button class="btn btn-ghost" id="openProjectBrowse">Browse…</button>
         </div>
         <div style="display:flex;gap:8px;justify-content:flex-end">
           <button class="btn btn-ghost" id="openProjectCancel">Cancel</button>
@@ -3754,6 +3678,29 @@ function showOpenProjectModal() {
     }
     close();
     await openProject(path);
+  });
+
+  // v2.3.4-fix: the modal promised "use the file picker below" but there
+  // was no picker button — a dead end for users whose native dialog
+  // failed. Re-try the native picker from inside the modal; on success
+  // fill the input and open directly.
+  modal.querySelector('#openProjectBrowse').addEventListener('click', async () => {
+    try {
+      const result = await callBridge('native_file_picker');
+      if (result && result.ok && result.path) {
+        close();
+        await openProject(result.path.trim());
+      } else if (result && result.cancelled) {
+        // stay in the modal, user cancelled
+      } else if (result && result.error) {
+        toast('File picker error: ' + result.error, 'error');
+      } else {
+        toast('File picker unavailable — enter the path manually', 'error');
+      }
+    } catch (e) {
+      console.warn('Browse retry failed:', e);
+      toast('File picker failed: ' + e.message, 'error');
+    }
   });
 
   input.addEventListener('keydown', (e) => {
@@ -3782,6 +3729,11 @@ async function openProject(path) {
       // Reload file tree if open
       if (document.getElementById('codeViewer')?.classList.contains('open')) {
         refreshFileTree();
+      }
+      // v2.3.4-fix: also refresh the sidebar file-tree panel — it used to
+      // keep showing the PREVIOUS project's files until toggled.
+      if (state.fileTreePanelOpen) {
+        refreshFileTreePanel();
       }
       // Reload chat list since it's project-specific
       loadChats();
@@ -3897,7 +3849,12 @@ let cmdSelectedIndex=0;let cmdItems=[];
 
 function openCommandPalette(){cmdPalette.classList.add('open');cmdInput.value='';cmdInput.focus();renderCommandResults('')}
 function closeCommandPalette(){cmdPalette.classList.remove('open')}
-function getCommandItems(){const items=[{group:'Actions',icon:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',title:'New chat',desc:'Start a fresh conversation',action:()=>newChat()},{group:'Actions',icon:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 3h5v5H2V3ZM9 3h5v5H9V3ZM2 9h5v5H2V9ZM9 9h5v5H9V9Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',title:'Open chat catalog',desc:'Browse all chats, projects, and tags',action:()=>{closeCommandPalette();openAllChats()}},{group:'Actions',icon:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',title:'Open settings',desc:'Configure providers, models, inference',shortcut:'⌘,',action:()=>{closeCommandPalette();openSettings('providers')}},{group:'Actions',icon:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h4l1.5 1.5H14V13H2V4Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',title:'Open project',desc:'Open a folder for code viewer',shortcut:'⌘O',action:()=>{closeCommandPalette();toast('Press ⌘+O to open a folder')}},{group:'Actions',icon:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 3l-3 4 3 4M11 3l3 4-3 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',title:'Toggle code viewer',desc:'Show/hide the file browser',shortcut:'⌘\\',action:()=>{closeCommandPalette();if(codeViewer.classList.contains('open'))closeViewer();else openViewer()}},{group:'Actions',icon:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8l3 3 7-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',title:'Enhance prompt',desc:'Restructure the current prompt',action:()=>{closeCommandPalette();document.getElementById('enhanceBtn').click()}}];
+function getCommandItems(){const items=[
+  // v2.3.4: Heavy Code / Office panes have no sidebar entry since the
+  // section switcher was removed — surface them here and in Settings→Tools.
+  {group:'Modes',icon:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1.5v13M3 5l5-2 5 2M3 11l5 2 5-2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.1"/></svg>',title:'Heavy Code',desc:'Multi-agent coding — subagents + parallel execution',action:()=>{closeCommandPalette();if(window.__teraPilotOpenHeavyCode)window.__teraPilotOpenHeavyCode();else toast('Heavy Code unavailable','error')}},
+  {group:'Modes',icon:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 2h7l3 3v9H3V2Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M10 2v3h3M5.5 8h5M5.5 10.5h5M5.5 13h3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>',title:'Office Worker',desc:'Create and edit .docx / .xlsx / .pptx files',action:()=>{closeCommandPalette();if(window.__teraPilotOpenOffice)window.__teraPilotOpenOffice();else toast('Office Worker unavailable','error')}},
+  {group:'Actions',icon:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',title:'New chat',desc:'Start a fresh conversation',action:()=>newChat()},{group:'Actions',icon:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 3h5v5H2V3ZM9 3h5v5H9V3ZM2 9h5v5H2V9ZM9 9h5v5H9V9Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',title:'Open chat catalog',desc:'Browse all chats, projects, and tags',action:()=>{closeCommandPalette();openAllChats()}},{group:'Actions',icon:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',title:'Open settings',desc:'Configure providers, models, inference',shortcut:'⌘,',action:()=>{closeCommandPalette();openSettings('providers')}},{group:'Actions',icon:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h4l1.5 1.5H14V13H2V4Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',title:'Open project',desc:'Open a folder for code viewer',shortcut:'⌘O',action:()=>{closeCommandPalette();openProjectPicker()}},{group:'Actions',icon:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M5 3l-3 4 3 4M11 3l3 4-3 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',title:'Toggle code viewer',desc:'Show/hide the file browser',shortcut:'⌘\\',action:()=>{closeCommandPalette();if(codeViewer.classList.contains('open'))closeViewer();else openViewer()}},{group:'Actions',icon:'<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8l3 3 7-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',title:'Enhance prompt',desc:'Restructure the current prompt',action:()=>{closeCommandPalette();document.getElementById('enhanceBtn').click()}}];
   // Providers
   for(const [id,m] of Object.entries(PROVIDER_META)){items.push({group:'Switch provider',icon:`<div style="width:8px;height:8px;border-radius:50%;background:var(--accent)"></div>`,title:m.label,desc:m.statusLabel,action:()=>{closeCommandPalette();state.activeProvider=id;providerTriggerText.textContent=m.statusLabel;statusProvider.textContent=m.modelDisplay||m.model;if(isBackendAvailable())callBridge('set_provider',id);toast(`Switched to ${m.label}`)}})}
   // Templates
@@ -3940,6 +3897,9 @@ document.addEventListener('keydown',(e)=>{
   if((e.metaKey||e.ctrlKey)&&e.key==='\\'){e.preventDefault();if(codeViewer.classList.contains('open'))closeViewer();else openViewer()}
   if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();if(cmdPalette.classList.contains('open'))closeCommandPalette();else openCommandPalette()}
   if((e.metaKey||e.ctrlKey)&&e.key===','){e.preventDefault();openSettings('providers')}
+  // v2.3.4-fix: ⌘O / Ctrl+O actually opens the project picker now (it was
+  // advertised by the command palette but no binding existed).
+  if((e.metaKey||e.ctrlKey)&&e.key==='o'){e.preventDefault();openProjectPicker()}
   if(e.key==='Escape'){if(cmdPalette.classList.contains('open'))closeCommandPalette();if(modal.classList.contains('open'))closeSettings();var acm=document.getElementById('allChatsModal');if(acm&&acm.classList.contains('open'))closeAllChats();if(usageModal.classList.contains('open'))closeUsage()}
 });
 
@@ -3998,7 +3958,7 @@ window.addEventListener('tera_pilot:bridge_ready',async()=>{
   try{
   window.bridge.token_streamed.connect(function(token){streamToken(token)});
   window.bridge.agent_step.connect(function(step){addActivityStep(step);if(step.label)statusContext.textContent=step.label});
-  window.bridge.agent_done.connect(function(result){finalizeMessage(result);if(result.text){const msgs=chatView.querySelectorAll('.msg');const last=msgs[msgs.length-1];if(last){const body=last.querySelector('.msg-body');if(body.textContent.length<result.text.length)body.textContent=result.text}}debouncedRefreshChatList();_maybeAutoTitle();refreshContextIndicator()});
+  window.bridge.agent_done.connect(function(result){finalizeMessage(result);if(result.text){const msgs=chatView.querySelectorAll('.msg');const last=msgs[msgs.length-1];if(last){const body=last.querySelector('.msg-body');if(body.textContent.length<result.text.length)body.textContent=result.text;maybeAutoScrollChat()}}debouncedRefreshChatList();_maybeAutoTitle();refreshContextIndicator()});
   window.bridge.agent_error.connect(function(err){toast(err,'error');finalizeMessage(null);statusContext.innerHTML='<span class="err">Error</span>'});
   // v1.0.5: Wire agent-specific signals (used by send_agent_message / tool-use mode)
   // v1.0.8: THOUGHT and PLAN_CREATED events now stream their text INTO the
@@ -4035,7 +3995,7 @@ window.addEventListener('tera_pilot:bridge_ready',async()=>{
     window.bridge.agent_final.connect(function(result){
       if(window.__onVerifyReset) window.__onVerifyReset();
       // v1.0.8: the final answer replaces any streamed provisional text
-      // v2.4.x: use REAL token counts from the backend (tokens_in+out).
+      // v2.3.4: use REAL token counts from the backend (tokens_in+out).
       // The old ``result.iterations`` fallback showed "3 tokens" for a
       // 3-iteration run no matter how much text the model produced.
       var totalTok = (result.tokens_in||0) + (result.tokens_out||0);
@@ -4097,7 +4057,7 @@ window.addEventListener('tera_pilot:bridge_ready',async()=>{
     if(status.context_stats)updateContextIndicator(status.context_stats);
     // v1.0.4: restore auto-route state
     state.autoRoute=!!status.auto_route;
-    toast('Tera Pilot v1.1.0 ready · '+(activeP?activeP.label:'Ollama'));
+    toast('Tera Pilot v'+(status.version||APP_VERSION)+' ready · '+(activeP?activeP.label:'Ollama'));
   }catch(e){console.error('[tera_pilot] init failed',e);toast('Init failed: '+e.message,'error')}
 });
 
@@ -4401,7 +4361,7 @@ function _maybeAutoTitle() {
   }
   if(userMsgCount >= 1 && assistantMsgCount >= 1) {
     _autoTitleRequested[state.activeChatId] = true;
-    // v2.4.x-fix: the generated title was never APPLIED in the web path
+    // v2.3.4-fix: the generated title was never APPLIED in the web path
     // (the promise result was ignored), so chats kept their raw creation
     // title forever. Update the breadcrumb + sidebar from the response.
     callBridge('generate_title', state.activeChatId).then(function(r){
@@ -5329,8 +5289,12 @@ window.finalizeMessage = function(result) {
   const hcResetQuotaBtn = document.getElementById('hcResetQuotaBtn');
   const hcTeraPilotSidebarToggle = document.getElementById('hcTeraPilotSidebarToggle');
   const csBackdrop = document.getElementById('csBackdrop');
+  // v2.2.1+: the section switcher was removed from the sidebar, so this
+  // pane must work WITHOUT it — entry points now come from the Settings
+  // Tools grid (window.__teraPilotOpenHeavyCode) and the command palette.
+  // `switcher` is kept only to sync .active classes when it exists.
   const switcher = document.getElementById('sectionSwitcher');
-  if(!hcPane || !switcher) return;
+  if(!hcPane) return;
 
   // Section state
   let hcActive = false;
@@ -5353,8 +5317,11 @@ window.finalizeMessage = function(result) {
     // Intentionally NOT showing csBackdrop — sidebar must stay fully visible
     // so the user keeps spatial context that they're still inside Tera Pilot.
     if (csBackdrop) csBackdrop.classList.remove('visible');
-    switcher.querySelectorAll('.section-btn').forEach(b => b.classList.remove('active'));
-    switcher.querySelector('[data-section="heavycode"]').classList.add('active');
+    if (switcher) {
+      switcher.querySelectorAll('.section-btn').forEach(b => b.classList.remove('active'));
+      const btn = switcher.querySelector('[data-section="heavycode"]');
+      if (btn) btn.classList.add('active');
+    }
     hcActive = true;
     refreshHCQuota();
     hcComposerInput && hcComposerInput.focus();
@@ -5363,10 +5330,19 @@ window.finalizeMessage = function(result) {
   function hideHCPane() {
     hcPane.classList.remove('visible');
     if (csBackdrop) csBackdrop.classList.remove('visible');
-    switcher.querySelectorAll('.section-btn').forEach(b => b.classList.remove('active'));
-    switcher.querySelector('[data-section="general"]').classList.add('active');
+    if (switcher) {
+      switcher.querySelectorAll('.section-btn').forEach(b => b.classList.remove('active'));
+      const btn = switcher.querySelector('[data-section="general"]');
+      if (btn) btn.classList.add('active');
+    }
     hcActive = false;
   }
+
+  // v2.3.4: expose open/close so the Settings → Tools grid and the
+  // command palette can open Heavy Code even though the old section
+  // switcher is gone.
+  window.__teraPilotOpenHeavyCode = showHCPane;
+  window.__teraPilotHideHeavyCode = hideHCPane;
 
   // v1.1.1: Wire up the Tera Pilot-sidebar-toggle button in hc-topbar.
   // The main topbar's sidebar toggle is covered by .hc-pane, so we need
@@ -5423,31 +5399,37 @@ window.finalizeMessage = function(result) {
 
   // Override the original click handlers by attaching new ones
   // (the original IIFE runs first; ours run after and take precedence
-  // for the heavycode case by stopping propagation).
-  switcher.querySelectorAll('.section-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const section = btn.dataset.section;
-      if (section === 'heavycode') {
-        e.stopPropagation();
-        showHCPane();
-      } else if (section === 'general') {
-        // Let the original handler close overlays, then ensure HC pane is hidden
-        setTimeout(() => hideHCPane(), 0);
-      } else if (section === 'office' && hcActive) {
-        // v1.3.1 fix: switching straight to Office from Heavy Code must
-        // close this pane too, or it's left stacked underneath/behind
-        // the office pane and re-opening HC later looks "stuck".
-        hideHCPane();
-      }
-    }, true);  // capture phase so we run first
-  });
+  // for the heavycode case by stopping propagation). Only when the old
+  // section switcher still exists (it was removed in v2.2.1).
+  if (switcher) {
+    switcher.querySelectorAll('.section-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const section = btn.dataset.section;
+        if (section === 'heavycode') {
+          e.stopPropagation();
+          showHCPane();
+        } else if (section === 'general') {
+          // Let the original handler close overlays, then ensure HC pane is hidden
+          setTimeout(() => hideHCPane(), 0);
+        } else if (section === 'office' && hcActive) {
+          // v1.3.1 fix: switching straight to Office from Heavy Code must
+          // close this pane too, or it's left stacked underneath/behind
+          // the office pane and re-opening HC later looks "stuck".
+          hideHCPane();
+        }
+      }, true);  // capture phase so we run first
+    });
+  }
 
   if (hcBackBtn) {
     hcBackBtn.addEventListener('click', () => {
       hideHCPane();
-      // Click the General button to restore original state
-      const generalBtn = switcher.querySelector('[data-section="general"]');
-      if (generalBtn) generalBtn.click();
+      // Click the General button to restore original state (if the old
+      // section switcher still exists)
+      if (switcher) {
+        const generalBtn = switcher.querySelector('[data-section="general"]');
+        if (generalBtn) generalBtn.click();
+      }
     });
   }
 
@@ -5759,9 +5741,7 @@ window.finalizeMessage = function(result) {
   if (hcSendBtn) hcSendBtn.addEventListener('click', sendHCMessage);
   if (hcSettingsBtn) {
     hcSettingsBtn.addEventListener('click', () => {
-      // Open the FULL settings modal directly on the agent tab — the
-      // settings button itself now opens quick settings (v2.3.2-fix).
-      if (typeof closeQuickSettings === 'function') closeQuickSettings();
+      // Open the FULL settings modal directly on the agent tab.
       openSettings('agent');
     });
   }
@@ -6162,9 +6142,7 @@ env: GITHUB_TOKEN=ghp_xxx</pre>
     ind.innerHTML = '<span class="mcp-indicator-dot"></span><span class="mcp-indicator-text">MCP: 0</span>';
     ind.title = 'Model Context Protocol servers — click to open MCP settings';
     ind.addEventListener('click', () => {
-      // Open the FULL settings modal directly on the MCP tab — the
-      // settings button itself now opens quick settings (v2.3.2-fix).
-      if (typeof closeQuickSettings === 'function') closeQuickSettings();
+      // Open the FULL settings modal directly on the MCP tab.
       openSettings('mcp');
     });
     // Try to insert before the gitBar (or any reasonable spot)
@@ -6344,10 +6322,14 @@ env: GITHUB_TOKEN=ghp_xxx</pre>
   const officeBackBtn = document.getElementById('officeBackBtn');
   const officeTeraPilotSidebarToggle = document.getElementById('officeTeraPilotSidebarToggle');
   const officeComposerHint = document.getElementById('officeComposerHint');
+  // v2.2.1+: the section switcher was removed from the sidebar — this
+  // pane must work WITHOUT it (entry point: Settings Tools grid via
+  // window.__teraPilotOpenOffice). `switcher` is kept only to sync
+  // .active classes when it exists.
   const switcher = document.querySelector('.section-switcher');
   const csBackdrop = document.getElementById('csBackdrop');
 
-  if (!officePane || !switcher) return;
+  if (!officePane) return;
 
   let officeActive = false;
   let officeDocType = 'docx';
@@ -6355,8 +6337,11 @@ env: GITHUB_TOKEN=ghp_xxx</pre>
   function showOfficePane() {
     officePane.classList.add('office-active');
     if (csBackdrop) csBackdrop.classList.remove('visible');
-    switcher.querySelectorAll('.section-btn').forEach(b => b.classList.remove('active'));
-    switcher.querySelector('[data-section="office"]').classList.add('active');
+    if (switcher) {
+      switcher.querySelectorAll('.section-btn').forEach(b => b.classList.remove('active'));
+      const btn = switcher.querySelector('[data-section="office"]');
+      if (btn) btn.classList.add('active');
+    }
     officeActive = true;
     officeComposerInput && officeComposerInput.focus();
   }
@@ -6364,36 +6349,48 @@ env: GITHUB_TOKEN=ghp_xxx</pre>
   function hideOfficePane() {
     officePane.classList.remove('office-active');
     if (csBackdrop) csBackdrop.classList.remove('visible');
-    switcher.querySelectorAll('.section-btn').forEach(b => b.classList.remove('active'));
-    switcher.querySelector('[data-section="general"]').classList.add('active');
+    if (switcher) {
+      switcher.querySelectorAll('.section-btn').forEach(b => b.classList.remove('active'));
+      const btn = switcher.querySelector('[data-section="general"]');
+      if (btn) btn.classList.add('active');
+    }
     officeActive = false;
   }
 
-  // Override section switcher for office
-  switcher.querySelectorAll('.section-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const section = btn.dataset.section;
-      if (section === 'office') {
-        e.stopPropagation();
-        showOfficePane();
-      } else if (section === 'general' && officeActive) {
-        hideOfficePane();
-      } else if (section === 'heavycode' && officeActive) {
-        // v1.3.1 fix: this branch was missing entirely, so clicking
-        // "Heavy Code" while Office Worker was open left the Office
-        // pane's full-stage overlay on top — Heavy Code silently
-        // activated underneath it and looked like nothing happened.
-        hideOfficePane();
-      }
-    }, true);
-  });
+  // v2.3.4: expose open/close so the Settings → Tools grid can open
+  // Office Worker even though the old section switcher is gone.
+  window.__teraPilotOpenOffice = showOfficePane;
+  window.__teraPilotHideOffice = hideOfficePane;
+
+  // Override section switcher for office (only if the old switcher exists)
+  if (switcher) {
+    switcher.querySelectorAll('.section-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const section = btn.dataset.section;
+        if (section === 'office') {
+          e.stopPropagation();
+          showOfficePane();
+        } else if (section === 'general' && officeActive) {
+          hideOfficePane();
+        } else if (section === 'heavycode' && officeActive) {
+          // v1.3.1 fix: this branch was missing entirely, so clicking
+          // "Heavy Code" while Office Worker was open left the Office
+          // pane's full-stage overlay on top — Heavy Code silently
+          // activated underneath it and looked like nothing happened.
+          hideOfficePane();
+        }
+      }, true);
+    });
+  }
 
   // Back button
   if (officeBackBtn) {
     officeBackBtn.addEventListener('click', () => {
       hideOfficePane();
-      const generalBtn = switcher.querySelector('[data-section="general"]');
-      if (generalBtn) generalBtn.click();
+      if (switcher) {
+        const generalBtn = switcher.querySelector('[data-section="general"]');
+        if (generalBtn) generalBtn.click();
+      }
     });
   }
 

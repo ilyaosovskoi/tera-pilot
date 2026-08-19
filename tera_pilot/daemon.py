@@ -39,6 +39,7 @@ import argparse
 import json
 import os
 import queue
+import secrets
 import signal
 import sys
 import threading
@@ -54,7 +55,7 @@ from urllib.parse import urlparse, parse_qs
 def _build_registry():
     """Build a ProviderRegistry configured from ~/.tera_pilot/config.json.
 
-    v2.4.1-fix (real-run): the daemon previously called
+    v2.3.4-fix (real-run): the daemon previously called
     ``AgentRuntime(workspace=...)`` with no ``registry`` argument at all —
     but ``AgentRuntime.__init__`` requires one, so every daemon task
     (HTTP + `tera-pilot-daemon task`) crashed with TypeError before the
@@ -69,6 +70,11 @@ def _build_registry():
     cfg = load_config() or {}
     for pid, pcfg in (cfg.get("providers") or {}).items():
         try:
+            # v2.3.5-fix: thread optional provider extras (e.g.
+            # reasoning_effort for reasoning models).
+            extra = {}
+            if pcfg.get("reasoning_effort"):
+                extra["reasoning_effort"] = pcfg["reasoning_effort"]
             registry.configure(
                 pid,
                 ProviderConfig(
@@ -78,6 +84,7 @@ def _build_registry():
                     api_base=pcfg.get("api_base") or None,
                     temperature=float(pcfg.get("temperature", 0.2)),
                     max_tokens=int(pcfg.get("max_tokens", 4096)),
+                    extra=extra,
                 ),
             )
         except Exception as e:
@@ -292,7 +299,7 @@ class TaskQueue:
         workspace = task.workspace or os.getcwd()
 
         # Create a headless AgentRuntime (same as CLI/TUI path).
-        # v2.4.1-fix: pass a config-backed registry (see _build_registry).
+        # v2.3.4-fix: pass a config-backed registry (see _build_registry).
         agent = AgentRuntime(registry=_build_registry(), workspace=workspace)
 
         # Event callback — streams to SSE subscribers
@@ -394,12 +401,17 @@ class DaemonHandler(BaseHTTPRequestHandler):
         pass
 
     def _check_auth(self) -> bool:
-        """Check Bearer token authentication."""
+        """Check Bearer token authentication.
+
+        v2.3.4-security: use ``secrets.compare_digest`` (constant-time)
+        instead of plain ``==`` so the token comparison has no timing
+        side-channel — mirrors api_server.py's _check_auth.
+        """
         if self.auth_token is None:
             return True
         auth_header = self.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
-            return auth_header[7:] == self.auth_token
+            return secrets.compare_digest(auth_header[7:], self.auth_token)
         return False
 
     def _send_json(self, data: Any, status: int = 200) -> None:
@@ -410,9 +422,15 @@ class DaemonHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    # v2.3.4-security: cap request bodies so a malicious local caller
+    # can't exhaust memory with a huge Content-Length claim.
+    MAX_BODY_BYTES = 2 * 1024 * 1024  # 2 MiB is plenty for task/JSON payloads
+
     def _read_body(self) -> Dict[str, Any]:
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
+            return {}
+        if length > self.MAX_BODY_BYTES:
             return {}
         raw = self.rfile.read(length)
         try:
@@ -502,6 +520,21 @@ class DaemonHandler(BaseHTTPRequestHandler):
 
         # Send initial state
         self._sse_send("state", task.to_dict())
+
+        # If the task is already in a terminal state (completed / failed /
+        # cancelled), there will never be another event — close the stream
+        # now instead of keepalive-looping until the client disconnects.
+        #
+        # v2.3.4-fix: also mark the connection for close. The response
+        # above advertises ``Connection: keep-alive``, so returning alone
+        # left the socket open: an SSE client polling a finished task
+        # would block in read() forever (until ITS timeout) waiting for a
+        # stream end that never came. Setting close_connection makes
+        # BaseHTTPRequestHandler close the socket right after this
+        # response, so the client sees EOF immediately.
+        if task.state in (TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED):
+            self.close_connection = True
+            return
 
         # Subscribe to updates
         event_queue: queue.Queue[Optional[Dict[str, Any]]] = queue.Queue(maxsize=100)
@@ -700,7 +733,7 @@ def run_single_task(
     except ImportError:
         from .agent_runtime.runtime import AgentRuntime
 
-    # v2.4.1-fix: pass a config-backed registry (see _build_registry).
+    # v2.3.4-fix: pass a config-backed registry (see _build_registry).
     agent = AgentRuntime(registry=_build_registry(), workspace=workspace or os.getcwd())
     result = agent.run(prompt)
 

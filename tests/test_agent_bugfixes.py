@@ -164,7 +164,7 @@ def test_execute_command_shows_error_at_end_of_long_stderr(tmp_path):
     assert "[EXIT CODE] 1" in result
 
 
-# ── 3. Quota/429 retry budget + friendly error (v2.4.x) ───────────────
+# ── 3. Quota/429 retry budget + friendly error (v2.3.4) ───────────────
 
 def _make_retry_runtime(monkeypatch):
     """A minimally-initialized AgentRuntime for _generate_with_retry tests."""
@@ -191,7 +191,7 @@ def _make_retry_runtime(monkeypatch):
 
 
 def test_quota_error_gets_extended_retry_budget_and_friendly_error(monkeypatch):
-    """Regression (v2.4.x): a persistently-429'd provider (OpenRouter free
+    """Regression (v2.3.4): a persistently-429'd provider (OpenRouter free
     tier shared pool) must be retried up to _RETRY_QUOTA_MAX_ATTEMPTS, not
     the plain 5, and the final error must be actionable instead of a raw
     upstream JSON blob."""

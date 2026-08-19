@@ -602,7 +602,7 @@ def make_daemon_stop_callback(
             # cancel the most recent RUNNING one. If the daemon exposes
             # a "cancel current" method, prefer that.
             #
-            # v2.4.1-fix: the old code read ``t.get("status")`` /
+            # v2.3.4-fix: the old code read ``t.get("status")`` /
             # ``t.get("task_id")`` — but TaskRecord.to_dict() emits
             # ``"state"`` / ``"id"``, so the running-task check never
             # matched and the kill switch silently cancelled NOTHING

@@ -74,7 +74,17 @@ BASE_DANGEROUS_FLAGS: Dict[str, FrozenSet[str]] = {
     "python":  frozenset({"-c", "-m"}),
     "node":    frozenset({"-e", "--eval"}),
     "pip":     frozenset({"install", "uninstall"}),
-    "npm":     frozenset({"install", "uninstall", "run"}),
+    # v2.3.4-security: `npm run` was blocked, but `npm test`/`npm start`/
+    # `npm exec` are ALIASES that execute the same arbitrary
+    # package.json scripts — a malicious repo can ship
+    # `{"scripts":{"test":"rm -rf ~"}}` and `npm test` runs it. All
+    # script-executing npm subcommands are now blocked (fail-closed); a
+    # user can re-allow them for a trusted project via
+    # commands.json extra_trusted_flags.
+    "npm":     frozenset({"install", "uninstall", "run", "run-script",
+                           "test", "t", "start", "restart", "exec", "ci",
+                           "install-test", "install-ci-test", "link",
+                           "rebuild", "publish"}),
     "git":     frozenset({"clone", "push", "pull", "fetch", "remote"}),
 }
 

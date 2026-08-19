@@ -8,11 +8,14 @@ Goal (M1): "Cross-model 'Second Opinion' before commit — Guardian +
 This module is the data layer for the Second Opinion feature. It does
 TWO things:
 
-1. **Pro gating** — ``is_pro_enabled()`` reads ``tera_pilot_pro`` from
-   ``~/.tera_pilot/config.json`` and ``TERA_PILOT_PRO`` from the environment.
-   The feature only fires when pro is enabled AND the user has
-   explicitly turned on Second Opinion (``second_opinion.enabled`` in
-   the same config file, or via ``/second_opinion on``).
+1. **Pro gating (v2.3.4: license-based)** — Second Opinion only fires when
+   the ``second_opinion`` feature is licensed: a valid Ed25519-signed
+   license (``tera-pilot license activate <key>``) or the local-dev
+   ``TERA_PILOT_PRO`` override (dev-only, never for production). The old
+   forgeable ``tera_pilot_pro`` config flag no longer grants access — see
+   ``licensing.py`` / ``LICENSING.md``. On top of the license, the user
+   must explicitly enable Second Opinion (``second_opinion.enabled`` in
+   ``~/.tera_pilot/config.json``, or ``/second_opinion on``).
 
 2. **Cross-model review** — ``review_with_second_model()`` asks a
    DIFFERENT provider/model than the active one to review a proposed
@@ -38,6 +41,21 @@ Why a separate module (vs. extending ``guardian.py``):
 - The two features compose: Guardian flags a risky call, then Second
   Opinion chimes in with a different model's take. The user sees both
   rationales side-by-side.
+
+Status & known limitations (v2.3.4 — honest, matching README's
+"deliberately NOT claiming" section):
+- The MANUAL run path is fully wired and gated: TUI ``/second_opinion
+  run ...``-style invocation and ``POST /api/second_opinion/run`` both
+  funnel through :func:`run_second_opinion` → license check →
+  cross-model review.
+- The AUTO-trigger path (:func:`should_run_second_opinion`, meant to
+  fire before risky tool calls) is implemented and gated but is NOT yet
+  wired into the agent tool-engine call flow — nothing calls it during
+  a run yet. The guardian approval modal can still surface a second
+  opinion when the UI explicitly invokes it.
+- The second opinion issues a REAL LLM call to a second provider; that
+  is the feature itself (a cloud provider call by design), not
+  telemetry. License checks themselves make zero network calls.
 """
 
 from __future__ import annotations
@@ -68,22 +86,22 @@ _CONFIG_KEY_SECOND_OPINION = "second_opinion"
 # differ in training data and reasoning style.
 _CROSS_FAMILY_DEFAULTS: Dict[str, str] = {
     # active provider family → (second provider id, second model)
-    "ollama":       ("groq",      "llama-3.3-70b-versatile"),
-    "lmstudio":     ("groq",      "llama-3.3-70b-versatile"),
-    "nvidia_nim":   ("groq",      "llama-3.3-70b-versatile"),
+    "ollama":       ("groq",      "meta-llama/llama-4-maverick-17b-128e-instruct"),
+    "lmstudio":     ("groq",      "meta-llama/llama-4-maverick-17b-128e-instruct"),
+    "nvidia_nim":   ("groq",      "meta-llama/llama-4-maverick-17b-128e-instruct"),
     "openai":       ("anthropic", "claude-haiku-4-5-20251001"),
-    "anthropic":    ("openai",    "gpt-5.4-mini"),
-    "openrouter":   ("groq",      "llama-3.3-70b-versatile"),
-    "groq":         ("openai",    "gpt-5.4-mini"),
-    "deepseek":     ("openai",    "gpt-5.4-mini"),
-    "zai":          ("openai",    "gpt-5.4-mini"),
-    "gemini":       ("openai",    "gpt-5.4-mini"),
-    "mistral":      ("openai",    "gpt-5.4-mini"),
-    "together":     ("groq",      "llama-3.3-70b-versatile"),
-    "fireworks":    ("groq",      "llama-3.3-70b-versatile"),
-    "xai":          ("openai",    "gpt-5.4-mini"),
-    "cerebras":     ("openai",    "gpt-5.4-mini"),
-    "sambanova":    ("openai",    "gpt-5.4-mini"),
+    "anthropic":    ("openai",    "gpt-5.5"),
+    "openrouter":   ("groq",      "meta-llama/llama-4-maverick-17b-128e-instruct"),
+    "groq":         ("openai",    "gpt-5.5"),
+    "deepseek":     ("openai",    "gpt-5.5"),
+    "zai":          ("openai",    "gpt-5.5"),
+    "gemini":       ("openai",    "gpt-5.5"),
+    "mistral":      ("openai",    "gpt-5.5"),
+    "together":     ("groq",      "meta-llama/llama-4-maverick-17b-128e-instruct"),
+    "fireworks":    ("groq",      "meta-llama/llama-4-maverick-17b-128e-instruct"),
+    "xai":          ("openai",    "gpt-5.5"),
+    "cerebras":     ("openai",    "gpt-5.5"),
+    "sambanova":    ("openai",    "gpt-5.5"),
 }
 
 
@@ -148,16 +166,32 @@ def _save_config(cfg: Dict[str, Any]) -> None:
 
 
 def is_pro_enabled() -> bool:
-    """Return True if the ``tera_pilot_pro`` flag is on (env or config)."""
-    env_val = os.environ.get(_PRO_ENV_VAR, "").strip().lower()
-    if env_val in ("1", "true", "yes", "on"):
-        return True
-    cfg = _load_config()
-    return bool(cfg.get(_CONFIG_KEY_PRO, False))
+    """DEPRECATED (v2.3.4): Pro is now license-based.
+
+    Returns True only when a valid Pro license is active (or the
+    ``TERA_PILOT_PRO`` local-dev override is set). The old ``tera_pilot_pro``
+    config flag no longer grants anything — it was a forgeable boolean and
+    is replaced by the offline license system (``licensing.py``). Kept as a
+    status shim for displays; feature gating uses
+    ``licensing.is_feature_licensed("second_opinion")``.
+    """
+    from .licensing import is_pro_enabled as _licensing_pro
+    return _licensing_pro()
 
 
 def set_pro_enabled(enabled: bool) -> None:
-    """Persist the ``tera_pilot_pro`` flag."""
+    """DEPRECATED (v2.3.4): Pro can no longer be enabled by a config flag.
+
+    Pro requires a valid signed license (``tera-pilot license activate
+    <key>``). This method is kept for API compatibility: it records the
+    legacy flag for any old readers, but it has NO effect on gating —
+    :func:`is_pro_enabled` ignores it.
+    """
+    logger.warning(
+        "[second_opinion] set_pro_enabled() is deprecated — Pro requires a "
+        "valid license (see tera_pilot/licensing.py and LICENSING.md). "
+        "The config flag is no longer read for gating."
+    )
     cfg = _load_config()
     cfg[_CONFIG_KEY_PRO] = bool(enabled)
     _save_config(cfg)
@@ -207,7 +241,7 @@ def resolve_second_provider(
     if pair:
         return pair
     # Last-resort: Groq with a fast llama model.
-    return "groq", "llama-3.3-70b-versatile"
+    return "groq", "meta-llama/llama-4-maverick-17b-128e-instruct"
 
 
 # ── Verdict parsing ──────────────────────────────────────────────────
@@ -432,11 +466,13 @@ def should_run_second_opinion(
     """Decide whether to actually invoke the second model for this call.
 
     Rules:
-    - Pro must be enabled.
+    - The second_opinion feature must be licensed (valid Pro license or
+      TERA_PILOT_PRO dev override).
     - Second Opinion must be enabled in config.
     - The risk level must meet the configured threshold.
     """
-    if not is_pro_enabled():
+    from .licensing import is_feature_licensed
+    if not is_feature_licensed("second_opinion"):
         return False
     if not config.enabled:
         return False

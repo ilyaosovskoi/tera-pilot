@@ -178,7 +178,7 @@ def _plugins_dir() -> Path:
 
 _PROVIDER_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "local":      {"model": "", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
-    "openrouter": {"model": "anthropic/claude-sonnet-4.6", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
+    "openrouter": {"model": "anthropic/claude-sonnet-5", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
     "groq":       {"model": "meta-llama/llama-4-maverick-17b-128e-instruct", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
     "openai":     {"model": "gpt-5.5", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
     "anthropic":  {"model": "claude-sonnet-5", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
@@ -192,7 +192,7 @@ _PROVIDER_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "xai":        {"model": "grok-4.3", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
     "cerebras":   {"model": "llama-4-scout-17b-16e-instruct", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
     "sambanova":  {"model": "Meta-Llama-4-Maverick-17B-128E-Instruct", "api_key": "", "api_base": "", "temperature": 0.2, "max_tokens": 4096},
-    "ollama":     {"model": "llama3.1", "api_key": "", "api_base": "http://localhost:11434/v1", "temperature": 0.2, "max_tokens": 4096},
+    "ollama":     {"model": "llama4", "api_key": "", "api_base": "http://localhost:11434/v1", "temperature": 0.2, "max_tokens": 4096},
     "lmstudio":   {"model": "", "api_key": "", "api_base": "http://localhost:1234/v1", "temperature": 0.2, "max_tokens": 4096},
 }
 
@@ -271,7 +271,7 @@ def _chat_path(chat_id: str) -> Path:
 def _chat_title_from_text(text: str, limit: int = 60) -> str:
     """Build a clean initial chat title from the first user message.
 
-    v2.4.x: the old code used ``text[:60]`` verbatim, which kept markdown
+    v2.3.4: the old code used ``text[:60]`` verbatim, which kept markdown
     quote prefixes (``> ``), double spaces and punctuation, so titles looked
     like ``> Создай в папке  mini_project  небольшой Python-модуль  uti...``.
     We strip quote prefixes/markdown markers and collapse whitespace so the
@@ -661,6 +661,10 @@ class ServerContext:
                     max_iterations=int(self.config.get("agent_max_iterations", 8)),
                     enable_planning=bool(self.config.get("agent_enable_planning", True)),
                     memory_persist_path=str(_tera_pilot_home() / "agent_memory.json"),
+                    # v2.3.5-fix (small-model support): explicit override
+                    # for the compact prompt / tool set. None = auto-detect
+                    # from the active model's size (<= ~8B → compact).
+                    compact_prompt=self.config.get("agent_compact_prompt"),
                 )
                 # v1.0.5-correctness: wire the token tracker so the agent
                 # records real token usage on every provider call (H-RT-3).
@@ -694,6 +698,12 @@ class ServerContext:
         providers = self.config.get("providers", {})
         for pid, pcfg in providers.items():
             try:
+                # v2.3.5-fix: thread optional provider extras (e.g.
+                # reasoning_effort for reasoning models) into the
+                # ProviderConfig so providers can honor them.
+                extra: Dict[str, Any] = {}
+                if pcfg.get("reasoning_effort"):
+                    extra["reasoning_effort"] = pcfg["reasoning_effort"]
                 cfg = ProviderConfig(
                     provider_id=pid,
                     model=pcfg.get("model", ""),
@@ -701,6 +711,7 @@ class ServerContext:
                     api_base=pcfg.get("api_base") or None,
                     temperature=float(pcfg.get("temperature", 0.2)),
                     max_tokens=int(pcfg.get("max_tokens", 4096)),
+                    extra=extra,
                 )
                 self.registry.configure(pid, cfg)
             except Exception as e:
@@ -805,10 +816,17 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
 
     # ── Helpers ────────────────────────────────────────────────
 
+    # v2.3.4-security: cap request bodies so a malicious local caller (or
+    # a page abusing the loopback CORS) can't exhaust memory by claiming a
+    # huge Content-Length. 8 MiB is far beyond any legitimate payload here.
+    MAX_BODY_BYTES = 8 * 1024 * 1024
+
     def _read_json(self) -> Dict[str, Any]:
         length = int(self.headers.get('Content-Length', 0))
         if length == 0:
             return {}
+        if length > self.MAX_BODY_BYTES:
+            return {}  # refuse oversized bodies, don't read them
         raw = self.rfile.read(length)
         return json.loads(raw.decode('utf-8'))
 
@@ -848,14 +866,33 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
         HTTP SSE streaming path fails with CORS and falls back to the
         QWebChannel bridge, whose push-based signal delivery does not work
         in this configuration.
+
+        v2.3.4-security: the old check used ``origin.startswith('http://'
+        + 'localhost')``, which an attacker-controlled domain named
+        ``localhost.evil.com`` satisfies — CORS echoed the attacker's
+        origin, and because GET /api/status is public and returns
+        ``api_token``, a malicious webpage could read the bearer token
+        and drive the agent (CSRF-to-localhost → token theft → arbitrary
+        commands). Compare the parsed HOSTNAME against the exact
+        loopback set (any port), never a string prefix.
         """
         origin = (self.headers.get('Origin', '') or '').strip()
-        allowed_prefixes = (
-            'http://localhost', 'http://127.0.0.1',
-            'https://localhost', 'https://127.0.0.1',
-        )
-        if origin and any(origin.startswith(p) for p in allowed_prefixes):
-            return origin
+        if origin:
+            try:
+                parts = urlparse(origin)
+            except ValueError:
+                parts = None
+            if parts is not None and parts.scheme in ('http', 'https'):
+                host = (parts.hostname or '').lower()
+                # Reject malformed origins (e.g. "localhost:8080.evil.com"
+                # parses as hostname "localhost" with an invalid port).
+                try:
+                    parts.port  # raises ValueError on a non-numeric port
+                    port_ok = True
+                except ValueError:
+                    port_ok = False
+                if host in ('localhost', '127.0.0.1', '::1') and port_ok:
+                    return origin
         # file:// pages (QWebEngineView) send Origin: null or empty.
         # In a desktop-app context this is safe — no external website can
         # forge a null origin.  Return '*' so the preflight passes.
@@ -1100,7 +1137,7 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
             'api_token': self.ctx._auth_token,
             'snippets_count': len(self.ctx.config.get('snippets', [])),
             'auto_route': self.ctx.config.get('auto_route', True),
-            # v2.4.x: expose saved UI preferences (theme, Basic/Advanced
+            # v2.3.4: expose saved UI preferences (theme, Basic/Advanced
             # mode) so the frontend can restore them across browsers/webviews
             # even when localStorage is unavailable.
             'ui': self.ctx.config.get('ui', {}) or {},
@@ -1205,7 +1242,7 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                     temperature=0.2,
                     max_tokens=100,
                 )
-                # v2.4.x-fix (root cause of "agent reports success but did
+                # v2.3.4-fix (root cause of "agent reports success but did
                 # nothing"): the OLD code went through registry.configure(),
                 # which stores cfg_obj in the registry's _configs map — so
                 # even though `finally` restored the instance, the NEXT
@@ -1246,9 +1283,29 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                     except Exception as restore_err:
                         logger.warning("[api] failed to restore provider config after test: %s",
                                        restore_err)
-                self.close_connection = True
+                handler.close_connection = True
+                stream_done.set()
 
+        stream_done = threading.Event()
+        handler = self
         threading.Thread(target=test_thread, daemon=True).start()
+        # v2.3.4-fix (SSE "success reported as timeout"): block this
+        # connection's handler thread until the stream thread finishes and
+        # sets ``close_connection = True``. Previously we returned
+        # immediately: BaseHTTPRequestHandler.handle() had already evaluated
+        # ``close_connection`` and moved on to the next handle_one_request()
+        # (blocked in rfile.readline()), so the flag set by the stream
+        # thread's ``finally`` was never read — the socket stayed open after
+        # the terminal event and a client reading until EOF (eval/runner.py)
+        # hung until ITS read timeout fired, turning a real success into a
+        # reported timeout.
+        #
+        # Blocking here is safe: ThreadedHTTPServer (ThreadingMixIn with
+        # daemon_threads=True) spawns ONE thread per connection, so we only
+        # occupy this connection's thread for the duration of its own stream.
+        # Concurrent clients get their own threads and are unaffected, and
+        # daemon_threads=True means server shutdown never waits on us.
+        stream_done.wait()
 
     # ── Chat streaming (SSE) ──────────────────────────────────
 
@@ -1271,8 +1328,11 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
 
         # Prevent handle() from closing the connection after do_POST() returns.
         # The background stream_thread will write to self.wfile; it needs the
-        # connection to stay open.  When the stream finishes (or errors),
-        # _stream_done_event signals handle_one_request() to stop blocking.
+        # connection to stay open. When the stream finishes (or errors),
+        # ``stream_done`` is set and ``close_connection`` becomes True — and
+        # because _handle_chat_stream() blocks on ``stream_done.wait()`` below
+        # (v2.3.4-fix), handle_one_request() actually gets to READ that flag
+        # instead of being stuck in rfile.readline() for the next request.
         self.close_connection = False
 
         text = (body.get('text') or '').strip()
@@ -1487,11 +1547,22 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                 handler._sse({'type': 'error', 'message': f'Unexpected error: {e}'})
             finally:
                 # Signal that the stream is finished so the handler thread
-                # (blocked in handle_one_request) can close the connection.
+                # (blocked on stream_done.wait() below) can return, letting
+                # handle_one_request() see close_connection and close the
+                # socket right after the terminal event.
                 handler.close_connection = True
                 stream_done.set()
 
         threading.Thread(target=stream_thread, daemon=True).start()
+        # v2.3.4-fix (SSE "success reported as timeout"): block until the
+        # stream thread sets ``stream_done`` (in its ``finally``). See
+        # _handle_test_provider() for the full reasoning — ThreadingMixIn
+        # gives every connection its own thread and daemon_threads=True
+        # means shutdown never waits on us, so blocking here is safe and
+        # makes the socket close immediately after `done`, which is what a
+        # client reading until EOF (eval/runner.py, the web UI's
+        # getReader()) needs to see a clean end-of-stream.
+        stream_done.wait()
 
     # ── Agent mode (tool-use: read_file, write_file, run_code, etc.) ──
 
@@ -1680,7 +1751,7 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                         })
                         # Block the agent thread until POST /api/agent/diff_review
                         # for THIS review_id arrives, or 5 min timeout.
-                        # v2.4.0-fix: also abort early when the user clicks Stop
+                        # v2.3.4-fix: also abort early when the user clicks Stop
                         # (/api/agent/stop). Previously the agent thread stayed
                         # blocked here for the full 300s (or until the browser
                         # answered), so Stop appeared to hang mid-diff-review —
@@ -1757,7 +1828,7 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                     handler._sse({'type': 'error', 'message': result.error or 'Agent failed with no output.'})
                     return
 
-                # v2.4.x-fix: report REAL token usage (accumulated by the
+                # v2.3.4-fix: report REAL token usage (accumulated by the
                 # runtime from the actual provider responses) instead of
                 # ``result.iterations`` — a 3-iteration run used to show as
                 # "3 tokens" no matter how much text the model produced.
@@ -1778,7 +1849,7 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                         'tokens_out': total_out,
                         'elapsed': elapsed,
                         'tool_calls': [tc.name.value for tc in (result.tool_calls or [])],
-                        # v2.4.x: True when the run ended as prose-without-
+                        # v2.3.4: True when the run ended as prose-without-
                         # tools — the UI must warn instead of showing a clean
                         # completion.
                         'degraded': degraded,
@@ -1817,6 +1888,19 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                 stream_done.set()
 
         threading.Thread(target=stream_thread, daemon=True).start()
+        # v2.3.4-fix (SSE "success reported as timeout"): block until the
+        # stream thread sets ``stream_done`` in its ``finally``. This is the
+        # root-cause fix for eval runs that reported `error`/timeout even
+        # though the agent had already finished: the handler returned
+        # immediately, the request loop had moved past the close_connection
+        # check, and the socket stayed open after `done` — so a client
+        # reading until EOF hung until ITS read timeout. Blocking here (this
+        # connection's own thread, see _handle_test_provider) makes the
+        # socket close right after the terminal event. NOTE: while we block,
+        # the agent may pause on a diff_review event and wait for
+        # POST /api/agent/diff_review — that POST arrives on a NEW
+        # connection (own thread), so this wait never deadlocks it.
+        stream_done.wait()
 
     # ── Diff review (agent pauses for user approve/reject) ──────
 
@@ -1935,8 +2019,17 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                         logger.warning("[api] failed to restore provider config after oneshot: %s",
                                        restore_err)
                 handler.close_connection = True
+                stream_done.set()
 
+        stream_done = threading.Event()
         threading.Thread(target=oneshot_thread, daemon=True).start()
+        # v2.3.4-fix (SSE "success reported as timeout"): same keep-alive /
+        # close_connection race as the other SSE handlers — block until the
+        # stream thread sets ``stream_done`` so the request loop reads
+        # ``close_connection`` and the socket closes right after
+        # oneshot_done/oneshot_error. Safe because ThreadingMixIn runs each
+        # connection on its own thread (see _handle_test_provider).
+        stream_done.wait()
 
     # ── Chat CRUD ─────────────────────────────────────────────
 

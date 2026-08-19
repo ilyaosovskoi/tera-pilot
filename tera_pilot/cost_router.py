@@ -50,6 +50,25 @@ Tera Pilot v2.0.2 — Smart Cost-Aware Provider Routing (Goal M2).
 
 4.  **Persistence.** Caps and demotion thresholds live in
     ``~/.tera_pilot/cost_router.json``. The file is small and human-editable.
+
+Status & known limitations (v2.3.4 — honest, matching README's
+"deliberately NOT claiming" section):
+- Cost Router is a **Pro-licensed feature** (M2): without a valid license
+  (or the local-dev ``TERA_PILOT_PRO`` override) ``route()`` fails CLOSED
+  — it returns the AutoRouter decision unchanged with a
+  ``"Pro license required"`` factor, and config mutations raise
+  ``LicenseRequiredError``. The gate lives in :meth:`CostRouter.route` and
+  the config setters, which every surface funnels through (TUI ``/cost``,
+  HTTP ``/api/cost/*``, bridge).
+- Cost Router is NOT wired into the live chat/agent routing path yet: the
+  HTTP chat stream and the TUI bridge route through AutoRouter directly.
+  ``CostRouter`` is fully functional as a policy layer and is exercised
+  via ``/cost route`` / ``/api/cost/route`` / the bridge, but the runtime
+  does not yet call it before every prompt. This is the same
+  present-but-not-wired gap Second Opinion's auto-trigger has.
+- ``CostRouter.route()`` requires the ``token_tracker``/``token_budget``
+  singletons for budget-pressure signals; when they are unavailable it
+  degrades gracefully (pressure 0.0) rather than failing.
 """
 
 from __future__ import annotations
@@ -62,6 +81,11 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+# v2.3.4: Cost Router is a Pro-licensed feature (M2). License checks are
+# fully offline and fail closed — an unlicensed user gets AutoRouter's
+# decision unchanged, never a crash.
+from .licensing import LicenseRequiredError, is_feature_licensed as _is_feature_licensed
 
 logger = logging.getLogger(__name__)
 
@@ -229,12 +253,30 @@ class CostRouter:
             return self._config
 
     def set_config(self, cfg: CostRouterConfig) -> None:
+        """Replace the whole config. Pro-licensed (raises when unlicensed)."""
+        self._require_license()
         with self._lock:
             self._config = cfg
         save_config(cfg)
 
+    def _require_license(self) -> None:
+        """Fail closed: refuse to mutate cost-router policy without a license.
+        Reads are always allowed (harmless settings visibility); writes and
+        routing are the feature itself."""
+        if not _is_feature_licensed("cost_router"):
+            raise LicenseRequiredError(
+                "Cost Router is a Pro feature — activate a license with: "
+                "tera-pilot license activate <key>"
+            )
+
     def update_config(self, **kwargs: Any) -> CostRouterConfig:
-        """Patch one or more config fields, then persist."""
+        """Patch one or more config fields, then persist.
+
+        Pro-licensed: raises ``LicenseRequiredError`` when unlicensed so no
+        surface (TUI /cost, HTTP /api/cost/*) can mutate the policy by a
+        different code path.
+        """
+        self._require_license()
         with self._lock:
             cur = self._config
             for k, v in kwargs.items():
@@ -280,15 +322,20 @@ class CostRouter:
         original_complexity = ar_decision.get("complexity", "simple")
         demoted_from = ""
 
-        # If CostRouter is disabled, just return the AutoRouter decision
-        # with the cost-explanation fields zeroed out.
-        if not cfg.enabled:
+        # If CostRouter is disabled, or the feature isn't licensed (Pro),
+        # just return the AutoRouter decision with the cost-explanation
+        # fields zeroed out — fail closed to the free tier, never crash.
+        if not cfg.enabled or not _is_feature_licensed("cost_router"):
+            if cfg.enabled:
+                factor = "cost_router: Pro license required — using AutoRouter output unchanged"
+            else:
+                factor = "cost_router disabled — using AutoRouter output unchanged"
             return CostRouteDecision(
                 prompt_preview=prompt[:120],
                 auto_router_pick=ar_decision,
                 final_pick=final_pick,
                 fallbacks=fallbacks,
-                factors=["cost_router disabled — using AutoRouter output unchanged"],
+                factors=[factor],
                 budget_pressure=0.0,
                 budget_remaining_usd=0.0,
                 complexity=original_complexity,

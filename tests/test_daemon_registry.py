@@ -1,4 +1,4 @@
-"""Regression tests for daemon registry wiring (v2.4.1-fix).
+"""Regression tests for daemon registry wiring (v2.3.4-fix).
 
 Previously ``daemon._run_task`` and ``daemon.run_single_task`` called
 ``AgentRuntime(workspace=...)`` with no ``registry`` argument, but

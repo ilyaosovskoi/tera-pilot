@@ -47,7 +47,7 @@
 [data-theme="light"] .provider-menu{box-shadow:0 8px 32px rgba(0,0,0,0.1)}
 [data-theme="light"] .toast{box-shadow:0 8px 32px rgba(0,0,0,0.1)}
 [data-theme="light"] .drawer{box-shadow:0 -8px 32px rgba(0,0,0,0.06)}
-[data-theme="light"] .composer:focus-within{box-shadow:0 0 0 4px rgba(26,26,30,0.06)}
+[data-theme="light"] .composer:focus-within{border-color:var(--border-strong)}
 [data-theme="light"] .template-card:hover,[data-theme="light"] .skill-card:hover,[data-theme="light"] .suggestion:hover{box-shadow:0 4px 16px rgba(0,0,0,0.06)}
 [data-theme="light"] .token-bar,[data-theme="light"] .statusbar{box-shadow:0 1px 4px rgba(0,0,0,0.06)}
 [data-theme="light"] .cmd-palette{box-shadow:0 16px 64px rgba(0,0,0,0.12)}
@@ -100,7 +100,7 @@
 [data-theme="espresso"] .send-btn:hover{box-shadow:0 0 14px rgba(217,119,87,0.4)}
 [data-theme="espresso"] .btn-primary{background:#D97757;color:#1F1D1B}
 [data-theme="espresso"] .agent-mode-toggle.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
-[data-theme="espresso"] .composer:focus-within{box-shadow:0 0 0 4px var(--accent-glow)}
+[data-theme="espresso"] .composer:focus-within{border-color:var(--accent)}
 [data-theme="espresso"] .empty-state h2{background:linear-gradient(135deg,#F0EBE0 0%,#D97757 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 [data-theme="espresso"] ::selection{background:rgba(217,119,87,0.3)}
 .tc-preview-espresso{background:linear-gradient(135deg,#1F1D1B 0%,#2D2B27 100%)}
@@ -172,7 +172,7 @@
 [data-theme="graphite"] .send-btn:hover{box-shadow:0 0 14px rgba(91,141,239,0.35)}
 [data-theme="graphite"] .btn-primary{background:#5B8DEF;color:#14151A}
 [data-theme="graphite"] .agent-mode-toggle.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
-[data-theme="graphite"] .composer:focus-within{box-shadow:0 0 0 4px var(--accent-glow)}
+[data-theme="graphite"] .composer:focus-within{border-color:var(--accent)}
 [data-theme="graphite"] ::selection{background:rgba(91,141,239,0.28)}
 .tc-preview-graphite{background:#1C1C1E}
 .tc-bar-graphite{background:#2A2A2D}
@@ -202,7 +202,7 @@
 [data-theme="clay"] .send-btn:hover{box-shadow:0 0 14px rgba(217,119,87,0.3)}
 [data-theme="clay"] .btn-primary{background:#D97757;color:#FFFFFF}
 [data-theme="clay"] .agent-mode-toggle.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
-[data-theme="clay"] .composer:focus-within{box-shadow:0 0 0 4px var(--accent-glow)}
+[data-theme="clay"] .composer:focus-within{border-color:var(--accent)}
 [data-theme="clay"] .all-chats-btn{border-style:solid}
 [data-theme="clay"] ::selection{background:rgba(217,119,87,0.2)}
 .tc-preview-clay{background:#FAF9F5}
@@ -246,7 +246,7 @@
 [data-theme="linen"] .msg-body{background:rgba(255,255,255,0.68);border-color:rgba(255,255,255,0.5);backdrop-filter:blur(18px) saturate(180%);-webkit-backdrop-filter:blur(18px) saturate(180%);box-shadow:0 1px 2px rgba(42,38,32,0.04)}
 [data-theme="linen"] .msg-body.user{background:rgba(255,255,255,0.9);border-color:var(--border-strong)}
 [data-theme="linen"] .composer{background:rgba(255,255,255,0.72);border:1px solid rgba(255,255,255,0.55);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%)}
-[data-theme="linen"] .composer:focus-within{box-shadow:0 0 0 4px var(--accent-glow)}
+[data-theme="linen"] .composer:focus-within{border-color:var(--accent)}
 [data-theme="linen"] .send-btn{background:linear-gradient(135deg,#2F6FED 0%,#6FA8FF 100%);color:#FFFFFF}
 [data-theme="linen"] .send-btn:hover{box-shadow:0 0 16px rgba(47,111,237,0.35)}
 [data-theme="linen"] .btn-primary{background:linear-gradient(135deg,#2F6FED 0%,#6FA8FF 100%);color:#FFFFFF}
@@ -308,7 +308,7 @@
 [data-theme="noir"] .neural-pixel{opacity:0.5!important}
 [data-theme="noir"] .vignette{background:radial-gradient(ellipse 90% 70% at 50% 0%,rgba(255,255,255,0.035) 0%,transparent 60%)}
 [data-theme="noir"] .vignette::after{opacity:0.28}
-[data-theme="noir"] .brand-mark{background:linear-gradient(135deg,#FFFFFF 0%,#8E8E93 100%);border-radius:6px}
+[data-theme="noir"] .brand-mark{background:linear-gradient(135deg,#8E8E93 0%,#4A4A54 100%);border-radius:6px}
 [data-theme="noir"] .brand-mark::after{background:var(--bg-primary)}
 [data-theme="noir"] .brand-mark::before{background:linear-gradient(135deg,#FFFFFF 0%,#8E8E93 100%)}
 [data-theme="noir"] .msg-body.user{background:var(--bg-secondary);border-color:var(--border-strong)}
@@ -405,8 +405,9 @@ input,textarea{font-family:inherit;border:none;outline:none;background:none;colo
 .app.sidebar-collapsed .catalog-trigger{position:relative}
 .app.sidebar-collapsed .catalog-trigger[data-count]:not([data-count="0"])::after{
   content:attr(data-count);position:absolute;top:2px;right:2px;min-width:14px;height:14px;padding:0 3px;
-  border-radius:var(--r-pill);background:var(--accent);color:#fff;font-size:8px;font-weight:700;
+  border-radius:var(--r-pill);background:var(--accent);color:var(--bg-primary);font-size:8px;font-weight:700;
   display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;line-height:1;
+  box-shadow:0 1px 3px rgba(0,0,0,0.4);
 }
 /* macOS traffic light spacer — used only as a fallback drag region.
    Replaced by .mac-traffic-lights in frameless mode (see below). */
@@ -730,11 +731,12 @@ html[data-platform="darwin"] .resize-edge{display:none !important}
 .empty-state p{font-size:14px;color:var(--text-muted);max-width:480px;line-height:1.6;animation:fadeIn 0.8s 0.2s var(--ease) both}
 
 /* COMPOSER */
-.composer-wrap{flex-shrink:0;padding:var(--s-8) var(--s-32) var(--s-16);display:flex;flex-direction:column;align-items:center;gap:var(--s-8);min-height:0}
+.composer-wrap{flex-shrink:0;padding:var(--s-8) var(--s-32) var(--s-16);display:flex;flex-direction:column;align-items:center;gap:var(--s-8);min-height:0;position:relative}
 
-/* Provider dropdown — hidden by default, opens on click */
-.provider-dropdown{position:relative;display:none}
-.provider-dropdown.open{display:block}
+/* Provider dropdown — trigger is always visible above the composer;
+   only the menu is hidden until opened. (v2.3.4: the whole wrapper was
+   display:none, so the provider pill never appeared.) */
+.provider-dropdown{position:relative}
 .provider-trigger{display:flex;align-items:center;gap:var(--s-8);padding:7px 14px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--r-pill);font-size:12px;font-weight:500;font-family:'JetBrains Mono',monospace;color:var(--text-secondary);transition:all var(--m-fast) var(--ease)}
 .provider-trigger:hover{background:var(--bg-hover);color:var(--text-primary);border-color:var(--border-strong)}
 .provider-trigger .pd-dot{width:6px;height:6px;border-radius:50%;background:var(--accent)}
@@ -765,7 +767,9 @@ html[data-platform="darwin"] .resize-edge{display:none !important}
 .provider-menu-footer a:hover{text-decoration:underline}
 
 .composer{width:100%;max-width:min(820px,100%);background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--r-composer);padding:var(--s-14) var(--s-16);position:relative;transition:border-color var(--m-med) var(--ease),box-shadow var(--m-med) var(--ease),transform 0.2s var(--ease);box-shadow:var(--card-shadow)}
-.composer:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow),var(--card-shadow-hover)}
+/* v2.3.4: focus feedback is a border-color change only — the old 3px
+   glow ring read as an unwanted "frame" around the input while typing. */
+.composer:focus-within{border-color:var(--accent);box-shadow:var(--card-shadow-hover)}
 .composer-meta{display:flex;align-items:center;gap:var(--s-8);margin-bottom:6px;font-size:10.5px;color:var(--text-muted);font-weight:500;letter-spacing:0.02em;font-family:'JetBrains Mono',monospace;text-transform:none}
 .composer-meta-dot{width:5px;height:5px;border-radius:50%;background:var(--accent);animation:dotPulse 2.4s ease-in-out infinite}
 .composer-inputrow{display:flex;align-items:flex-start;gap:var(--s-8)}
@@ -4438,28 +4442,8 @@ body.tools-panel-open {
 .provider-category-label{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin:var(--s-20) 0 var(--s-8);padding:0 var(--s-4);font-weight:600}
 .provider-category-label:first-child{margin-top:0}
 
-/* ═══════════════════════════════════════════════════════════════
-   v2.2.4: Quick Settings — simplified two-tier settings modal
-   ═══════════════════════════════════════════════════════════════ */
-.qs-section{margin-bottom:var(--s-16)}
-.qs-section-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);margin-bottom:var(--s-8)}
-.qs-provider-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s-8)}
-.qs-provider-btn{display:flex;flex-direction:column;align-items:center;gap:4px;padding:var(--s-12) var(--s-8);border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg-floating);cursor:pointer;transition:all 0.15s var(--ease);position:relative}
-.qs-provider-btn:hover{border-color:var(--accent);background:var(--bg-hover)}
-.qs-provider-btn.active{border-color:var(--accent);background:var(--accent-glow);box-shadow:0 0 0 2px var(--accent-glow)}
-.qs-provider-icon{font-size:20px;line-height:1}
-.qs-provider-name{font-size:11px;color:var(--text-secondary);font-weight:500;text-align:center;white-space:nowrap}
-.qs-provider-key{font-size:9px;color:var(--text-muted)}
-.qs-provider-key.set{color:var(--success)}
-.qs-model-input,.qs-key-input{width:100%}
-.qs-key-hint{margin-top:4px;font-size:11px}
-.qs-key-hint a{color:var(--accent);text-decoration:none}
-.qs-key-hint a:hover{text-decoration:underline}
-.qs-theme-toggle{display:flex;gap:var(--s-8)}
-.qs-theme-btn{flex:1;padding:var(--s-8);border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg-floating);cursor:pointer;font-size:12px;color:var(--text-secondary);transition:all 0.15s var(--ease)}
-.qs-theme-btn:hover{border-color:var(--accent)}
-.qs-theme-btn.active{border-color:var(--accent);background:var(--accent-glow);color:var(--text-primary)}
-@media(max-width:480px){.qs-provider-grid{grid-template-columns:repeat(2,1fr)}}
+/* v2.3.4: Quick Settings CSS removed along with the modal — the full
+   Settings modal adapts to UI mode instead. */
 
 /* ════════════════════════════════════════════════════════════════
    v2.3.1 — MOTION: minimal micro-interactions
@@ -4472,7 +4456,7 @@ body.tools-panel-open {
 .btn-primary:active, .btn-secondary:active, .provider-trigger:active,
 .model-selector-chip:active, .composer-plus-btn:active, .cpm-item:active,
 .gb-btn:active, .cv-action:active, .ftp-action:active, .hc-suggestion:active,
-.office-suggestion:active, .qs-provider-btn:active, .qs-theme-btn:active,
+.office-suggestion:active,
 .modal-tab:active, .all-chats-btn:active, .sidebar-toggle:active,
 .ui-mode-toggle:active, .profile:active, .chat-search-input:active{
   transform:scale(0.97);
@@ -4483,7 +4467,7 @@ body.tools-panel-open {
 .send-btn, .icon-btn, .nav-item, .new-chat-btn, .catalog-trigger, .chat-item,
 .es-chip, .btn-primary, .btn-secondary, .provider-trigger, .model-selector-chip,
 .composer-plus-btn, .cpm-item, .gb-btn, .cv-action, .ftp-action,
-.hc-suggestion, .office-suggestion, .qs-provider-btn, .qs-theme-btn,
+.hc-suggestion, .office-suggestion,
 .modal-tab, .all-chats-btn, .sidebar-toggle, .ui-mode-toggle{
   transition:transform var(--m-fast) var(--ease), opacity var(--m-fast) var(--ease),
     background var(--m-fast) var(--ease), border-color var(--m-fast) var(--ease),

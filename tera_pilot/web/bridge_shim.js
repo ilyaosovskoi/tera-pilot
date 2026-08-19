@@ -118,9 +118,7 @@
       'check_for_updates':     '/api/updates/check',
       'read_claude_md':        '/api/memory/read',
       'mcp_list_servers':      '/api/mcp/servers',
-      'load_chat':             '/api/chat/load',
-      'pin_context_file':      '/api/context/pin',
-      'unpin_context_file':    '/api/context/unpin'
+      'load_chat':             '/api/chat/load'
     };
     var POST_ROUTES = {
       'set_provider':          '/api/providers/activate',
@@ -134,6 +132,8 @@
       'reload_project_context':'/api/context/reload',
       'undo_last_agent':       '/api/agent/undo',
       'delete_chat':           '/api/chat/delete',
+      'pin_context_file':      '/api/context/pin',
+      'unpin_context_file':    '/api/context/unpin',
       'rename_chat':           '/api/chat/rename',
       'create_chat':           '/api/chat/create',
       'rag_search':            '/api/rag/search',
@@ -205,9 +205,7 @@
     if (Array.isArray(args)) {
       if (route.verb === 'GET') {
         var GET_ARG_MAP = {
-          'load_chat': 'id',
-          'pin_context_file': 'path',
-          'unpin_context_file': 'path'
+          'load_chat': 'id'
         };
         var key = GET_ARG_MAP[method];
         if (key && args.length >= 1) {
@@ -233,6 +231,8 @@
           var POST_ARG_MAP = {
             'delete_chat': ['id'],
             'rename_chat': ['id', 'title'],
+            'pin_context_file': ['path'],
+            'unpin_context_file': ['path'],
             'create_chat': ['title'],
             'set_provider': ['provider_id'],
             'open_project': ['path'],

@@ -39,8 +39,28 @@ eval/
                        that test_command passes (proves solvability)
   results/
     schema.json        JSON Schema v1 (machine-readable artifact)
-    *.json             run results
+    *.json             raw run results (NOT versioned — see git policy below)
+  REPORT_*.md          human-readable run summaries (versioned)
 ```
+
+## Git policy for results
+
+Raw per-run JSON in `results/` is a development artifact: it can contain
+potentially sensitive model output (`final_output`) and is regenerated on
+every batch, so it is **gitignored** (`eval/results/*.json`; `schema.json`
+stays tracked). The versioned, human-readable summary is `REPORT_<date>.md`
+(e.g. `REPORT_2026-08-19.md`), which also records known harness caveats:
+
+- parallel launches against a single agent collide with
+  `Another agent request is already running` — the driver now retries such
+  collisions with backoff instead of failing the task (3 attempts);
+- a run whose tests **passed** but whose final LLM response failed is now
+  reported `success` when the agent actually ran (iterations > 0) — the
+  driver's `error` no longer masks a genuine fix.
+
+These two corrections are covered by `tests/test_eval_api_driver.py`.
+Always quote the corrected pass rate from the report, not the raw status
+counts.
 
 ## Task format (`task.json`)
 
