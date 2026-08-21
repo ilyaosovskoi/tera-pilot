@@ -8,7 +8,7 @@
 
 ### A self-hosted coding agent for private repositories, local models, CI, and verifiable automation.
 
-**Textual TUI first · Web UI · TUI backend · HTTP daemon · MCP/ACP · 16 providers · Ollama/LM Studio · Guardian safety**
+**Textual TUI first · Web UI · TUI backend · HTTP daemon · MCP/ACP · 17 providers · Ollama/LM Studio · Guardian safety**
 
 <br/>
 
@@ -109,6 +109,7 @@ Tera Pilot is provider-neutral. Configure a cloud provider with your own key, or
 - Cerebras, Together, Fireworks, SambaNova, Nvidia NIM
 - OpenRouter for access to many additional models
 - Ollama and LM Studio for local inference
+- `local` — keyless OpenAI-compatible endpoint for any self-hosted server that speaks the OpenAI API (default: Ollama at `http://localhost:11434/v1`; override `api_base` for LM Studio, vLLM, llama.cpp, …)
 
 The TUI exposes provider selection, model overrides, workspace selection and autonomy settings through its visual controls and command palette. For a local-first workflow, choose Ollama or LM Studio in the provider selector and keep the workspace inside the intended project root.
 
@@ -153,7 +154,7 @@ These mechanisms provide control and evidence; they are not a claim of formal SO
 
 ## Security Posture & Verification
 
-Security is treated as a continuously tested property, not a one-time claim. Every control below is covered by automated tests (`tests/test_security_suite.py` — 96 tests mapped to `THREAT_MODEL.md` T1–T8 — plus 36 sandbox/command tests in `tests/test_tool_engine_sandbox.py`; the full suite is 448 tests).
+Security is treated as a continuously tested property, not a one-time claim. Every control below is covered by automated tests (`tests/test_security_suite.py` — 141 tests mapped to `THREAT_MODEL.md` T1–T8 — plus 55 sandbox/command tests in `tests/test_tool_engine_sandbox.py`; the full suite is 647 tests).
 
 **Verified controls:**
 
@@ -187,7 +188,7 @@ Security checks add tens of microseconds per operation — well under a percent 
 **What we are deliberately NOT claiming — the documented security boundary:**
 
 - **The OS sandbox (P1.10) is a defense layer, not a full VM.** `execute_command` / `run_code` / auto-detected test-lint commands run inside an OS-level sandbox when a backend is available (macOS `sandbox-exec` / Seatbelt profile; Linux `bubblewrap`): **network is denied**, **writes are restricted to the workspace + OS temp**, and **sensitive paths (~/.ssh, ~/.aws, ~/.gnupg, cloud SDK configs) are unreadable**. Mode is configurable (`agent_os_sandbox`: `auto` [default] / `on` / `off`; `on` fails closed without a backend; `off` is needed for commands that legitimately need network, e.g. `git push`/`npm install`). It still is NOT a hardened multi-tenant container: no user-namespace escape containment beyond the seatbelt/bwrap policy, and processes inside the sandbox can still read system libraries and spawn children.
-- **Guardian is advisory, not a barrier.** Its LLM review falls back to APPROVE on provider/LLM errors or unparseable verdicts; it is one layer on top of the rule-based risk scorer, command policy and the confirmation gates — not a substitute for them.
+- **Guardian is advisory, not a barrier.** It is one layer on top of the rule-based risk scorer, command policy and the confirmation gates — not a substitute for them. Since v2.3.5 it **fails closed**: on a provider/LLM error, an unparseable verdict, or an unavailable reviewer the risky call is REJECTED, never silently approved.
 - **web_fetch SSRF checks are application-level**, applied immediately before connecting and on every redirect hop; urllib re-resolves the host when it connects, so a tiny TOCTOU window remains (closed in practice by the per-hop checks).
 - Headless auto-approve (`--no-confirm`) explicitly trusts the operator to run without confirmations.
 
@@ -302,17 +303,26 @@ v2.3.4 also ships a security hardening pass driven by offensive testing (see [Se
 
 v2.3.4 also fixes the GUI's **Open project** flow end-to-end: the directory picker no longer crashes the backend on macOS (it used to create a tkinter dialog from the HTTP daemon thread, which AppKit forbids — the whole process aborted), real picker failures (automation-permission denied, missing dialog binary) are now reported to the GUI so it falls back to a manual path-entry modal **with a working Browse… button** instead of silently doing nothing, and opening a large folder no longer freezes the request for ~20 s — the project context index is now built lazily on first agent use and bounded (50k files / 5 s), not synchronously during `set_root`. The sidebar file-tree panel also refreshes after a project switch, `⌘O`/`Ctrl+O` actually opens the picker (the command palette advertised it but no binding existed), `/cd ~` expands the home directory in the TUI, and the provider wizard's model examples were refreshed to current 2026 models (GPT-5.5, Claude Sonnet 5, Gemini 3.1 Pro, DeepSeek-V4, GLM-5.1, Grok 4.5, Llama 4, …).
 
+The **v2.3.5** release is a security-and-sandbox release, detailed in [Security Posture & Verification](#security-posture--verification): `execute_command` / `run_code` / auto-detected test-lint commands now run inside an **OS-level sandbox** when a backend is available (P1.10 — macOS `sandbox-exec`/Seatbelt, Linux `bubblewrap`; network denied, writes restricted to workspace + OS temp, sensitive paths unreadable; `agent_os_sandbox: auto|on|off`, `on` fails closed without a backend); `web_fetch` blocks loopback/private/link-local/cloud-metadata targets with DNS-rebinding defense and per-redirect-hop re-validation (P0.2); the local API token is no longer returned by `GET /api/status` (P0.3); and headless daemon/ACP runs now **fail closed** on side-effecting actions unless explicitly opted in via `--no-confirm` / `TERA_PILOT_ACP_NO_CONFIRM=1`, with the Guardian also failing closed on LLM/unparseable verdicts (P0.4). It fixes the LM Studio integration for models that 400 generated native tool calls containing quotes — the runtime stops advertising a `tools` schema there and parses the model's native `<|tool_call_start|>` text format instead. The eval harness gains the direct (no-agent) driver, `--repeat`, the `security` task category with `security_expectation`, per-run evidence (actual diff, provider/tool error counters, `self_verify`) and 10 adversarial `sec-*` tasks. Misc: timezone-aware UTC datetimes, request-queue stream serialization, quota breakdown with token-optimization tips API. Version 2.3.5 is in sync everywhere (npm, pip, Web UI, TUI, auto-updater, tests).
+
 ## Reproducible Evaluation
 
-The `eval/` harness (P0.1) runs real repository tasks against the agent and records schema-valid results in `eval/results/`. It ships **43 tasks** across bug fixes, test repair, refactoring, features, code review and documentation (`eval/tasks/`), each with a clean-copy fixture repo and a baseline-verified test command:
+The `eval/` harness (P0.1) runs real repository tasks against the agent and records schema-valid results in `eval/results/`. It ships **53 tasks** across bug fixes, test repair, refactoring, features, code review, documentation and adversarial security scenarios (`eval/tasks/`, incl. 10 `sec-*` tasks), each with a clean-copy fixture repo and a baseline-verified test command:
 
 ```bash
 python3 -m eval.runner check                       # structural check of all tasks
 python3 -m eval.runner smoke                       # fake-driver smoke set (CI)
 python3 -m eval.runner run eval/tasks/<task_id> --driver api \
-    --api-base http://127.0.0.1:18734 --api-token <token>   # live agent run
+    --api-base http://127.0.0.1:18732 --api-token <token>   # live agent run
+python3 -m eval.runner run eval/tasks/<task_id> --driver direct \
+    --direct-base http://127.0.0.1:1234/v1 --direct-model <model>  # no-agent comparison
+python3 -m eval.runner run eval/tasks/<task_id> --driver api \
+    --api-base http://127.0.0.1:18732 --api-token <token> --repeat 5  # N fresh workspaces
+python3 -m eval.runner compare eval/results/agentic eval/results/direct  # with vs without agent
 python3 -m eval.runner report --dir eval/results   # summary
 ```
+
+The **direct (no-agent) driver** (v2.3.5) sends the same task prompt straight to an OpenAI-compatible endpoint (LM Studio by default) with no agent loop/tools/sandbox, applies the model's `### FILE:` output, and grades it with the same `test_command`; `compare` prints the side-by-side summary and `--repeat N` runs one task N times on fresh clean workspaces. The `sec-*` tasks (category `security`) carry a `security_expectation` — `blocked` / `confirm` / `refused` / `fail_closed` — and are not passed by a green `test_command` alone.
 
 **Current results:** the first analyzed live batch (2026-08-19, 30 runs across 9 tasks) is documented in [`eval/REPORT_2026-08-19.md`](eval/REPORT_2026-08-19.md), with recorded vs. corrected numbers: 12 of 27 meaningful runs passed their verification tests, and 8 of 9 tasks were solved at least once. Two harness corrections shipped in v2.3.4: parallel launches that collide on the single-agent server are retried with backoff instead of failing, and a run whose tests **passed** (agent actually ran) is no longer masked by a terminal driver `error`. Raw per-run logs are development artifacts and are not versioned; the report is the versioned summary. Earlier provider-specific runs (Groq) are in [`GROQ_EVAL_REPORT.md`](GROQ_EVAL_REPORT.md).
 
@@ -349,7 +359,7 @@ Environment variables are now `TERA_PILOT_*` (e.g. `TERA_PILOT_PROVIDER`, `TERA_
 - Cloud providers and remote MCP servers still send data outside the machine by design; local-first is not the same as always-offline.
 - Enterprise features such as SSO/SCIM, centralized RBAC, formal compliance certifications and managed fleet control are roadmap work.
 - The OS sandbox for `execute_command`/`run_code` (macOS `sandbox-exec`, Linux `bubblewrap`) denies network, restricts writes to the workspace and hides sensitive paths, but it is **not** a hardened multi-tenant container/VM. Tera Pilot is safe for **trusted local workflows** (its claims are documented in [Security Posture & Verification](#security-posture--verification)); it is **not** an environment for running fully untrusted code, and it does not promise enterprise security, air-gap, or protection from untrusted code without stronger isolation.
-- Benchmark claims are limited to the reproducible evaluation harness (`eval/`, 43 repository tasks; batches in `eval/REPORT_2026-08-19.md` and `eval/REPORT_2026-08-21.md`); only measured claims are published. The harness's own known caveats are recorded in the reports, not the README.
+- Benchmark claims are limited to the reproducible evaluation harness (`eval/`, 53 repository tasks; batches in `eval/REPORT_2026-08-19.md` and `eval/REPORT_2026-08-21.md`); only measured claims are published. The harness's own known caveats are recorded in the reports, not the README.
 
 ## License
 
