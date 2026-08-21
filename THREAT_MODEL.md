@@ -57,15 +57,21 @@ development is built.
 | Threat | Tera Pilot mechanism | Module |
 |---|---|---|
 | T1, T2, T7 | Prompt scaffold with safety guardrails: external content = untrusted; instructions from files/output have no priority over the system prompt | `agent_runtime/prompts.py` |
-| T2 | Command policy: allowlist/denylist of commands; project approvals; autonomy levels (`always_ask` / `new_files_only` / `never_ask`); diff review gate; Guardian risk assessment of tool calls; npm script-executing subcommands (`run`, `test`, `start`, `exec`, …) blocked; auto-detected test/lint commands require user approval | `command_policy.py`, `agent/guardian.py`, `progressive_tools.py` |
+| T2 | Command policy: allowlist/denylist of commands; project approvals; autonomy levels (`always_ask` / `new_files_only` / `never_ask`) applied **uniformly to every side effect** (commands, code, file writes new+overwrite, mkdir, delete/rename, apply_diff incl. multi-file, git stage/commit, MCP tools, auto-detected test/lint); diff review gate; Guardian risk assessment of tool calls; npm script-executing subcommands (`run`, `test`, `start`, `exec`, …) blocked. **Headless (daemon/ACP) fails CLOSED**: no UI callback → the action is blocked, never silently run; explicit opt-in via `--no-confirm` / `TERA_PILOT_ACP_NO_CONFIRM=1` | `command_policy.py`, `agent/guardian.py`, `progressive_tools.py`, `agent_runtime/tool_engine/_engine.py` |
 | T3 | Workspace sandbox: file operations restricted to the selected project; checkpoint/undo for rollback; **git hardening**: repo-supplied exec-capable config keys (`core.fsmonitor`, `diff.*.textconv`, `filter.*.clean/.smudge`, `core.editor`, …) and `.git/hooks/*` are neutralized at runtime for every agent git call (a malicious repo cannot turn `git status`/`commit`/`diff` into command execution) | `context_manager.py` (path restrictions), `checkpoint.py`, `git_service.py` (`git_neutralization_args`), `agent_runtime/tool_engine/_engine.py` |
 | T4 | Prompts do not require reading keys; keys live in env/config, not in the repository; `encrypted_prompt.py` (ChaCha20-Poly1305) for enterprise prompts; UI hints "do not paste keys into code" | `agent/encrypted_prompt.py` |
-| T5 | The single network egress point is `web_search_backend.py` (zero-telemetry, only explicit web_search/web_fetch calls); MCP connects explicitly; providers are chosen by the user (BYOK) | `web_search_backend.py`, `mcp_manager.py` |
+| T5 | The single network egress point is `web_search_backend.py` (zero-telemetry, only explicit web_search/web_fetch calls); MCP connects explicitly; providers are chosen by the user (BYOK). **SSRF defense (P0.2):** web_fetch rejects loopback/private/link-local/metadata targets (IPv4+IPv6), DNS-resolves the hostname and checks every resolved address (DNS-rebinding), and re-validates **every redirect hop** | `web_search_backend.py`, `mcp_manager.py` |
 | T6 | Activity log (append-only, in memory) + signed export: Ed25519 signature per record + hash chain (SHA-256 prev_hash+payload) — tampering/deletion/reordering is detected; verification: `tera-pilot audit verify` | `activity_log.py`, `audit_signing.py`, `audit_cli.py` |
 | T8 | Dependencies pinned in requirements.txt; local installation from source; MIT license for code review | `requirements.txt`, `pyproject.toml` |
 
 Additionally: **network egress visibility** — the `web` category in the activity log marks
 all external agent calls, so the user sees "the agent left the project".
+
+**Local API token delivery (P0.3):** the bearer token is **not** returned by the public
+`GET /api/status` (a cross-origin reader could previously steal it through the CORS echo).
+It now reaches the frontend only through the same-origin HTML page served by the server
+itself (`window.__TERA_PILOT_TOKEN`), and that page carries no CORS header — a cross-origin
+script, including a null-origin sandboxed iframe, cannot read it.
 
 ## 6. Verification and evidence
 
@@ -96,6 +102,23 @@ What a user can verify themselves:
   (export is up to the user).
 - Prompt injection cannot be fully eliminated at the prompt level — defense in depth:
   sandbox + policy + approvals + audit.
+- **Guardian is advisory, not a barrier:** its LLM review falls back to APPROVE on
+  provider/LLM errors or unparseable verdicts. The primary gates are the rule-based risk
+  scorer, the command policy and the confirmation gates — Guardian is an extra layer, not
+  the boundary.
+- **The OS sandbox (P1.10) is a defense layer, not a hardened VM.** `execute_command` /
+  `run_code` / auto-detected test-lint commands run inside an OS sandbox when a backend is
+  available (macOS `sandbox-exec` / Seatbelt: `(deny default)` + write-restricted to the
+  workspace + `(deny network*)` + sensitive-path read denials; Linux `bwrap`:
+  `--ro-bind / /` + rw workspace + `--tmpfs /tmp` + `--unshare-net`). Mode
+  `agent_os_sandbox` = `auto` (default) | `on` (fail-closed) | `off`. It still is NOT a
+  multi-tenant container: no namespace-escape containment beyond the seatbelt/bwrap policy,
+  and processes inside can read system libraries and spawn children. Tera Pilot is safe for
+  **trusted local workflows**; it does not claim enterprise security, air-gap, or protection
+  from fully untrusted code without stronger isolation.
+- **web_fetch SSRF checks are application-level**, applied right before connecting and on
+  every redirect hop; urllib re-resolves the host when it connects, so a small TOCTOU
+  window remains (closed in practice by the per-hop checks).
 
 ## 8. What we do NOT claim
 
@@ -104,7 +127,10 @@ Per claims discipline (strategy, §11), we do not claim that Tera Pilot:
 - is "smarter" than other agents or has a better SWE-bench;
 - is enterprise-ready (until P0/P2 gaps are closed);
 - guarantees the absence of vulnerabilities;
-- is fully offline when using cloud providers or MCP.
+- is fully offline when using cloud providers or MCP;
+- provides a hardened multi-tenant sandbox or a safe environment for running fully
+  untrusted code (P1.10: the OS sandbox denies network / restricts writes / hides secrets;
+  it is not a container/VM escape-proof boundary).
 
 Correct formulations: "local-first", "supports local and cloud providers",
 "vendor-neutral", "provides policy, approval and audit mechanisms",

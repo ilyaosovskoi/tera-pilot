@@ -70,7 +70,7 @@ class TeraPilotTUIApp(App):
         try:
             from tera_pilot import __version__ as _tera_pilot_version
         except Exception:
-            _tera_pilot_version = "2.3.4"
+            _tera_pilot_version = "2.3.5"
 
         # Initialize InfoBox with current state
         info = self.query_one(InfoBox)
@@ -949,19 +949,21 @@ class TeraPilotTUIApp(App):
         else:
             lines = ["[b]Request Queues[/b]", ""]
             for pid, s in stats.items():
-                cooldown = s.get("cooldown_until")
-                if cooldown:
-                    import time as _t
-                    remaining = max(0, int(cooldown - _t.time()))
-                    cooldown_str = f"{remaining}s"
-                else:
-                    cooldown_str = "-"
+                # v2.3.4-fix: use the ACTUAL keys RequestQueue.stats()
+                # returns (cooldown_remaining_secs, max_concurrency,
+                # pending, retried, errors) — the old code read
+                # in_flight/max_in_flight/total_retries/cooldown_until,
+                # which don't exist, so /queue always showed zeros.
+                cooldown = s.get("cooldown_remaining_secs", 0) or 0
+                cooldown_str = f"{int(cooldown)}s" if cooldown > 0 else "-"
+                max_conc = s.get("max_concurrency", 1)
                 lines.append(
                     f"  [cyan]{pid}[/cyan]:  "
-                    f"in-flight {s.get('in_flight', 0)}/{s.get('max_in_flight', 1)}  "
+                    f"max_concurrency {max_conc}  "
                     f"pending {s.get('pending', 0)}  "
-                    f"retries {s.get('total_retries', 0)}  "
-                    f"errors {s.get('total_errors', 0)}  "
+                    f"completed {s.get('completed', 0)}  "
+                    f"retries {s.get('retried', 0)}  "
+                    f"errors {s.get('errors', 0)}  "
                     f"cooldown: {cooldown_str}"
                 )
             chat.add_system("\n".join(lines))
@@ -2559,6 +2561,9 @@ class TeraPilotTUIApp(App):
             info.update_info(
                 model=status.get("model", "unknown"),
                 provider=status.get("provider", "unknown"),
+                # v2.3.4-fix: refresh the directory too — /cd changed the
+                # workspace but the InfoBox kept showing the old path.
+                directory=self.bridge.workspace,
             )
         except Exception:
             pass

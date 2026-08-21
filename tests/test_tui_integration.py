@@ -248,8 +248,10 @@ def test_approval_deny_skips_command(tmp_path, fake):
     assert "[REJECTED BY USER]" in (result.tool_calls[0].result or "")
 
 
-def test_no_ui_confirm_handler_fails_open(tmp_path, fake):
-    """Headless mode (no confirm handler) must not deadlock the agent."""
+def test_no_ui_confirm_handler_fails_closed(tmp_path, fake):
+    """v2.3.4-security (P0.4): headless mode (no UI confirm handler)
+    must not deadlock the agent — AND must fail CLOSED: the side-
+    effecting command is rejected, never silently run."""
     fake._script = [
         FakeProvider.tool_call("execute_command", {"command": "ls"}),
         FakeProvider.final_answer("headless-ok"),
@@ -263,6 +265,9 @@ def test_no_ui_confirm_handler_fails_open(tmp_path, fake):
     result = _wait_result(t, holder)
     assert result.success is True
     assert result.output == "headless-ok"
+    # The command was BLOCKED (fail-closed), not silently approved.
+    assert result.tool_calls and result.tool_calls[0].name == ToolName.EXECUTE_COMMAND
+    assert "[REJECTED BY USER]" in (result.tool_calls[0].result or "")
 
 
 # ── provider errors ────────────────────────────────────────────────────

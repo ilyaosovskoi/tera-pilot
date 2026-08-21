@@ -107,7 +107,7 @@ import tempfile
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from socketserver import ThreadingMixIn
@@ -118,6 +118,13 @@ from .providers import (
     ProviderRegistry, ProviderConfig, ProviderMessage,
     get_registry, ProviderError,
 )
+
+
+def _utcnow_z() -> str:
+    """ISO-8601 UTC timestamp with 'Z' suffix — replaces the deprecated
+    ``_utcnow_z()`` (naive local time mislabeled
+    as UTC; utcnow() is scheduled for removal)."""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 from .agent_runtime import AgentRuntime, TaskType, AgentEvent
 from .auto_router import AutoRouter
 from .auto_updater import get_current_version
@@ -635,6 +642,24 @@ class ServerContext:
         # Map: agent_runtime_id -> review_id (so the POST handler can route
         # the response back to the right waiting agent).
         self._diff_review_by_agent: Dict[int, str] = {}
+        # v2.3.4: generic action-confirmation state for the HTTP path
+        # (execute_command / delete_file / rename_file / git_commit /
+        # call_mcp_tool under autonomy 'always_ask'). Same pattern as the
+        # diff-review state above: per-request dict keyed by confirm_id, so
+        # the POST /api/action/respond routes back to the exact waiting
+        # agent thread. Previously the HTTP path never wired
+        # set_confirm_callback, so _request_confirmation() failed open and
+        # commands ran WITHOUT asking even when the user selected
+        # "always_ask" in Settings (silent autonomy bypass).
+        self._action_confirm_lock = threading.Lock()
+        self._action_confirm_pending: Dict[str, Dict[str, Any]] = {}
+        self._action_confirm_by_agent: Dict[int, str] = {}
+        # v2.3.4: Guardian MODIFY-verdict review state for the HTTP path.
+        # The guardian callback asks the user to approve the original call,
+        # reject it, or apply the suggested fix before the tool runs.
+        self._guardian_lock = threading.Lock()
+        self._guardian_pending: Dict[str, Dict[str, Any]] = {}
+        self._guardian_by_agent: Dict[int, str] = {}
         # v1.1.1: agent cancellation flag for the HTTP path.
         # reset_agent_cancel() is called at the start of each agent run,
         # cancel_agent() is called by POST /api/agent/stop.
@@ -689,6 +714,49 @@ class ServerContext:
                 # The agent thread blocks on ServerContext._diff_review_event;
                 # a POST /api/agent/diff_review sets it to unblock the agent.
                 self._agent_runtime.tools.diff_review_enabled = self.config.get('diff_review', True)
+                # v2.3.4-fix: apply the saved autonomy level (Settings →
+                # Agent → Autonomy) at runtime creation. Previously the
+                # saved 'always_ask'/'new_files_only'/'never_ask' choice was
+                # only pushed to the live runtime when the user re-saved the
+                # settings — after a server restart the runtime was created
+                # with the hardcoded default, silently ignoring the user's
+                # stored choice (and confirmations then failed open because
+                # no confirm callback was wired — fixed below in
+                # _handle_agent_stream).
+                try:
+                    self._agent_runtime.set_autonomy(
+                        self.config.get('agent_autonomy', 'always_ask')
+                    )
+                except Exception as autonomy_err:
+                    logger.warning("[api] autonomy not applied: %s", autonomy_err)
+                # v2.3.4-fix: apply the saved Guardian level too. Previously
+                # only the TUI bridge pushed the level onto the runtime; the
+                # HTTP path persisted it to config (POST /api/agent/guardian)
+                # but never applied it, so Guardian stayed silently OFF in
+                # the browser GUI even after the user enabled it.
+                try:
+                    from .agent.guardian import GuardianConfig
+                    glevel = self.config.get('guardian_level', 'off')
+                    old = getattr(self._agent_runtime.tools, '_guardian_config', None)
+                    if old is not None:
+                        self._agent_runtime.tools._guardian_config = GuardianConfig(
+                            level=glevel, provider_id=old.provider_id, model=old.model,
+                        )
+                    else:
+                        self._agent_runtime.tools._guardian_config = GuardianConfig(level=glevel)
+                except Exception as guardian_err:
+                    logger.warning("[api] guardian level not applied: %s", guardian_err)
+                # v2.3.4-security (P1.10): apply the OS-sandbox mode (off /
+                # auto / on) from config or env. 'auto' (default) enables
+                # the OS sandbox for code/command execution when a backend
+                # is available; 'on' fails closed without one.
+                try:
+                    self._agent_runtime.tools.os_sandbox = (
+                        os.environ.get("TERA_PILOT_OS_SANDBOX")
+                        or self.config.get('agent_os_sandbox', 'auto')
+                    )
+                except Exception as sandbox_err:
+                    logger.warning("[api] os_sandbox not applied: %s", sandbox_err)
                 logger.info("[api] AgentRuntime created (workspace=%s)", workspace)
             elif workspace:
                 self._agent_runtime.set_workspace(workspace)
@@ -774,7 +842,8 @@ class ServerContext:
         '/api/chat/create', '/api/chat/rename',
         '/api/providers/activate', '/api/providers/configure',
         '/api/providers/test', '/api/settings',
-        '/api/agent/diff_review', '/api/chat/delete',
+        '/api/agent/diff_review', '/api/action/respond', '/api/guardian/respond',
+        '/api/chat/delete',
         # v1.1.0: MCP + quota + advanced agent settings
         '/api/mcp/add', '/api/mcp/remove', '/api/mcp/toggle',
         '/api/mcp/start', '/api/mcp/stop', '/api/mcp/start_all',
@@ -1042,6 +1111,11 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
             self._json(self._save_settings(body))
         elif path == '/api/agent/diff_review':
             self._json(self._handle_diff_review(body))
+        # v2.3.4: action-confirm + guardian-review responses (HTTP path)
+        elif path == '/api/action/respond':
+            self._json(self._handle_action_respond(body))
+        elif path == '/api/guardian/respond':
+            self._json(self._handle_guardian_respond(body))
         # v1.1.0: MCP + quota + advanced agent settings
         elif path == '/api/mcp/add':
             self._json(self._mcp_add_server(body))
@@ -1130,11 +1204,16 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
             'skills': len(SKILLS),
             'plugins': len(self.ctx.plugin_manager.plugins),
             'api_port': self.server.server_address[1],
-            # v1.0.5-security: bearer token for mutating endpoints.
-            # The pywebview frontend picks this up via __teraPilotReady and
-            # sends it as `Authorization: Bearer <token>` on POSTs.
-            # This blocks CSRF-to-localhost attacks (BUGS_REPORT C-API-1).
-            'api_token': self.ctx._auth_token,
+            # v2.3.4-security (P0.3): the bearer token is NO LONGER
+            # returned from this public endpoint. A cross-origin reader
+            # (another localhost page, or a sandboxed iframe sending
+            # Origin: null) could previously fetch /api/status and steal
+            # api_token because CORS echoed loopback origins — that was
+            # a CSRF-to-localhost → token-theft chain. The token now
+            # reaches the frontend ONLY through the same-origin trusted
+            # channel: the server injects it into the HTML page it serves
+            # (see web_server._inject_api_token). Mutating endpoints still
+            # require `Authorization: Bearer <token>`.
             'snippets_count': len(self.ctx.config.get('snippets', [])),
             'auto_route': self.ctx.config.get('auto_route', True),
             # v2.3.4: expose saved UI preferences (theme, Basic/Advanced
@@ -1352,8 +1431,8 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
             chat = {
                 'id': chat_id,
                 'title': _chat_title_from_text(text),
-                'created_at': datetime.utcnow().isoformat() + 'Z',
-                'updated_at': datetime.utcnow().isoformat() + 'Z',
+                'created_at': _utcnow_z(),
+                'updated_at': _utcnow_z(),
                 'messages': [],
                 'provider': self.ctx.registry.active_id,
                 'skill': body.get('skill'),
@@ -1375,9 +1454,9 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
         # Save user message
         chat['messages'].append({
             'role': 'user', 'content': text,
-            'ts': datetime.utcnow().isoformat() + 'Z',
+            'ts': _utcnow_z(),
         })
-        chat['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+        chat['updated_at'] = _utcnow_z()
         _save_chat(chat)
 
         # Send chat metadata first
@@ -1503,12 +1582,12 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                     chat['messages'].append({
                         'role': 'assistant',
                         'content': text_result,
-                        'ts': datetime.utcnow().isoformat() + 'Z',
+                        'ts': _utcnow_z(),
                         'tokens': token_count,
                         'elapsed': elapsed,
                         'cancelled': ctx._stop_event.is_set(),
                     })
-                    chat['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+                    chat['updated_at'] = _utcnow_z()
                     _save_chat(chat)
 
                 handler._sse({
@@ -1640,8 +1719,8 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
             chat = {
                 'id': chat_id,
                 'title': _chat_title_from_text(text),
-                'created_at': datetime.utcnow().isoformat() + 'Z',
-                'updated_at': datetime.utcnow().isoformat() + 'Z',
+                'created_at': _utcnow_z(),
+                'updated_at': _utcnow_z(),
                 'messages': [],
                 'provider': self.ctx.registry.active_id,
                 'mode': 'agent',
@@ -1650,11 +1729,11 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
 
         chat['messages'].append({
             'role': 'user', 'content': text,
-            'ts': datetime.utcnow().isoformat() + 'Z',
+            'ts': _utcnow_z(),
         })
         chat['mode'] = 'agent'
         chat['section'] = section
-        chat['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+        chat['updated_at'] = _utcnow_z()
         _save_chat(chat)
 
         self._sse({
@@ -1693,6 +1772,13 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                 payload['thought'] = data['thought']
             if data.get('plan'):
                 payload['plan'] = data['plan']
+            # v2.3.4 (P1.8): include the (already truncated to 200 chars by
+            # the runtime) tool result so headless consumers — the eval
+            # harness's api driver, and future tooling — can record real
+            # evidence (self_verify outcome, tool errors) without scraping
+            # the chat. Ignored by the browser UI.
+            if data.get('result') is not None:
+                payload['result'] = str(data['result'])[:200]
             if data.get('write_intent'):
                 payload['write_intent'] = data['write_intent']
             handler._sse(payload)
@@ -1773,6 +1859,111 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                     agent.tools._diff_review_callback = _http_diff_review_callback
                     # Sync diff_review_enabled from config (user may have toggled it)
                     agent.tools.diff_review_enabled = ctx.config.get('diff_review', True)
+
+                    # v2.3.4-fix: wire the generic action-confirmation
+                    # callback (execute_command / delete_file / rename_file /
+                    # git_commit / call_mcp_tool under autonomy
+                    # 'always_ask'). Previously this was NEVER wired on the
+                    # HTTP path, so ToolEngine._request_confirmation() failed
+                    # open — commands ran without asking even though the GUI
+                    # ships an "Agent wants to run an action" modal and the
+                    # Settings page lets the user pick "Always ask". The
+                    # callback sends an SSE 'action_confirm' event and blocks
+                    # until POST /api/action/respond answers (mirrors the
+                    # diff-review flow; also unblocks on Stop or after 5 min).
+                    # Guard for stand-in agents in tests that don't expose
+                    # the confirmation machinery (the wiring is a no-op for
+                    # them — they never request confirmations anyway).
+                    has_confirm_wiring = (
+                        hasattr(agent.tools, '_confirm_callback')
+                        and hasattr(agent, 'set_confirm_callback')
+                    )
+                    original_confirm_cb = None
+                    if has_confirm_wiring:
+                        original_confirm_cb = agent.tools._confirm_callback
+
+                        def _http_action_confirm_callback(confirm_info: Dict[str, Any]) -> None:
+                            confirm_id = secrets.token_urlsafe(12)
+                            confirm_event = threading.Event()
+                            with ctx._action_confirm_lock:
+                                ctx._action_confirm_pending[confirm_id] = {
+                                    'event': confirm_event,
+                                    'accepted': None,
+                                    'agent_id': id(agent),
+                                }
+                                ctx._action_confirm_by_agent[id(agent)] = confirm_id
+                            handler._sse({
+                                'type': 'action_confirm',
+                                'confirm_id': confirm_id,
+                                'action': confirm_info.get('action', 'action'),
+                                'summary': confirm_info.get('summary', ''),
+                            })
+                            waited = 0.0
+                            while not confirm_event.wait(timeout=0.25):
+                                waited += 0.25
+                                if ctx.is_agent_cancelled() or waited >= 300:
+                                    break
+                            with ctx._action_confirm_lock:
+                                entry = ctx._action_confirm_pending.pop(confirm_id, None)
+                                if id(agent) in ctx._action_confirm_by_agent and \
+                                        ctx._action_confirm_by_agent[id(agent)] == confirm_id:
+                                    del ctx._action_confirm_by_agent[id(agent)]
+                            accepted_val = bool(entry['accepted']) if entry else False
+                            agent.tools._confirm_accepted = accepted_val
+                            agent.tools._confirm_event.set()
+
+                        agent.set_confirm_callback(_http_action_confirm_callback)
+
+                    # v2.3.4-fix: wire the Guardian MODIFY-verdict callback.
+                    # Guardian's LLM can suggest safer args for a risky tool
+                    # call; the user must approve / reject / apply the fix
+                    # before the tool runs. Previously the engine never
+                    # invoked _guardian_callback at all, so the suggested fix
+                    # was applied silently (and the GUI's Guardian review
+                    # modal could never open — its respond route 404'd).
+                    has_guardian_wiring = (
+                        hasattr(agent.tools, '_guardian_callback')
+                        and hasattr(agent, 'set_guardian_callback')
+                    )
+                    original_guardian_cb = None
+                    if has_guardian_wiring:
+                        original_guardian_cb = agent.tools._guardian_callback
+
+                        def _http_guardian_callback(guardian_info: Dict[str, Any]) -> None:
+                            review_id = secrets.token_urlsafe(12)
+                            review_event = threading.Event()
+                            with ctx._guardian_lock:
+                                ctx._guardian_pending[review_id] = {
+                                    'event': review_event,
+                                    'decision': None,
+                                    'agent_id': id(agent),
+                                }
+                                ctx._guardian_by_agent[id(agent)] = review_id
+                            handler._sse({
+                                'type': 'guardian_review',
+                                'review_id': review_id,
+                                'action': guardian_info.get('action', 'tool'),
+                                'args': guardian_info.get('args'),
+                                'guardian_verdict': guardian_info.get('guardian_verdict', 'MODIFY'),
+                                'suggested_args': guardian_info.get('suggested_args'),
+                                'rationale': guardian_info.get('rationale', ''),
+                                'risk_level': guardian_info.get('risk_level'),
+                                'reasons': guardian_info.get('reasons'),
+                            })
+                            waited = 0.0
+                            while not review_event.wait(timeout=0.25):
+                                waited += 0.25
+                                if ctx.is_agent_cancelled() or waited >= 300:
+                                    break
+                            with ctx._guardian_lock:
+                                entry = ctx._guardian_pending.pop(review_id, None)
+                                if id(agent) in ctx._guardian_by_agent and \
+                                        ctx._guardian_by_agent[id(agent)] == review_id:
+                                    del ctx._guardian_by_agent[id(agent)]
+                            decision = entry['decision'] if entry and entry['decision'] else "reject"
+                            agent.tools.respond_guardian(decision)
+
+                        agent.set_guardian_callback(_http_guardian_callback)
                     # v1.1.0: switch the runtime to the requested section.
                     # This affects which tools are advertised and which quota
                     # counter is bumped. Also bump max_iterations for heavy_code.
@@ -1809,6 +2000,14 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                     finally:
                         agent.on_event = original_callback
                         agent.tools._diff_review_callback = original_diff_cb
+                        # v2.3.4: restore the confirm/guardian callbacks the
+                        # way diff-review's is restored above (only if we
+                        # actually wired them — stand-in agents in tests may
+                        # not expose the attributes).
+                        if has_confirm_wiring:
+                            agent.tools._confirm_callback = original_confirm_cb
+                        if has_guardian_wiring:
+                            agent.tools._guardian_callback = original_guardian_cb
                         # Clear the cancel check so it doesn't affect future runs
                         agent.set_cancel_check(None)
                         # v1.0.5-security: clean up any leftover pending review for this agent.
@@ -1818,6 +2017,20 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                                 entry = ctx._diff_review_pending.pop(leftover_id, None)
                                 if entry is not None:
                                     entry['event'].set()  # unblock the wait if still blocked
+                        # v2.3.4: same cleanup for action confirms and
+                        # guardian reviews left pending when the run ends.
+                        with ctx._action_confirm_lock:
+                            leftover_cid = ctx._action_confirm_by_agent.pop(id(agent), None)
+                            if leftover_cid is not None:
+                                c_entry = ctx._action_confirm_pending.pop(leftover_cid, None)
+                                if c_entry is not None:
+                                    c_entry['event'].set()
+                        with ctx._guardian_lock:
+                            leftover_gid = ctx._guardian_by_agent.pop(id(agent), None)
+                            if leftover_gid is not None:
+                                g_entry = ctx._guardian_pending.pop(leftover_gid, None)
+                                if g_entry is not None:
+                                    g_entry['event'].set()
                 finally:
                     ctx._agent_run_lock.release()
                 elapsed = time.time() - start
@@ -1825,7 +2038,28 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                 text_result = result.output or ''
 
                 if not result.success and not text_result:
-                    handler._sse({'type': 'error', 'message': result.error or 'Agent failed with no output.'})
+                    # v2.3.4-fix: a user-cancelled run with no partial output
+                    # must NOT surface as "Error: Cancelled by user" in the
+                    # chat — send a proper `done` with cancelled=True so the
+                    # UI shows the 'cancelled' pill and resets cleanly.
+                    cancelled = bool(
+                        ctx.is_agent_cancelled()
+                        or (result.error and 'cancel' in result.error.lower())
+                    )
+                    if cancelled:
+                        handler._sse({
+                            'type': 'done',
+                            'text': '',
+                            'tokens': 0,
+                            'tokens_in': 0,
+                            'tokens_out': 0,
+                            'degraded': False,
+                            'elapsed': elapsed,
+                            'cancelled': True,
+                            'chat_id': chat_id,
+                        })
+                    else:
+                        handler._sse({'type': 'error', 'message': result.error or 'Agent failed with no output.'})
                     return
 
                 # v2.3.4-fix: report REAL token usage (accumulated by the
@@ -1843,7 +2077,7 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                     chat2['messages'].append({
                         'role': 'assistant',
                         'content': text_result,
-                        'ts': datetime.utcnow().isoformat() + 'Z',
+                        'ts': _utcnow_z(),
                         'tokens': total_tokens or 0,
                         'tokens_in': total_in,
                         'tokens_out': total_out,
@@ -1854,7 +2088,7 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                         # completion.
                         'degraded': degraded,
                     })
-                    chat2['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+                    chat2['updated_at'] = _utcnow_z()
                     _save_chat(chat2)
 
                 handler._sse({
@@ -1925,6 +2159,53 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
         logger.info("[api] diff_review: review_id=%s accepted=%s",
                     review_id, 'accepted' if accepted else 'rejected')
         return {"ok": True, "accepted": accepted, "review_id": review_id}
+
+    # ── Action confirmation respond (v2.3.4) ────────────────────
+
+    def _handle_action_respond(self, body: dict) -> dict:
+        """Answer a pending generic action confirmation (execute_command /
+        delete_file / ...) requested by the agent over SSE.
+
+        Mirrors _handle_diff_review: routes the response back to the
+        SPECIFIC waiting agent thread via `confirm_id`. Returns an error
+        when no confirmation with that id is pending (e.g. already
+        answered, timed out, or the run ended).
+        """
+        accepted = bool(body.get('accepted', False))
+        confirm_id = body.get('confirm_id', '')
+        ctx = self.ctx
+        with ctx._action_confirm_lock:
+            entry = ctx._action_confirm_pending.get(confirm_id)
+            if entry is None:
+                return {"ok": False, "error": "no pending action confirmation for that confirm_id"}
+            entry['accepted'] = accepted
+            entry['event'].set()
+        logger.info("[api] action_confirm: confirm_id=%s accepted=%s",
+                    confirm_id, 'accepted' if accepted else 'denied')
+        return {"ok": True, "accepted": accepted, "confirm_id": confirm_id}
+
+    # ── Guardian review respond (v2.3.4) ────────────────────────
+
+    def _handle_guardian_respond(self, body: dict) -> dict:
+        """Answer a pending Guardian MODIFY-verdict review.
+
+        verdict: "approve" (run the original call) | "reject" |
+        "use_fix" (apply the guardian's suggested args). Routes back to
+        the waiting agent thread via `review_id`.
+        """
+        decision = body.get('verdict') or body.get('decision') or 'approve'
+        if decision not in ('approve', 'reject', 'use_fix'):
+            return {"ok": False, "error": f"invalid verdict: {decision}"}
+        review_id = body.get('review_id', '')
+        ctx = self.ctx
+        with ctx._guardian_lock:
+            entry = ctx._guardian_pending.get(review_id)
+            if entry is None:
+                return {"ok": False, "error": "no pending guardian review for that review_id"}
+            entry['decision'] = decision
+            entry['event'].set()
+        logger.info("[api] guardian_review: review_id=%s verdict=%s", review_id, decision)
+        return {"ok": True, "verdict": decision, "review_id": review_id}
 
     # ── Agent stop (v1.1.1) ─────────────────────────────────────
 
@@ -2064,8 +2345,8 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
         chat = {
             'id': chat_id,
             'title': title,
-            'created_at': datetime.utcnow().isoformat() + 'Z',
-            'updated_at': datetime.utcnow().isoformat() + 'Z',
+            'created_at': _utcnow_z(),
+            'updated_at': _utcnow_z(),
             'messages': [],
             'provider': self.ctx.registry.active_id,
             'skill': None,
@@ -2082,7 +2363,7 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
         if not chat:
             return {'ok': False, 'error': 'Chat not found'}
         chat['title'] = title
-        chat['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+        chat['updated_at'] = _utcnow_z()
         _save_chat(chat)
         return {'ok': True}
 
@@ -2340,6 +2621,7 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                     'run_timeout': int(cfg.get('agent_run_timeout', 15)),
                     'autonomy': cfg.get('agent_autonomy', 'always_ask'),
                     'diff_review': bool(cfg.get('diff_review', True)),
+                    'os_sandbox': cfg.get('agent_os_sandbox', 'auto'),
                     'section': agent.section if agent else 'general',
                     'memory_max_messages': int(cfg.get('agent_memory_max_messages', 20)),
                     'memory_max_tokens': int(cfg.get('agent_memory_max_tokens', 8000)),
@@ -2376,6 +2658,9 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                         cfg['agent_autonomy'] = a['autonomy']
                     if 'diff_review' in a:
                         cfg['diff_review'] = bool(a['diff_review'])
+                    if 'os_sandbox' in a:
+                        from .os_sandbox import sanitize_mode
+                        cfg['agent_os_sandbox'] = sanitize_mode(a['os_sandbox'])
                     if 'memory_max_messages' in a:
                         cfg['agent_memory_max_messages'] = int(a['memory_max_messages'])
                     if 'memory_max_tokens' in a:
@@ -2393,6 +2678,9 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                             rt.tools.RUN_TIMEOUT = int(a['run_timeout'])
                         if 'diff_review' in a:
                             rt.tools.diff_review_enabled = bool(a['diff_review'])
+                        if 'os_sandbox' in a:
+                            from .os_sandbox import sanitize_mode
+                            rt.tools.os_sandbox = sanitize_mode(a['os_sandbox'])
                         if rt.memory:
                             if 'memory_max_messages' in a:
                                 rt.memory.max_messages = int(a['memory_max_messages'])

@@ -23,7 +23,11 @@ from tera_pilot.agent_runtime.tool_engine import ToolEngine  # noqa: E402
 
 
 def _engine(tmp_path) -> ToolEngine:
-    return ToolEngine(str(tmp_path))
+    e = ToolEngine(str(tmp_path))
+    # P0.4: fail-closed default would block every command in these
+    # pipe-drain tests (no UI callback) — opt in to headless auto-approve.
+    e.headless_confirm = "allow"
+    return e
 
 
 def test_large_stdout_completes_without_timeout(tmp_path):

@@ -11,7 +11,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import os
 import shutil
@@ -65,8 +65,8 @@ class SwarmManager:
             role=role,
             status="idle",
             checkout_path=checkout,
-            created_at=datetime.utcnow().isoformat() + "Z",
-            updated_at=datetime.utcnow().isoformat() + "Z",
+            created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            updated_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         )
         with self._lock:
             self._agents[agent_id] = agent
@@ -101,7 +101,7 @@ class SwarmManager:
             agent = self._agents.get(agent_id)
             if agent:
                 agent.status = status
-                agent.updated_at = datetime.utcnow().isoformat() + "Z"
+                agent.updated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 for k, v in kwargs.items():
                     if hasattr(agent, k):
                         setattr(agent, k, v)

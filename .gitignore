@@ -14,3 +14,7 @@ venv/
 # The human-readable summary is eval/REPORT_*.md; the schema stays tracked.
 eval/results/*.json
 !eval/results/schema.json
+# Per-run JSON logs from the `direct`/`api` drivers (P1.6 repeats) are
+# development artifacts too — keep the whole agentic results dir out.
+eval/results/agentic/
+!eval/results/agentic/.gitkeep

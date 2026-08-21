@@ -26,6 +26,15 @@ class LMStudioProvider(OpenAICompatProvider):
     default_model: str = ""
     api_base: str = "http://localhost:1234/v1"
     env_var: str = ""  # LM Studio requires no API key
+    # v2.3.5-fix (LM Studio / LFM 2.5): LM Studio's engine VALIDATES
+    # generated native tool calls and hard-400s any call whose string
+    # content contains quotes (e.g. ``query = f"SELECT ... '{username}'"``
+    # — reproduced with plain chat.completions requests, every tool name
+    # and both stream modes). The agent runtime must NOT advertise the
+    # ``tools`` schema to LM Studio; the model's native
+    # ``<|tool_call_start|>[name(arg='...')]<|tool_call_end|>`` text is
+    # parsed instead (see agent_runtime/parser.py).
+    emits_native_tool_calls: bool = False
     capabilities: frozenset = frozenset({
         ProviderCapability.CHAT,
         ProviderCapability.STREAMING,

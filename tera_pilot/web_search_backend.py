@@ -37,15 +37,17 @@ from __future__ import annotations
 
 import gzip
 import html
+import ipaddress
 import logging
 import re
+import socket
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import zlib
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -408,6 +410,162 @@ _FETCH_TIMEOUT = 15.0
 _MAX_REDIRECTS = 5
 
 
+# ── SSRF-safe URL validation (P0.2) ────────────────────────────────────
+# Closing the redirect / private-IP / DNS-rebinding class of SSRF in
+# web_fetch:
+#
+#   * literal loopback/private/link-local/metadata addresses (IPv4 + IPv6)
+#     are rejected up front (ToolEngine pre-check) AND at fetch time;
+#   * the hostname is resolved and EVERY resolved address is checked, so
+#     a hostname that DNS-resolves to an internal address (DNS rebinding)
+#     is rejected before we connect;
+#   * every redirect hop is re-validated with the same rules — a 302 to
+#     localhost, to a private IP, or to a hostname resolving internally is
+#     blocked before it is followed.
+#
+# Best-effort, not a full OS sandbox: urllib re-resolves the host when it
+# connects (a TOCTOU window remains), but the check runs immediately
+# before the request and on every redirect hop, which closes the practical
+# classes of SSRF the agent could hit.
+
+
+def _classify_ip(ip_str: str) -> Optional[str]:
+    """Classify an IP literal as 'loopback' / 'private' / 'link_local' /
+    'unspecified' / 'multicast' / 'reserved', or None when it is a
+    public address. Handles IPv4 and IPv6 (including IPv4-mapped IPv6
+    like ``::ffff:127.0.0.1``, which is classified by its embedded IPv4).
+
+    Cloud metadata endpoints (169.254.169.254) fall under 'link_local';
+    IPv6 unique-local (fc00::/7) and link-local (fe80::/10) ranges are
+    covered by ipaddress' is_private / is_link_local.
+    """
+    ip_str = (ip_str or "").strip()
+    if not ip_str:
+        return None
+    low = ip_str.lower()
+    # IPv4-mapped IPv6 — classify by the embedded IPv4 address.
+    if low.startswith("::ffff:") and "." in ip_str:
+        try:
+            return _classify_ip(ip_str.rsplit(":", 1)[1])
+        except Exception:
+            pass
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return None
+    if ip.is_loopback:
+        return "loopback"
+    if ip.is_link_local:
+        return "link_local"  # 169.254.0.0/16 incl. cloud metadata; fe80::/10
+    if ip.is_unspecified:
+        return "unspecified"  # 0.0.0.0 / :: — "this host", never a valid target
+    if ip.is_private:
+        return "private"  # 10/8, 172.16/12, 192.168/16; IPv6 fc00::/7
+    if ip.is_multicast:
+        return "multicast"
+    if ip.is_reserved:
+        return "reserved"
+    return None
+
+
+def _looks_like_internal_host(host: str) -> bool:
+    """Cheap, DNS-free check whether a hostname is an internal address.
+
+    Used by the tool-engine pre-check for a fast rejection BEFORE any
+    network access: literal loopback/private/link-local IPs (IPv4 + IPv6)
+    and ``localhost``-style names. Hostnames that only *resolve* to an
+    internal address are caught later by ``_check_fetch_target`` (which
+    does the DNS lookup at fetch time).
+    """
+    host = (host or "").strip().lower().rstrip(".")
+    if not host:
+        return False
+    if host in ("localhost", "localhost.localdomain"):
+        return True
+    if host.startswith("127."):
+        # 127.x.x.x loopback range — also catches 127.0.0.1.evil.com-style
+        # rebinding hostnames. Conservative, harmless to over-block.
+        return True
+    return _classify_ip(host) is not None
+
+
+def _resolve_host_ips(host: str) -> List[str]:
+    """Resolve a hostname to its IP addresses (IPv4 + IPv6).
+
+    Module-level so tests can monkeypatch it to simulate DNS rebinding
+    (a hostname that resolves to an internal address). Returns an empty
+    list on resolution failure — the caller then rejects nothing (the
+    request will fail on its own), which keeps legitimate fetches from
+    being blocked by a transient resolver hiccup.
+    """
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, OSError):
+        return []
+    ips: List[str] = []
+    for info in infos:
+        addr = info[4][0]
+        # Strip IPv6 scope/zone ids (fe80::1%en0) — ipaddress can't parse them.
+        if "%" in addr:
+            addr = addr.split("%", 1)[0]
+        if addr not in ips:
+            ips.append(addr)
+    return ips
+
+
+def _check_fetch_target(url: str, _resolver: Optional[Callable[[str], List[str]]] = None) -> Optional[str]:
+    """Return a rejection reason if ``url`` targets an internal address.
+
+    Checks the scheme, the literal hostname, and — via DNS resolution —
+    every IP the hostname resolves to (DNS-rebinding defense). Returns
+    None when the target is acceptable.
+
+    ``_resolver`` is an injectable ``host -> List[str]`` for tests; it
+    defaults to ``_resolve_host_ips``.
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return "malformed URL"
+    if parsed.scheme not in ("http", "https"):
+        return f"only http(s) URLs are allowed (got {parsed.scheme!r})"
+    try:
+        host = (parsed.hostname or "").lower()
+    except ValueError:
+        return "malformed URL"
+    if not host:
+        return "URL has no host"
+    if _looks_like_internal_host(host):
+        return f"target {host!r} is an internal/loopback address"
+    resolver = _resolver or _resolve_host_ips
+    for ip in resolver(host):
+        cat = _classify_ip(ip)
+        if cat is not None:
+            return (
+                f"target {host!r} resolves to {ip} ({cat} address) — "
+                f"refusing to fetch internal/loopback targets"
+            )
+    return None
+
+
+class _SSRFSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """HTTPRedirectHandler that re-validates every redirect target.
+
+    A redirect can point anywhere — including back at localhost, a
+    private network, or a cloud-metadata endpoint — so each hop is
+    checked with the same SSRF rules as the initial request (including
+    DNS resolution, catching redirects to hostnames that resolve
+    internally). A blocked redirect raises ``urllib.error.URLError``
+    with a message starting with 'redirect blocked:'.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        reason = _check_fetch_target(newurl)
+        if reason is not None:
+            raise urllib.error.URLError(f"redirect blocked: {reason}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def fetch_url_as_text(url: str, max_chars: int = 8000) -> Tuple[str, int, str]:
     """Fetch a URL and return (text, http_status, final_url).
 
@@ -415,9 +573,17 @@ def fetch_url_as_text(url: str, max_chars: int = 8000) -> Tuple[str, int, str]:
     encoding. Extracts text from HTML by stripping tags + collapsing
     whitespace. Caps the returned text at ``max_chars``.
 
-    Raises ``urllib.error.URLError`` (or similar) on network errors —
-    callers should catch and surface a friendly error string.
+    SSRF defense (P0.2): the URL is validated (scheme + literal
+    internal addresses + DNS resolution) BEFORE the request is made, and
+    every redirect hop is re-validated by :class:`_SSRFSafeRedirectHandler`.
+
+    Raises ``urllib.error.URLError`` (or similar) on network errors or
+    blocked targets — callers should catch and surface a friendly error
+    string.
     """
+    reason = _check_fetch_target(url)
+    if reason is not None:
+        raise urllib.error.URLError(f"blocked: {reason}")
     req = urllib.request.Request(
         url,
         headers={
@@ -427,8 +593,9 @@ def fetch_url_as_text(url: str, max_chars: int = 8000) -> Tuple[str, int, str]:
         },
     )
     # urllib's default redirect handler follows redirects — we want
-    # to know the final URL so we can record it.
-    opener = urllib.request.build_opener(urllib.request.HTTPRedirectHandler)
+    # to know the final URL so we can record it, AND to re-validate
+    # every hop (SSRF-safe).
+    opener = urllib.request.build_opener(_SSRFSafeRedirectHandler())
     try:
         resp = opener.open(req, timeout=_FETCH_TIMEOUT)
     except urllib.error.HTTPError as e:

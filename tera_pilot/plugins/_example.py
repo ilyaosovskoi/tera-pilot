@@ -33,7 +33,7 @@ class HelloPlugin:
         name = (body or {}).get('name', 'Tera Pilot user')
         return {
             'message': f'Hello, {name}! This response comes from the {self.name} plugin.',
-            'time': __import__('datetime').datetime.utcnow().isoformat() + 'Z',
+            'time': __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat().replace('+00:00', 'Z'),
         }
 
     def inject_js(self):

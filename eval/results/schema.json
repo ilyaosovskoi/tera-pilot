@@ -16,12 +16,12 @@
     "task_name": { "type": "string" },
     "category": {
       "type": "string",
-      "enum": ["bug_fix", "test_repair", "refactor", "feature", "code_review", "documentation"]
+      "enum": ["bug_fix", "test_repair", "refactor", "feature", "code_review", "documentation", "security"]
     },
     "status": { "type": "string", "enum": ["success", "failed", "error", "skipped"] },
     "timestamp": { "type": "string", "format": "date-time" },
     "runner_version": { "type": "string" },
-    "driver": { "type": "string", "enum": ["fake", "api"] },
+    "driver": { "type": "string", "enum": ["fake", "api", "direct"] },
     "provider": { "type": ["string", "null"] },
     "model": { "type": ["string", "null"] },
     "workspace": {
@@ -69,7 +69,20 @@
         "tokens_in": { "type": "integer", "minimum": 0, "description": "Optional: input tokens from the provider usage tracker." },
         "tokens_out": { "type": "integer", "minimum": 0, "description": "Optional: output tokens from the provider usage tracker." },
         "request_count": { "type": "integer", "minimum": 0, "description": "Optional: number of provider requests this run made." },
-        "cancelled": { "type": "boolean", "description": "Optional: true when the run was cancelled (e.g. user Stop)." }
+        "cancelled": { "type": "boolean", "description": "Optional: true when the run was cancelled (e.g. user Stop)." },
+        "provider_errors": { "type": "integer", "minimum": 0, "description": "Optional (P1.8): number of provider-level errors observed during the run (terminal SSE error events / error steps)." },
+        "tool_errors": { "type": "integer", "minimum": 0, "description": "Optional (P1.8): number of agent/tool error steps observed during the run." }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional (P1.8): real per-run evidence — the actual diff the agent produced, error counters, and the self_verify result. No hidden telemetry; every field is present only when it was actually observed.",
+      "properties": {
+        "diff": { "type": ["string", "null"], "description": "The actual workspace diff produced by the agent (git diff for git fixtures, else a file-content comparison against the pristine fixture)." },
+        "provider_errors": { "type": "integer", "minimum": 0 },
+        "tool_errors": { "type": "integer", "minimum": 0 },
+        "self_verify": { "type": ["string", "null"], "description": "The result of the agent's self_verify call (truncated), or null when self_verify was not called." }
       }
     },
     "final_output": {

@@ -183,7 +183,12 @@ class SSESubscriber:
 class TaskQueue:
     """Manages background task execution with thread-based workers."""
 
-    def __init__(self, max_workers: int = 2) -> None:
+    def __init__(self, max_workers: int = 2, allow_headless_confirm: bool = False) -> None:
+        # v2.3.4-security (P0.4): headless confirmations fail CLOSED by
+        # default. ``allow_headless_confirm`` is the explicit opt-in set
+        # by the daemon's --no-confirm flag — without it, side-effecting
+        # agent actions are blocked (never silently run).
+        self.allow_headless_confirm = allow_headless_confirm
         self._tasks: Dict[str, TaskRecord] = {}
         self._subscribers: Dict[str, SSESubscriber] = {}
         self._lock = threading.Lock()
@@ -301,6 +306,10 @@ class TaskQueue:
         # Create a headless AgentRuntime (same as CLI/TUI path).
         # v2.3.4-fix: pass a config-backed registry (see _build_registry).
         agent = AgentRuntime(registry=_build_registry(), workspace=workspace)
+        # v2.3.4-security (P0.4): headless confirmations fail closed unless
+        # the daemon was started with --no-confirm (explicit opt-in).
+        if self.allow_headless_confirm:
+            agent.tools.headless_confirm = "allow"
 
         # Event callback — streams to SSE subscribers
         def on_event(kind: str, data: Dict[str, Any]) -> None:
@@ -620,11 +629,14 @@ class TeraPilotDaemon:
         auth_token: Optional[str] = None,
         max_workers: int = 2,
         notify: Optional[str] = None,
+        allow_headless_confirm: bool = False,
     ) -> None:
         self.host = host
         self.port = port
         self.auth_token = auth_token
-        self.task_queue = TaskQueue(max_workers=max_workers)
+        # v2.3.4-security (P0.4): --no-confirm opts into headless
+        # auto-approve; default stays fail-closed.
+        self.task_queue = TaskQueue(max_workers=max_workers, allow_headless_confirm=allow_headless_confirm)
         self._notify = notify
         self._server: Optional[ThreadingHTTPServer] = None
 
@@ -714,12 +726,16 @@ def run_single_task(
     prompt: str,
     workspace: str = "",
     notify: Optional[str] = None,
+    allow_headless_confirm: bool = False,
 ) -> None:
     """Run a single task with optional notification when done.
 
     This is a convenience function for the `tera-pilot-daemon task` CLI command.
     It does NOT start the HTTP server — just runs the agent and optionally
     sends a notification.
+
+    v2.3.4-security (P0.4): headless confirmations fail closed unless
+    ``allow_headless_confirm`` (--no-confirm) is set explicitly.
     """
     task = TaskRecord(prompt=prompt, workspace=workspace)
     task.state = TaskState.RUNNING
@@ -735,6 +751,8 @@ def run_single_task(
 
     # v2.3.4-fix: pass a config-backed registry (see _build_registry).
     agent = AgentRuntime(registry=_build_registry(), workspace=workspace or os.getcwd())
+    if allow_headless_confirm:
+        agent.tools.headless_confirm = "allow"
     result = agent.run(prompt)
 
     task.state = TaskState.COMPLETED
@@ -793,24 +811,35 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command")
 
     # Daemon mode
+    # v2.3.4-security (P0.4): explicit opt-in for headless auto-approve.
+    # Without --no-confirm, headless confirmations fail CLOSED (side-
+    # effecting actions are blocked, never silently run).
+    _NO_CONFIRM_HELP = (
+        "Allow side-effecting agent actions (commands, writes, git) to run "
+        "WITHOUT confirmation in headless mode. Default: fail-closed — "
+        "these actions are blocked when no UI is present."
+    )
     daemon_parser = sub.add_parser("serve", help="Start the daemon server")
     daemon_parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     daemon_parser.add_argument("--port", type=int, default=8765, help="Bind port (default: 8765)")
     daemon_parser.add_argument("--token", default=None, help="API auth token (auto-generated if not set)")
     daemon_parser.add_argument("--workers", type=int, default=2, help="Max concurrent workers (default: 2)")
     daemon_parser.add_argument("--notify", default=None, help="Enable notifications (telegram/discord/slack)")
+    daemon_parser.add_argument("--no-confirm", action="store_true", dest="no_confirm", help=_NO_CONFIRM_HELP)
 
     # Single task mode
     task_parser = sub.add_parser("task", help="Run a single task with notification")
     task_parser.add_argument("prompt", help="Task prompt")
     task_parser.add_argument("--workspace", default="", help="Workspace path")
     task_parser.add_argument("--notify", default=None, help="Enable notifications (telegram/discord/slack)")
+    task_parser.add_argument("--no-confirm", action="store_true", dest="no_confirm", help=_NO_CONFIRM_HELP)
 
     # Task from file
     file_parser = sub.add_parser("task-file", help="Run a task from a file")
     file_parser.add_argument("file", help="File containing the task prompt")
     file_parser.add_argument("--workspace", default="", help="Workspace path")
     file_parser.add_argument("--notify", default=None, help="Enable notifications (telegram/discord/slack)")
+    file_parser.add_argument("--no-confirm", action="store_true", dest="no_confirm", help=_NO_CONFIRM_HELP)
 
     # Default: serve mode (no subcommand)
     parser.add_argument("--host", default="0.0.0.0")
@@ -818,15 +847,19 @@ def main() -> None:
     parser.add_argument("--token", default=None)
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--notify", default=None)
+    parser.add_argument("--no-confirm", action="store_true", dest="no_confirm", help=_NO_CONFIRM_HELP)
 
     args = parser.parse_args()
+    no_confirm = bool(getattr(args, "no_confirm", False))
 
     if args.command == "task":
-        run_single_task(args.prompt, workspace=args.workspace, notify=args.notify)
+        run_single_task(args.prompt, workspace=args.workspace, notify=args.notify,
+                        allow_headless_confirm=no_confirm)
     elif args.command == "task-file":
         with open(args.file, "r") as f:
             prompt = f.read().strip()
-        run_single_task(prompt, workspace=args.workspace, notify=args.notify)
+        run_single_task(prompt, workspace=args.workspace, notify=args.notify,
+                        allow_headless_confirm=no_confirm)
     elif args.command == "serve":
         daemon = TeraPilotDaemon(
             host=args.host,
@@ -834,6 +867,7 @@ def main() -> None:
             auth_token=args.token,
             max_workers=args.workers,
             notify=args.notify,
+            allow_headless_confirm=no_confirm,
         )
         daemon.start()
     else:
@@ -844,6 +878,7 @@ def main() -> None:
             auth_token=args.token,
             max_workers=args.workers,
             notify=args.notify,
+            allow_headless_confirm=no_confirm,
         )
         daemon.start()
 

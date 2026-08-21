@@ -389,9 +389,11 @@ async def review_with_llm(
 
     provider = provider_registry.get(provider_id)
     if provider is None:
+        # Fail CLOSED: a missing reviewer must not silently approve the
+        # risky call under review.
         return GuardianVerdict(
-            verdict="APPROVE",
-            rationale=f"Guardian: provider '{provider_id}' not found — defaulting to approve",
+            verdict="REJECT",
+            rationale=f"Guardian: provider '{provider_id}' not found — defaulting to reject (fail closed)",
             suggested_args=None,
         )
 
@@ -418,11 +420,12 @@ async def review_with_llm(
         # Parse JSON from response
         verdict = _parse_verdict(raw)
         if verdict is None:
-            logger.warning("guardian: failed to parse verdict from LLM, defaulting to APPROVE")
+            # Fail CLOSED: an unparseable review is a failed review.
+            logger.warning("guardian: failed to parse verdict from LLM — REJECTING (fail closed)")
             breaker.record(ok=True)
             return GuardianVerdict(
-                verdict="APPROVE",
-                rationale="LLM response unparseable — defaulting to approve",
+                verdict="REJECT",
+                rationale="LLM response unparseable — defaulting to reject (fail closed)",
                 suggested_args=None,
             )
         breaker.record(ok=True)
@@ -431,10 +434,10 @@ async def review_with_llm(
     except Exception as e:
         logger.exception("guardian: LLM call failed: %s", e)
         breaker.record(ok=False, rate_limited=_looks_like_rate_limit(e))
-        # Default behavior on error
+        # Fail CLOSED: an LLM error must not silently approve the risky call.
         return GuardianVerdict(
-            verdict="APPROVE",
-            rationale=f"LLM error — defaulting to approve: {e}",
+            verdict="REJECT",
+            rationale=f"LLM error — defaulting to reject (fail closed): {e}",
             suggested_args=None,
         )
 
@@ -502,14 +505,14 @@ async def review_with_subagent(
         except Exception as e:  # pragma: no cover — defensive
             logger.warning("guardian: subagent module unavailable: %s", e)
             return GuardianVerdict(
-                verdict="APPROVE",
-                rationale=f"Subagent reviewer unavailable — defaulting to approve: {e}",
+                verdict="REJECT",
+                rationale=f"Subagent reviewer unavailable — defaulting to reject (fail closed): {e}",
                 suggested_args=None,
             )
         if runtime is None:
             return GuardianVerdict(
-                verdict="APPROVE",
-                rationale="Subagent reviewer needs a runtime — defaulting to approve",
+                verdict="REJECT",
+                rationale="Subagent reviewer needs a runtime — defaulting to reject (fail closed)",
                 suggested_args=None,
             )
 
@@ -524,8 +527,8 @@ async def review_with_subagent(
     except Exception as e:
         logger.warning("guardian: subagent spawn failed: %s", e)
         return GuardianVerdict(
-            verdict="APPROVE",
-            rationale=f"Subagent spawn failed — defaulting to approve: {e}",
+            verdict="REJECT",
+            rationale=f"Subagent spawn failed — defaulting to reject (fail closed): {e}",
             suggested_args=None,
         )
 
@@ -540,11 +543,11 @@ async def review_with_subagent(
     verdict = _parse_verdict(raw)
     if verdict is None:
         logger.warning(
-            "guardian: subagent response unparseable, defaulting to APPROVE"
+            "guardian: subagent response unparseable — REJECTING (fail closed)"
         )
         return GuardianVerdict(
-            verdict="APPROVE",
-            rationale="Subagent response unparseable — defaulting to approve",
+            verdict="REJECT",
+            rationale="Subagent response unparseable — defaulting to reject (fail closed)",
             suggested_args=None,
         )
     return verdict

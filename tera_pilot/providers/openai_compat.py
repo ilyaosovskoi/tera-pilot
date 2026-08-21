@@ -37,6 +37,14 @@ class OpenAICompatProvider(Provider):
     default_model: str = ""
     api_base: str = "https://api.openai.com/v1"
     env_var: str = ""        # environment variable that holds the API key
+    # v2.3.5-fix (LM Studio / LFM 2.5): whether the provider's engine can
+    # be trusted to GENERATE native tool_calls with arbitrary string
+    # content. LM Studio's engine validates the model's generated tool
+    # call and hard-400s content that contains quotes ("Invalid diff",
+    # server_error 500) — so LM Studio overrides this to False and the
+    # agent runtime stops advertising the ``tools`` schema, parsing the
+    # model's native text format instead.
+    emits_native_tool_calls: bool = True
     capabilities: frozenset = frozenset({
         ProviderCapability.CHAT,
         ProviderCapability.STREAMING,

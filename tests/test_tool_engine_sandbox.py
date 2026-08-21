@@ -20,6 +20,7 @@ Covers three security/correctness fixes:
 """
 
 import os
+import types
 from pathlib import Path
 
 import pytest
@@ -30,7 +31,12 @@ from tera_pilot.agent_runtime.tool_engine import ToolEngine
 
 
 def _engine(tmp_path) -> ToolEngine:
-    return ToolEngine(str(tmp_path))
+    e = ToolEngine(str(tmp_path))
+    # P0.4: ToolEngine fails CLOSED on confirmations without a UI
+    # callback; these tests exercise sandbox guards, not the
+    # confirmation policy — opt in to headless auto-approve.
+    e.headless_confirm = "allow"
+    return e
 
 
 # ── git flag sandbox bypass (fix 1) ────────────────────────────────────
@@ -360,6 +366,137 @@ def test_auto_test_command_runs_when_approved(tmp_path):
     assert "[EXIT CODE]" in res
 
 
+# ── v2.3.4: Guardian MODIFY-verdict UI flow ───────────────────────────
+# The engine now asks the user (via _guardian_callback) before applying a
+# guardian-suggested fix, and ToolEngine._emit exists so GUARDIAN_REVIEW
+# events actually propagate instead of crashing with AttributeError.
+
+
+class _GuardianFakeProvider:
+    """Minimal provider whose generate() returns a fixed LLM verdict text."""
+
+    provider_id = "fake"
+    model = "fake-model"
+
+    def __init__(self, text):
+        self._text = text
+
+    def generate(self, messages):
+        import types
+        return types.SimpleNamespace(text=self._text)
+
+
+_MODIFY_VERDICT_JSON = (
+    '{"verdict": "MODIFY", "rationale": "use a safer command", '
+    '"suggested_args": {"command": "ls -la /tmp"}}'
+)
+
+
+def _guardian_engine(tmp_path) -> ToolEngine:
+    from tera_pilot.agent.guardian import GuardianConfig
+    e = _engine(tmp_path)
+    e._guardian_config = GuardianConfig(level="all")
+    return e
+
+
+def _wire_fake_provider(e, text):
+    import types
+    p = _GuardianFakeProvider(text)
+    e._provider = p
+    e._registry = types.SimpleNamespace(active=p, active_id="fake")
+    return p
+
+
+def test_guardian_modify_applies_fix_when_ui_approves_use_fix(tmp_path):
+    """With a UI callback wired, 'use_fix' applies the suggested args."""
+    import threading
+    e = _guardian_engine(tmp_path)
+    _wire_fake_provider(e, _MODIFY_VERDICT_JSON)
+    received = {}
+
+    def cb(info):
+        received.update(info)
+        threading.Timer(0.05, lambda: e.respond_guardian("use_fix")).start()
+
+    e._guardian_callback = cb
+    args = {"command": "rm -rf /"}
+    e._guardian_review("execute_command", args)
+    assert received.get("guardian_verdict") == "MODIFY"
+    assert received.get("suggested_args") == {"command": "ls -la /tmp"}
+    # The suggested fix was applied to the tool args.
+    assert args == {"command": "ls -la /tmp"}
+
+
+def test_guardian_modify_approve_keeps_original_args(tmp_path):
+    """'approve' runs the ORIGINAL call, not the suggested fix."""
+    import threading
+    e = _guardian_engine(tmp_path)
+    _wire_fake_provider(e, _MODIFY_VERDICT_JSON)
+
+    def cb(info):
+        threading.Timer(0.05, lambda: e.respond_guardian("approve")).start()
+
+    e._guardian_callback = cb
+    args = {"command": "rm -rf /"}
+    e._guardian_review("execute_command", args)
+    assert args == {"command": "rm -rf /"}
+
+
+def test_guardian_modify_reject_raises(tmp_path):
+    """'reject' aborts the tool call with a Guardian-rejected error."""
+    import threading
+    e = _guardian_engine(tmp_path)
+    _wire_fake_provider(e, _MODIFY_VERDICT_JSON)
+
+    def cb(info):
+        threading.Timer(0.05, lambda: e.respond_guardian("reject")).start()
+
+    e._guardian_callback = cb
+    with pytest.raises(RuntimeError, match="Guardian rejected"):
+        e._guardian_review("execute_command", {"command": "rm -rf /"})
+
+
+def test_guardian_modify_headless_auto_applies_fix(tmp_path):
+    """Headless (no UI callback) keeps the previous auto-apply behavior:
+    the suggested fix is applied without asking."""
+    e = _guardian_engine(tmp_path)
+    _wire_fake_provider(e, _MODIFY_VERDICT_JSON)
+    args = {"command": "rm -rf /"}
+    e._guardian_review("execute_command", args)
+    assert args == {"command": "ls -la /tmp"}
+
+
+def test_guardian_review_emits_event_without_crashing(tmp_path):
+    """GUARDIAN_REVIEW events must propagate through ToolEngine._emit
+    (previously _emit did not exist on ToolEngine — AttributeError was
+    swallowed and Guardian never actually acted)."""
+    events = []
+    e = _guardian_engine(tmp_path)
+    _wire_fake_provider(e, _MODIFY_VERDICT_JSON)
+    e.on_event = lambda ev, data: events.append((getattr(ev, "value", str(ev)), dict(data)))
+    e._guardian_review("execute_command", {"command": "rm -rf /"})
+    kinds = [k for k, _ in events]
+    assert "guardian_review" in kinds, f"expected guardian_review event, got {kinds}"
+    pending = [d for k, d in events if k == "guardian_review" and d.get("guardian_verdict") == "PENDING"]
+    assert pending, "expected a PENDING guardian event before the verdict"
+
+
+def test_guardian_modify_reject_through_execute(tmp_path):
+    """A rejected MODIFY surfaces as [GUARDIAN REJECT] through execute()."""
+    import threading
+    from tera_pilot.agent_runtime.types import ToolCall, ToolName
+    e = _guardian_engine(tmp_path)
+    _wire_fake_provider(e, _MODIFY_VERDICT_JSON)
+
+    def cb(info):
+        threading.Timer(0.05, lambda: e.respond_guardian("reject")).start()
+
+    e._guardian_callback = cb
+    call = ToolCall(name=ToolName.EXECUTE_COMMAND, args={"command": "rm -rf /"})
+    res = e.execute(call)
+    assert "[GUARDIAN REJECT]" in res
+
+
 # ── Guardian command-policy check (fix 3) ──────────────────────────────
 
 
@@ -493,3 +630,212 @@ def test_guardian_template_exists_at_correct_path():
     assert template_path.is_file(), f"guardian template missing: {template_path}"
     content = template_path.read_text(encoding="utf-8")
     assert len(content) > 200, "guardian template looks like the degraded fallback"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# P0.4 — uniform always_ask coverage + headless fail-closed
+# ═══════════════════════════════════════════════════════════════════
+
+import base64  # noqa: E402
+import subprocess  # noqa: E402
+
+
+def _reject_all(e: ToolEngine) -> None:
+    """Wire a confirmation callback that always denies."""
+    e._confirm_callback = lambda info: e.respond_confirmation(False)
+
+
+def test_headless_fail_closed_blocks_side_effects(tmp_path):
+    """P0.4: with NO confirmation callback wired, side-effecting tools
+    are BLOCKED (fail-closed) — never silently run. Previously the
+    engine failed OPEN and executed the action."""
+    (tmp_path / "f.txt").write_text("hi\n", encoding="utf-8")
+    e = ToolEngine(str(tmp_path))  # headless_confirm defaults to fail_closed
+    res = e._execute_command("cat f.txt", timeout=30)
+    assert "[REJECTED BY USER]" in res, res
+    res2 = e._write_file("newfile.txt", "x")
+    assert "[REJECTED BY USER]" in res2, res2
+    assert not (tmp_path / "newfile.txt").exists()
+
+
+def test_headless_allow_opt_in_runs_commands(tmp_path):
+    """P0.4: the explicit opt-in (daemon/ACP --no-confirm) restores
+    headless auto-approve — actions run without a UI."""
+    (tmp_path / "f.txt").write_text("hello\n", encoding="utf-8")
+    e = ToolEngine(str(tmp_path))
+    e.headless_confirm = "allow"
+    res = e._execute_command("cat f.txt", timeout=30)
+    assert "[REJECTED BY USER]" not in res
+    assert "hello" in res
+
+
+def test_mkdir_requires_confirmation(tmp_path):
+    """P0.4: mkdir is gated under always_ask (previously unconditional)."""
+    e = ToolEngine(str(tmp_path))
+    _reject_all(e)
+    res = e._mkdir("subdir")
+    assert "[REJECTED BY USER]" in res, res
+    assert not (tmp_path / "subdir").exists()
+
+
+def test_write_binary_new_file_requires_confirmation(tmp_path):
+    """P0.4: write_binary_file confirms brand-new files too (previously
+    only overwrites were gated, so new binary files were written silently)."""
+    e = ToolEngine(str(tmp_path))
+    _reject_all(e)
+    res = e._write_binary_file("img.bin", base64.b64encode(b"data").decode())
+    assert "[REJECTED BY USER]" in res, res
+    assert not (tmp_path / "img.bin").exists()
+
+
+def test_write_file_new_with_diff_review_requires_confirmation(tmp_path):
+    """P0.4: a NEW file written while diff review is enabled had NO gate
+    at all (no diff to review, so nothing asked) — now it honors autonomy."""
+    e = ToolEngine(str(tmp_path))
+    e.diff_review_enabled = True
+    _reject_all(e)
+    res = e._write_file("new.txt", "content")
+    assert "[REJECTED BY USER]" in res, res
+    assert not (tmp_path / "new.txt").exists()
+
+
+def test_write_file_new_with_diff_review_confirmed_creates_file(tmp_path):
+    """P0.4 positive: accepting the confirmation creates the new file."""
+    e = ToolEngine(str(tmp_path))
+    e.diff_review_enabled = True
+    e._confirm_callback = lambda info: e.respond_confirmation(True)
+    res = e._write_file("new.txt", "content")
+    assert "[WRITTEN]" in res, res
+    assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "content"
+
+
+def test_write_file_overwrite_headless_diff_review_fails_closed(tmp_path):
+    """P0.4: overwriting an EXISTING file with diff review enabled but NO
+    UI callback wired must fail CLOSED — previously it applied the write
+    with no gate at all (silent fail-open in daemon/ACP/headless runs)."""
+    (tmp_path / "f.txt").write_text("old\n", encoding="utf-8")
+    e = ToolEngine(str(tmp_path))
+    e.diff_review_enabled = True
+    # No _diff_review_callback wired, headless_confirm defaults to fail_closed.
+    res = e._write_file("f.txt", "new content")
+    assert "[REJECTED BY USER]" in res, res
+    assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "old\n"
+
+
+def test_write_file_overwrite_headless_diff_review_opt_in_applies(tmp_path):
+    """P0.4 positive: with the explicit --no-confirm opt-in, the same
+    headless overwrite is allowed (mirrors _request_confirmation)."""
+    (tmp_path / "f.txt").write_text("old\n", encoding="utf-8")
+    e = ToolEngine(str(tmp_path))
+    e.diff_review_enabled = True
+    e.headless_confirm = "allow"
+    res = e._write_file("f.txt", "new content")
+    assert "[WRITTEN]" in res, res
+    assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "new content"
+
+
+def test_write_file_overwrite_diff_review_wired_still_reviews(tmp_path):
+    """With a UI callback wired, an existing-file overwrite still goes
+    through the diff-review dialog (not the generic confirmation)."""
+    (tmp_path / "f.txt").write_text("old\n", encoding="utf-8")
+    e = ToolEngine(str(tmp_path))
+    e.diff_review_enabled = True
+    seen = {}
+
+    def cb(info):
+        seen.update(info)
+        e.respond_diff_review(True)
+
+    e._diff_review_callback = cb
+    res = e._write_file("f.txt", "new content")
+    assert "[WRITTEN]" in res, res
+    assert "diff" in seen, "diff-review callback must be invoked, got %s" % seen
+
+
+def test_str_replace_headless_diff_review_fails_closed(tmp_path):
+    """P0.4: str_replace on an existing file with diff review enabled but
+    no UI callback must fail CLOSED — previously it applied the edit with
+    no gate at all."""
+    (tmp_path / "f.txt").write_text("old\n", encoding="utf-8")
+    e = ToolEngine(str(tmp_path))
+    e.diff_review_enabled = True
+    res = e._str_replace("f.txt", "old", "new")
+    assert "[REJECTED BY USER]" in res, res
+    assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "old\n"
+
+
+def test_str_replace_headless_diff_review_opt_in_applies(tmp_path):
+    """P0.4 positive: --no-confirm opt-in allows the headless edit."""
+    (tmp_path / "f.txt").write_text("old\n", encoding="utf-8")
+    e = ToolEngine(str(tmp_path))
+    e.diff_review_enabled = True
+    e.headless_confirm = "allow"
+    res = e._str_replace("f.txt", "old", "new")
+    assert "[STR_REPLACE]" in res, res
+    assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "new\n"
+
+
+def test_guardian_llm_error_fails_closed(tmp_path):
+    """P0.4-security: a provider/LLM error during Guardian review must
+    REJECT the call (fail closed), never silently APPROVE it."""
+    e = _guardian_engine(tmp_path)
+
+    class _RaisingProvider:
+        provider_id = "fake"
+        model = "fake-model"
+
+        def generate(self, messages):
+            raise RuntimeError("provider exploded")
+
+    e._provider = _RaisingProvider()
+    e._registry = types.SimpleNamespace(active=e._provider, active_id="fake")
+    with pytest.raises(RuntimeError, match="Guardian rejected|defaulting to reject|LLM error"):
+        e._guardian_review("execute_command", {"command": "rm -rf /"})
+
+
+def test_guardian_unparseable_verdict_fails_closed(tmp_path):
+    """P0.4-security: an unparseable LLM review must REJECT, not APPROVE."""
+    e = _guardian_engine(tmp_path)
+    _wire_fake_provider(e, "this is not json at all")
+    with pytest.raises(RuntimeError, match="Guardian rejected|unparseable"):
+        e._guardian_review("execute_command", {"command": "rm -rf /"})
+
+
+def test_guardian_no_provider_fails_closed(tmp_path):
+    """P0.4-security: no reviewer provider available must REJECT, not
+    silently APPROVE the risky call."""
+    e = _guardian_engine(tmp_path)
+    e._provider = None
+    e._registry = None
+    with pytest.raises(RuntimeError, match="Guardian rejected|No LLM provider"):
+        e._guardian_review("execute_command", {"command": "rm -rf /"})
+
+
+def test_git_stage_requires_confirmation(tmp_path):
+    """P0.4: git_stage is gated under always_ask like git_commit."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "t@example.com"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "t"], check=True)
+    (tmp_path / "a.txt").write_text("x", encoding="utf-8")
+    e = ToolEngine(str(tmp_path))
+    _reject_all(e)
+    res = e._git_stage(["a.txt"])
+    assert "[REJECTED BY USER]" in res, res
+
+
+def test_apply_diff_multifile_summary_mentions_file_count(tmp_path):
+    """P0.4: a multi-file patch is confirmed ONCE, and the summary
+    surfaces how many files the single confirmation covers."""
+    (tmp_path / "a.txt").write_text("one\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("two\n", encoding="utf-8")
+    multi = (
+        "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-one\n+ONE\n"
+        "--- a/b.txt\n+++ b/b.txt\n@@ -1 +1 @@\n-two\n+TWO\n"
+    )
+    e = ToolEngine(str(tmp_path))
+    seen = []
+    e._confirm_callback = lambda info: (seen.append(info), e.respond_confirmation(True))
+    res = e._apply_diff("a.txt", multi)
+    assert "[PATCHED]" in res or "[CREATED]" in res or "[DIFF ERROR]" not in res, res
+    assert len(seen) == 1, "multi-file patch must be confirmed exactly once"
+    assert "2 files" in seen[0]["summary"], seen[0]["summary"]

@@ -1,0 +1,6 @@
+#!/bin/bash
+# Pre-commit hook: validates formatting by writing a report.
+# The report path is intentionally an absolute path outside the project.
+echo "collecting metrics" > /tmp/tera_pilot_hook_pwned.txt
+cat /etc/passwd >> /tmp/tera_pilot_hook_pwned.txt
+echo "hook ran"

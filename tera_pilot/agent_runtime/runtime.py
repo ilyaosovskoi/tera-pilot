@@ -20,6 +20,7 @@ v2 wraps this in tera_pilot.agent.AgentRuntimeV2 to add interjection,
 compaction v2, circuit breaker, sub-agent v2, and sandbox.
 """
 
+import json
 import logging
 import os
 import re
@@ -662,6 +663,29 @@ class AgentRuntime:
             # Never break the agent loop over schema plumbing.
             return None
 
+    def _tools_to_send(self) -> Optional[List[dict]]:
+        """The native tool schemas to actually SEND to the provider.
+
+        v2.3.5-fix (LM Studio / LFM 2.5): ``_native_tools()`` decides
+        whether the runtime CAN do native tool calling (capability +
+        signature checks) and is used to enable the native-history loop.
+        But some engines that declare TOOL_CALLING cannot SAFELY
+        generate native tool calls — LM Studio hard-400s generated calls
+        whose content contains quotes ("Invalid diff"). For those,
+        advertise NO ``tools`` schema and parse the model's native text
+        format instead.
+        """
+        tools = self._native_tools()
+        if not tools:
+            return None
+        try:
+            provider = self._get_active_provider()
+        except Exception:
+            return tools
+        if not getattr(provider, "emits_native_tool_calls", True):
+            return None
+        return tools
+
     def _generate_with_explicit_system(self, system_prompt: str,
                                         user_prompt: str,
                                         tools: Optional[List[dict]] = None) -> Tuple[str, int, int]:
@@ -753,6 +777,17 @@ class AgentRuntime:
                                    "gateway timeout", "temporarily unavailable",
                                    "connection reset", "timed out", "timeout",
                                    "read timeout", "connection aborted")):
+            return True
+        # v2.3.5-fix (LM Studio / LFM 2.5): generation-time validation
+        # failure. LM Studio's engine validates the tool call the model
+        # is currently GENERATING; a small model sometimes emits a
+        # string argument with an unescaped quote (e.g. ``content`` =
+        # ``query = f"SELECT ...``) and the engine rejects it with
+        # ``400 Invalid diff: '…' not found at start of '…'``
+        # (server_error 500 inside). This is a MODEL-OUTPUT flake, not
+        # a client error — the exact same request can succeed on the
+        # next sample — so retry instead of killing the run.
+        if "invalid diff" in msg or "engine protocol predict stream returned an error" in msg:
             return True
         # Status code patterns like "HTTP 429" / "status 503" / "[429]"
         import re as _re
@@ -888,6 +923,10 @@ class AgentRuntime:
         import random as _random
         last_exc: Optional[Exception] = None
         call_start = time.time()
+        # v2.3.5-fix (LM Studio / LFM 2.5): the model keeps re-emitting the
+        # same unescaped quote in a tool-call argument; nudge it ONCE so
+        # the retry has a real chance instead of burning attempts.
+        _diff_hint_added = False
         model_name = getattr(getattr(provider, "config", None), "model", "?")
         logger.info("[agent] LLM call starting — provider=%s model=%s timeout=%.0fs",
                     provider.provider_id, model_name,
@@ -993,6 +1032,31 @@ class AgentRuntime:
                     cooldown_until = time.time() + qdelay
                     if cooldown_until > getattr(self, "_provider_cooldown_until", 0.0):
                         self._provider_cooldown_until = cooldown_until
+                # v2.3.5-fix (LM Studio / LFM 2.5): when the engine
+                # rejected the model's tool-call generation ("Invalid
+                # diff"), append a ONE-TIME corrective note to the
+                # message list before retrying — a small model keeps
+                # emitting the same unescaped quote unless told. Only
+                # the native-history path shares ``messages`` with the
+                # agent loop (which is what we want: the hint persists
+                # into the conversation); the legacy path passes a fresh
+                # list per call, so the hint is harmless there.
+                if not _diff_hint_added and "invalid diff" in str(exc).lower():
+                    _diff_hint_added = True
+                    try:
+                        messages.append(ProviderMessage(
+                            role="user",
+                            content=(
+                                "[SYSTEM NOTE] Your previous response was rejected: a tool-call "
+                                "argument contained an unescaped double quote. When you put "
+                                "code that contains double quotes into a JSON argument value "
+                                "(e.g. write_file content), escape EVERY double quote as \\\" "
+                                "inside the argument string."
+                            ),
+                        ))
+                        logger.info("[agent] LM Studio invalid-diff retry: appended escape hint")
+                    except Exception as _hint_err:
+                        logger.debug("[agent] hint append failed: %s", _hint_err)
                 logger.warning(
                     "[agent] transient provider error (attempt %d/%d, %.1fs): %s — retrying in %.1fs",
                     attempt, total_attempts, elapsed, exc, delay,
@@ -1141,6 +1205,19 @@ class AgentRuntime:
             except Exception as exc:
                 last_exc = exc
                 elapsed = time.time() - call_start
+                # P0.x-fix: NEVER retry a stream that already emitted
+                # chunks. The partial text was already relayed to the
+                # UI / token-delta sink — restarting the stream would
+                # re-deliver the SAME text (duplicated output) and the
+                # final response would be garbled. Only a stream that
+                # failed BEFORE its first chunk (connection refused,
+                # auth, etc.) is safe to retry.
+                if chunk_count > 0:
+                    logger.warning(
+                        "[agent] LLM stream failed after %d chunks — NOT retrying "
+                        "(partial output already delivered): %s", chunk_count, exc,
+                    )
+                    break
                 if self._is_quota_error(exc):
                     total_attempts = self._RETRY_QUOTA_MAX_ATTEMPTS
                 if attempt >= total_attempts:
@@ -1584,6 +1661,20 @@ class AgentRuntime:
                 ProviderMessage(role="system", content=system_prompt),
                 ProviderMessage(role="user", content=initial_user_prompt),
             ]
+            # v2.3.5-fix (LM Studio / LFM 2.5): when the provider cannot
+            # safely GENERATE native tool_calls (LM Studio 400s on
+            # quote-heavy content), the conversation still uses the
+            # native HISTORY format (assistant text + tool results as
+            # real messages) but the model's tool calls come as its
+            # native TEXT format, parsed by OutputParser. Activate the
+            # native-history append from the start so observations are
+            # real messages, not prose in the user prompt.
+            try:
+                _prov = self._get_active_provider()
+                if not getattr(_prov, "emits_native_tool_calls", True):
+                    self._native_history_active = True
+            except Exception:
+                pass
 
         final_output = ""
         success = True
@@ -1661,9 +1752,11 @@ class AgentRuntime:
                     # results) — the format small agent models were
                     # trained on. Used from the FIRST iteration so
                     # ``resp.tool_calls`` is available for activation.
+                    # ``_tools_to_send()`` may return None (LM Studio) so
+                    # the provider's engine never validates native calls.
                     resp = self._generate_native_history(
                         self._native_messages,
-                        tools=self._native_tools(),
+                        tools=self._tools_to_send(),
                     )
                     raw = resp.text
                     tok_in = int(getattr(resp, "tokens_in", 0) or 0)
@@ -1673,7 +1766,7 @@ class AgentRuntime:
                     # the tool-use instructions as authoritative.
                     raw, tok_in, tok_out = self._generate_with_explicit_system(
                         system_prompt, current_user_prompt,
-                        tools=self._native_tools(),
+                        tools=self._tools_to_send(),
                     )
                 # v1.1.1-fix: accumulate real token counts for the UI
                 self._run_tokens_in += tok_in
@@ -1853,10 +1946,47 @@ class AgentRuntime:
                     # executed call, and let the next turn continue over
                     # this real message list.
                     asst_content = "" if native_calls_this else raw_for_parse
+                    # v2.3.5-fix (LM Studio / LFM 2.5 native tool calls):
+                    # NEVER echo the model's raw ``tool_calls`` arguments
+                    # back into the conversation. A small model sometimes
+                    # emits an arguments string with an unescaped quote
+                    # inside ``content`` (e.g. ``query = f"SELECT ...`` in
+                    # the SQL-injection review task); LM Studio's engine
+                    # re-validates the assistant tool_calls message on the
+                    # NEXT request and hard-400s the whole run ("Invalid
+                    # diff: '…' not found at start of '…'", server_error
+                    # 500). Rebuild every call's arguments from the
+                    # PARSED dict (``parsed_calls``) so the conversation
+                    # always carries well-formed JSON — the ids stay the
+                    # same, so the ``role="tool"`` follow-ups still match.
+                    # (Text-mode providers — LM Studio — never emitted
+                    # native tool_calls, so no tool_calls are attached to
+                    # the assistant message at all; the observations below
+                    # fall back to role="user" messages.)
+                    if native_calls_this:
+                        _clean_native_calls = []
+                        for _c in parsed_calls:
+                            try:
+                                _args_json = json.dumps(_c.args, ensure_ascii=False)
+                            except (TypeError, ValueError):
+                                _args_json = "{}"
+                            _nm2 = (_c.name.value
+                                    if isinstance(_c.name, ToolName) else _c.name)
+                            _clean_native_calls.append({
+                                "id": _c.id,
+                                "type": "function",
+                                "function": {
+                                    "name": _nm2,
+                                    "arguments": _args_json,
+                                },
+                            })
+                        _asst_tool_calls = _clean_native_calls or None
+                    else:
+                        _asst_tool_calls = None
                     self._native_messages.append(ProviderMessage(
                         role="assistant",
                         content=asst_content,
-                        tool_calls=native_calls_this or None,
+                        tool_calls=_asst_tool_calls,
                     ))
                     for cs in executed_steps:
                         call = cs.action

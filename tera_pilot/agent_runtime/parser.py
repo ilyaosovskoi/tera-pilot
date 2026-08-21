@@ -129,6 +129,206 @@ class OutputParser:
             out.append(call)
         return out
 
+    # ── v2.3.5-fix: LFM-native text tool calls ──────────────────────
+    # The LFM 2.5 chat template emits tool calls as
+    # ``<|tool_call_start|>[name(arg1='v1', arg2='v2')]<|tool_call_end|>``
+    # (Python-style args, single-quoted strings with \' escapes). These
+    # helpers parse that format so the runtime can execute the model's
+    # plan WITHOUT advertising the ``tools`` schema — LM Studio's engine
+    # rejects generated native tool calls whose content contains quotes
+    # ("Invalid diff", server_error 500), which the text path bypasses.
+
+    _LFM_START = "<|tool_call_start|>"
+    _LFM_END = "<|tool_call_end|>"
+
+    @classmethod
+    def _iter_lfm_calls(cls, text: str):
+        """Yield ``(name, args_dict)`` for every LFM-native block, in order."""
+        pos = 0
+        while True:
+            start = text.find(cls._LFM_START, pos)
+            if start == -1:
+                return
+            end = text.find(cls._LFM_END, start)
+            if end == -1:
+                return
+            body = text[start + len(cls._LFM_START):end].strip()
+            if body.startswith("[") and body.endswith("]"):
+                body = body[1:-1].strip()
+            parsed = cls._parse_lfm_call(body)
+            if parsed is not None:
+                yield parsed
+            pos = end + len(cls._LFM_END)
+
+    @classmethod
+    def _parse_lfm_call(cls, body: str):
+        """Parse ``name(arg1='v1', arg2='v2')`` → (name, args dict).
+
+        Never raises; returns None for unparseable bodies. Args may be
+        named (``key=value``) or positional (bare values), matching the
+        loose output small LFM models produce."""
+        open_paren = body.find("(")
+        if open_paren == -1:
+            name = body.strip()
+            return (name, {}) if name and name.isidentifier() else None
+        name = body[:open_paren].strip()
+        inner = body[open_paren + 1:]
+        # Find the matching closing paren (balanced, string-aware).
+        depth = 1
+        close = -1
+        in_str = None
+        i = 0
+        while i < len(inner):
+            ch = inner[i]
+            if in_str is not None:
+                if ch == "\\":
+                    i += 2
+                    continue
+                if ch == in_str:
+                    in_str = None
+            elif ch in ("'", '"'):
+                in_str = ch
+            elif ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    close = i
+                    break
+            i += 1
+        if close == -1:
+            return None
+        args = cls._parse_lfm_args(inner[:close], name)
+        return (name, args)
+
+    @classmethod
+    def _parse_lfm_args(cls, args_text: str, tool_name: str) -> dict:
+        """Split ``key='v', 'positional'`` into an args dict.
+
+        Named args keep their key; positional values are mapped to the
+        tool's parameter order (``_TOOL_ARGS``), falling back to
+        ``arg0/arg1`` for unknown tools."""
+        parts = cls._split_lfm_args(args_text)
+        ordered = cls.TOOL_ARG_HINTS.get(tool_name, [])
+        args: dict = {}
+        used = set()
+        positional_i = 0
+        for part in parts:
+            eq = part.find("=")
+            if eq != -1 and part[:eq].strip().isidentifier():
+                key = part[:eq].strip()
+                value = cls._parse_lfm_value(part[eq + 1:].strip())
+                if value is not None:
+                    args[key] = value
+                    used.add(key)
+            else:
+                value = cls._parse_lfm_value(part)
+                if value is None:
+                    continue
+                # Assign a positional value to the FIRST parameter slot
+                # not already filled by a named arg (the model often
+                # mixes ``write_file(path='x.py', 'content...')`` — the
+                # positional content must land on ``content``, never
+                # overwrite ``path``).
+                while positional_i < len(ordered) and ordered[positional_i] in used:
+                    positional_i += 1
+                if positional_i < len(ordered):
+                    args[ordered[positional_i]] = value
+                    used.add(ordered[positional_i])
+                    positional_i += 1
+                else:
+                    args[f"arg{positional_i}"] = value
+                    positional_i += 1
+        return args
+
+    @staticmethod
+    def _parse_lfm_value(raw: str):
+        """Parse one LFM arg value: '...' / "..." / bare token.
+
+        Returns None for empty/unknown forms so the caller can skip.
+        """
+        raw = raw.strip()
+        if not raw:
+            return None
+        if len(raw) >= 2 and raw[0] in ("'", '"') and raw[-1] == raw[0]:
+            quote = raw[0]
+            inner = raw[1:-1]
+            out = []
+            i = 0
+            while i < len(inner):
+                ch = inner[i]
+                if ch == "\\" and i + 1 < len(inner):
+                    nxt = inner[i + 1]
+                    out.append({"n": "\n", "t": "\t", "r": "\r", "\\": "\\"}.get(nxt, nxt))
+                    i += 2
+                else:
+                    out.append(ch)
+                    i += 1
+            return "".join(out)
+        # Bare token: number / true / false / identifier.
+        low = raw.lower()
+        if low == "true":
+            return True
+        if low == "false":
+            return False
+        if low in ("none", "null"):
+            return None
+        try:
+            if raw.count(".") == 1:
+                return float(raw)
+            return int(raw)
+        except ValueError:
+            pass
+        return raw
+
+    @classmethod
+    def _split_lfm_args(cls, args_text: str) -> List[str]:
+        """Split on top-level commas (string- and paren-aware)."""
+        parts: List[str] = []
+        cur: List[str] = []
+        in_str = None
+        depth = 0
+        i = 0
+        while i < len(args_text):
+            ch = args_text[i]
+            if in_str is not None:
+                cur.append(ch)
+                if ch == "\\" and i + 1 < len(args_text):
+                    cur.append(args_text[i + 1])
+                    i += 2
+                    continue
+                if ch == in_str:
+                    in_str = None
+            elif ch in ("'", '"'):
+                in_str = ch
+                cur.append(ch)
+            elif ch == "(":
+                depth += 1
+                cur.append(ch)
+            elif ch == ")":
+                depth -= 1
+                cur.append(ch)
+            elif ch == "," and depth == 0:
+                parts.append("".join(cur).strip())
+                cur = []
+            else:
+                cur.append(ch)
+            i += 1
+        if cur:
+            parts.append("".join(cur).strip())
+        return [p for p in parts if p]
+
+    @classmethod
+    def _tool_call_from_parts(cls, name: str, args: dict) -> Optional[ToolCall]:
+        """Build a ToolCall from a parsed LFM (name, args) pair."""
+        try:
+            if name.startswith("mcp__") or name == "list_mcp_tools":
+                return ToolCall(name=name, args=args or {})
+            return ToolCall(name=ToolName(name), args=args or {})
+        except (ValueError, KeyError) as e:
+            logger.warning(f"[parser] Tool name lookup failed: {e}")
+            return None
+
     @classmethod
     def parse_tool_call(cls, text: str) -> Optional[ToolCall]:
         """Extract the FIRST JSON tool call from text, with self-correction.
@@ -179,6 +379,30 @@ class OutputParser:
         cleaned = cls._strip_code_fence(text)
         calls: List[ToolCall] = []
         last_key: Optional[Tuple] = None
+        # v2.3.5-fix (LM Studio / LFM 2.5): the model ALSO emits tool
+        # calls in its NATIVE text format ``<|tool_call_start|>[name(arg=
+        # 'value')]<|tool_call_end|>`` — the LFM chat template injects
+        # those tokens even when no ``tools`` schema is advertised. LM
+        # Studio's engine VALIDATES generated native tool calls and
+        # hard-400s quote-heavy content ("Invalid diff"), so Tera Pilot
+        # deliberately stops advertising tools to LM Studio and parses
+        # this text format instead. If any LFM blocks are present they
+        # win (the model's whole plan is in them); otherwise fall back
+        # to the JSON paths below.
+        lfm_found = False
+        for _name, _args in cls._iter_lfm_calls(cleaned):
+            lfm_found = True
+            call = cls._tool_call_from_parts(_name, _args)
+            if call is None:
+                continue
+            _n = call.name.value if isinstance(call.name, ToolName) else call.name
+            key = (_n, json.dumps(call.args, sort_keys=True, ensure_ascii=False))
+            if key == last_key:
+                continue
+            last_key = key
+            calls.append(call)
+        if lfm_found:
+            return calls
         for raw, _end in cls._iter_balanced_json(cleaned):
             call = cls._tool_call_from_json(raw)
             if call is None:

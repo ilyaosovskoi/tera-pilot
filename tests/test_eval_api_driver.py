@@ -135,6 +135,83 @@ def test_api_driver_accepts_diff_review_with_bearer_token(tmp_path, mock_server)
     ]
 
 
+class _ConfirmFlowAgentServer(BaseHTTPRequestHandler):
+    """Current-code server: emits action_confirm and guardian_review SSE
+    events (as v2.3.5 api_server does when autonomy is 'always_ask' and
+    Guardian is enabled), then done. Records the response bodies for the
+    /api/action/respond and /api/guardian/respond routes."""
+
+    responses = []
+
+    def log_message(self, fmt, *args):
+        pass
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = json.loads(self.rfile.read(length).decode("utf-8"))
+        if self.path in ("/api/action/respond", "/api/guardian/respond"):
+            _ConfirmFlowAgentServer.responses.append((self.path, body))
+            resp = json.dumps({"ok": True}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp)))
+            self.end_headers()
+            self.wfile.write(resp)
+            return
+        if self.path != "/api/agent/stream":
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        events = [
+            {"type": "step", "tool": "execute_command", "detail": "tool_called"},
+            {"type": "action_confirm", "confirm_id": "confirm-1", "action": "execute_command", "summary": "run pytest"},
+            {"type": "guardian_review", "review_id": "guard-1", "action": "execute_command", "guardian_verdict": "MODIFY"},
+            {"type": "done", "ok": True, "output": "fixed"},
+        ]
+        for evt in events:
+            self.wfile.write(("data: " + json.dumps(evt) + "\n\n").encode("utf-8"))
+            self.wfile.flush()
+
+    def do_GET(self):
+        resp = json.dumps({"total_tokens": 0, "total_cost": 0}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(resp)))
+        self.end_headers()
+        self.wfile.write(resp)
+
+
+@pytest.fixture()
+def confirm_flow_server():
+    _ConfirmFlowAgentServer.responses = []
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _ConfirmFlowAgentServer)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+    srv.server_close()
+
+
+def test_api_driver_auto_answers_action_and_guardian(tmp_path, confirm_flow_server):
+    """v2.3.5-fix: on current-code servers headless confirmations fail
+    CLOSED, so the driver must auto-answer action_confirm and
+    guardian_review SSE events or every headless eval run stalls for the
+    300 s confirmation timeout."""
+    task_dir = _task_with_no_test(tmp_path)
+    result = runner.run_api_driver(
+        runner.load_task(str(task_dir)), tmp_path / "ws", confirm_flow_server,
+        request_timeout=10,
+    )
+    assert result["status"] == "success"
+    by_path = {p: b for p, b in _ConfirmFlowAgentServer.responses}
+    assert by_path["/api/action/respond"] == {"accepted": True, "confirm_id": "confirm-1"}
+    assert by_path["/api/guardian/respond"] == {"verdict": "approve", "review_id": "guard-1"}
+
+
 class _HoldOpenAgentServer(BaseHTTPRequestHandler):
     """Deliberately reproduces the pre-fix api_server behavior: send a
     `done` event, then KEEP THE CONNECTION OPEN (never send EOF). A client
@@ -224,6 +301,14 @@ class _RetryCollisionAgentServer(BaseHTTPRequestHandler):
             evt = {"type": "done", "ok": True, "output": "fixed on retry"}
         self.wfile.write(("data: " + json.dumps(evt) + "\n\n").encode("utf-8"))
         self.wfile.flush()
+        # Give the client time to read the event BEFORE the handler
+        # returns and the socket closes. Closing immediately after write
+        # races the client's first recv(): if the FIN arrives while the
+        # client still has the event unread in its receive buffer, macOS
+        # answers with RST (ECONNRESET on the next recv) and the driver
+        # sees a transport error instead of the clean SSE event — the
+        # same flake a real parallel launch can hit against api_server.
+        time.sleep(0.2)
 
     def do_GET(self):
         resp = json.dumps({"total_tokens": 0, "total_cost": 0}).encode("utf-8")

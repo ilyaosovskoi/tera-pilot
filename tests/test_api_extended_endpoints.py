@@ -491,6 +491,121 @@ def test_agent_autonomy_and_guardian(api):
     assert data.get("ok") is False
 
 
+def test_guardian_level_applied_to_runtime(api):
+    """v2.3.4-fix: setting the Guardian level over HTTP must push it onto
+    the live AgentRuntime's ToolEngine — previously it was persisted to
+    config only, so Guardian stayed silently OFF in the browser GUI."""
+    st, data = _post(api, "/api/agent/guardian", {"level": "all"})
+    assert st == 200
+    assert data.get("ok") is True
+    rt = api["server"].ctx.get_agent_runtime(api["ws"])
+    cfg = getattr(rt.tools, "_guardian_config", None)
+    assert cfg is not None, "guardian config was never applied to the runtime"
+    assert cfg.level == "all"
+
+
+def test_autonomy_setting_persists_to_runtime(api):
+    """v2.3.4-fix: the saved autonomy level must be applied when the
+    runtime is created (after a server restart) — not only when the user
+    re-saves the settings in the GUI."""
+    from tera_pilot.api_server import _save_config
+    with api["server"].ctx._config_lock:
+        api["server"].ctx.config["agent_autonomy"] = "never_ask"
+        _save_config(api["server"].ctx.config)
+    # Force the runtime to be re-created so it picks up the saved config.
+    api["server"].ctx._agent_runtime = None
+    rt = api["server"].ctx.get_agent_runtime(api["ws"])
+    assert rt.tools.autonomy == "never_ask"
+
+
+def test_action_respond_route_exists(api):
+    """v2.3.4-fix: /api/action/respond must exist (the GUI's Allow/Deny
+    modal posts to it). Unknown ids return a structured error, not 404."""
+    st, data = _post(api, "/api/action/respond", {"accepted": True, "confirm_id": "nope"})
+    assert st == 200
+    assert data.get("ok") is False
+    assert "no pending" in data.get("error", "")
+
+
+def test_guardian_respond_route_exists(api):
+    """v2.3.4-fix: /api/guardian/respond must exist (the GUI's Guardian
+    modal posts to it). Invalid verdicts and unknown ids are rejected."""
+    st, data = _post(api, "/api/guardian/respond", {"verdict": "bogus", "review_id": "nope"})
+    assert st == 200
+    assert data.get("ok") is False
+    st, data = _post(api, "/api/guardian/respond", {"verdict": "approve", "review_id": "nope"})
+    assert st == 200
+    assert data.get("ok") is False
+    assert "no pending" in data.get("error", "")
+
+
+def test_action_guardian_respond_require_token(api):
+    import urllib.request as _ur
+    url = f"http://127.0.0.1:{api['port']}/api/action/respond"
+    req = _ur.Request(url, data=b"{}", method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with _ur.urlopen(req, timeout=10) as r:
+            st = r.status
+    except urllib.error.HTTPError as e:
+        st = e.code
+    assert st == 401
+
+
+def test_os_sandbox_route_sets_and_validates_mode(api):
+    """P1.10: /api/agent/os_sandbox persists + applies the sandbox mode
+    (off|auto|on); invalid values are normalized to auto, never crash."""
+    st, data = _post(api, "/api/agent/os_sandbox", {"mode": "on"})
+    assert st == 200
+    assert data.get("ok") is True
+    assert data["settings"]["agent"]["os_sandbox"] == "on"
+    # The live runtime gets the mode too.
+    rt = api["server"].ctx.get_agent_runtime(api["ws"])
+    assert rt.tools.os_sandbox == "on"
+
+    st, data = _post(api, "/api/agent/os_sandbox", {"mode": "off"})
+    assert st == 200 and data.get("ok") is True
+    assert data["settings"]["agent"]["os_sandbox"] == "off"
+
+    # Bogus values normalize to 'auto' instead of erroring.
+    st, data = _post(api, "/api/agent/os_sandbox", {"mode": "bogus"})
+    assert st == 200 and data.get("ok") is True
+    assert data["settings"]["agent"]["os_sandbox"] == "auto"
+
+
+def test_os_sandbox_route_requires_token(api):
+    import urllib.request as _ur
+    url = f"http://127.0.0.1:{api['port']}/api/agent/os_sandbox"
+    req = _ur.Request(url, data=b"{}", method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with _ur.urlopen(req, timeout=10) as r:
+            st = r.status
+    except urllib.error.HTTPError as e:
+        st = e.code
+    assert st == 401
+
+
+def test_quota_breakdown_returns_list(api):
+    """v2.3.4-fix: /api/quota/breakdown must return a plain JSON array the
+    Usage modal can iterate (it used to 404, leaving "By provider" empty)."""
+    st, data = _get(api, "/api/quota/breakdown")
+    assert st == 200
+    assert isinstance(data, list)
+    for b in data:
+        assert "provider" in b
+        assert "cost" in b
+        assert "tokens" in b
+
+
+def test_token_optimization_tips_shape(api):
+    """v2.3.4-fix: /api/token_optimization/tips must return a structured
+    result (it used to 404, so the status-bar tip indicator never showed)."""
+    st, data = _get(api, "/api/token_optimization/tips")
+    assert st == 200
+    assert data.get("ok") is True
+    assert isinstance(data.get("tips"), list)
+    assert "total_potential_savings" in data
+
+
 def test_advanced_settings_save(api):
     st, data = _post(api, "/api/agent/advanced_settings/save", {"agent": {"max_iterations": 5}})
     assert st == 200

@@ -28,7 +28,16 @@ METRICS_REQUIRED = (
 )
 
 #: Optional metric fields — validated only when present (forward-compatible).
-METRICS_OPTIONAL = ("tokens_in", "tokens_out", "request_count", "cancelled")
+METRICS_OPTIONAL = (
+    "tokens_in", "tokens_out", "request_count", "cancelled",
+    # v2.3.4 (P1.8): evidence counters — provider/tool errors are counted
+    # separately so a green test suite is never confused with a clean run.
+    "provider_errors", "tool_errors",
+)
+
+#: Optional top-level evidence object — real telemetry for the run, no
+#: hidden tracking. Validated only when present (forward-compatible).
+EVIDENCE_KEYS = ("diff", "provider_errors", "tool_errors", "self_verify")
 
 RESULT_REQUIRED = (
     "schema_version",
@@ -115,6 +124,25 @@ def validate_result(result):
                 raise ValueError("metrics.cancelled must be boolean")
         elif not isinstance(metrics[field], int) or metrics[field] < 0:
             raise ValueError(f"metrics.{field} must be a non-negative integer")
+
+    # v2.3.4 (P1.8): optional evidence object (diff, error counters,
+    # self_verify result).
+    evidence = result.get("evidence")
+    if evidence is not None:
+        if not isinstance(evidence, dict):
+            raise ValueError("evidence must be a JSON object")
+        for key in evidence:
+            if key not in EVIDENCE_KEYS:
+                raise ValueError(f"unknown evidence key: {key!r}")
+        if evidence.get("diff") is not None and not isinstance(evidence["diff"], str):
+            raise ValueError("evidence.diff must be a string or null")
+        if evidence.get("self_verify") is not None and not isinstance(evidence["self_verify"], str):
+            raise ValueError("evidence.self_verify must be a string or null")
+        for key in ("provider_errors", "tool_errors"):
+            if evidence.get(key) is not None and (
+                not isinstance(evidence[key], int) or evidence[key] < 0
+            ):
+                raise ValueError(f"evidence.{key} must be a non-negative integer")
     if not isinstance(result["final_output"], str):
         raise ValueError("final_output must be a string (potentially sensitive field)")
     return True

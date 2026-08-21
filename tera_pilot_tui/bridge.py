@@ -204,8 +204,11 @@ class TeraPilotBridge:
         # Regular confirmation
         handler = self._confirm_handler
         if handler is None:
-            # No UI wired — approve so we do not deadlock the loop.
-            self.answer_confirmation(True)
+            # v2.3.4-security (P0.4): no UI wired — REJECT (fail closed)
+            # so a side-effecting action never runs silently. The agent
+            # sees "[REJECTED BY USER]" and moves on — no deadlock, and
+            # no silent fail-open.
+            self.answer_confirmation(False)
             return
         try:
             handler(dict(info))
@@ -230,20 +233,18 @@ class TeraPilotBridge:
         """Called by the UI after the user answers a Guardian modal.
 
         verdict: "approve" | "reject" | "use_fix"
+
+        v2.3.4-fix: the ToolEngine now actually waits on this answer via
+        ``respond_guardian()`` — previously the engine never invoked its
+        guardian callback, and this method poked private ``_confirm_*``
+        fields of a wait that could never be running, so the Guardian
+        modal's verdict had no effect at all.
         """
         agent = self._agent
         if agent is None:
             return
         try:
-            if verdict == "use_fix":
-                # Apply the suggested args
-                agent.tools._guardian_suggested_args = getattr(agent.tools, "_guardian_pending_args", None)
-                agent.tools._confirm_accepted = True
-            elif verdict == "approve":
-                agent.tools._confirm_accepted = True
-            else:  # reject
-                agent.tools._confirm_accepted = False
-            agent.tools._confirm_event.set()
+            agent.tools.respond_guardian(verdict)
         except Exception:
             pass
 

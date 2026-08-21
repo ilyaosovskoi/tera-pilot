@@ -2506,7 +2506,40 @@ def _agent_guardian(handler, body=None):
             handler.ctx.config["guardian_level"] = level
             from .api_server import _save_config
             _save_config(handler.ctx.config)
+        # v2.3.4-fix: apply the level to the live runtime so the GUI
+        # setting takes effect immediately. Previously it was persisted
+        # to config only — the engine's _guardian_config stayed None and
+        # Guardian never fired on the HTTP path.
+        try:
+            from .agent.guardian import GuardianConfig
+            rt = handler.ctx.get_agent_runtime(
+                handler.ctx.config.get("project_root") or os.getcwd()
+            )
+            old = getattr(rt.tools, "_guardian_config", None)
+            if old is not None:
+                rt.tools._guardian_config = GuardianConfig(
+                    level=level, provider_id=old.provider_id, model=old.model,
+                )
+            else:
+                rt.tools._guardian_config = GuardianConfig(level=level)
+        except Exception as g_err:
+            logger.warning("[api] guardian level not applied to runtime: %s", g_err)
         return _ok({"level": level})
+    except Exception as e:
+        return _err(str(e))
+
+
+@_post_route("/api/agent/os_sandbox")
+def _agent_os_sandbox(handler, body=None):
+    """P1.10: set the OS-sandbox mode (off | auto | on) for code/command
+    execution. 'auto' (default) enables the OS sandbox when a backend is
+    available; 'on' fails closed without one."""
+    body = body or {}
+    mode = body.get("mode") or (body.get("args") or [None])[0]
+    try:
+        from .os_sandbox import sanitize_mode
+        mode = sanitize_mode(mode)
+        return handler._save_advanced_agent_settings({"agent": {"os_sandbox": mode}})
     except Exception as e:
         return _err(str(e))
 
@@ -2740,6 +2773,90 @@ def _pricing_fetch(handler, body=None):
     """Live pricing requires a network pricing source; we ship a bundled
     snapshot, so report that honestly instead of pretending to refresh."""
     return _err("Live pricing source not configured — using bundled snapshot", count=0)
+
+
+# ════════════════════════════════════════════════════════════════════
+# Quota breakdown + token-optimization tips (Usage modal)
+# ════════════════════════════════════════════════════════════════════
+
+@_get_route("/api/quota/breakdown")
+def _quota_breakdown(handler, body=None):
+    """Per-provider token/cost aggregation for the Usage modal's "By
+    provider" bars. Returns a plain ARRAY (the frontend consumes it
+    directly, not a {ok:...} envelope). Previously this route 404'd and
+    the By-provider section stayed permanently empty in the browser GUI.
+    """
+    try:
+        from .token_tracker import get_token_tracker
+        stats = get_token_tracker().stats()
+        entries = stats.get("entries") or []
+        by_provider: Dict[str, Dict[str, Any]] = {}
+        for e in entries:
+            pid = e.get("provider") or "unknown"
+            b = by_provider.setdefault(pid, {
+                "provider": pid, "tokens": 0, "cost": 0.0, "requests": 0, "models": set(),
+            })
+            b["tokens"] += int(e.get("tokens_in", 0) or 0) + int(e.get("tokens_out", 0) or 0)
+            b["cost"] += float(e.get("cost", 0.0) or 0.0)
+            b["requests"] += 1
+            if e.get("model"):
+                b["models"].add(e["model"])
+        out = []
+        for b in by_provider.values():
+            b["models"] = sorted(b["models"])[:5]
+            out.append(b)
+        out.sort(key=lambda b: b["cost"], reverse=True)
+        return out
+    except Exception as e:
+        logger.warning("[api_ext] quota/breakdown failed: %s", e)
+        return []
+
+
+@_get_route("/api/token_optimization/tips")
+def _token_optimization_tips(handler, body=None):
+    """Data-informed token-optimization tips for the status-bar indicator.
+
+    Returns {ok, tips: [{type, title, detail, savings}], total_potential_savings}.
+    Previously this route 404'd, so the indicator never appeared even
+    though app.js polled it every 15s.
+    """
+    try:
+        from .token_tracker import get_token_tracker
+        stats = get_token_tracker().stats()
+        entries = stats.get("entries") or []
+        total_tokens = int(stats.get("total_tokens", 0) or 0)
+        tips = []
+        savings = 0
+        if total_tokens > 0:
+            if len(entries) > 40 and total_tokens > 30000:
+                tips.append({
+                    "type": "info",
+                    "title": "Many small requests",
+                    "detail": f"{len(entries)} calls so far. Batch related tasks into one agent run — each call re-sends the conversation context.",
+                    "savings": 0,
+                })
+                savings += int(total_tokens * 0.03)
+            prompt_tokens = int(stats.get("total_tokens_in", 0) or 0)
+            if total_tokens > 100000 and prompt_tokens > 0:
+                ratio = prompt_tokens / max(1, total_tokens)
+                if ratio > 0.7:
+                    tips.append({
+                        "type": "warning",
+                        "title": "Prompt-heavy usage",
+                        "detail": "Most tokens are prompt (context) tokens. Use /compact or /clear to shrink the conversation and cut re-send cost.",
+                        "savings": int(prompt_tokens * 0.1),
+                    })
+                    savings += int(prompt_tokens * 0.05)
+        if not tips and total_tokens > 0:
+            tips.append({
+                "type": "ok",
+                "title": "Usage looks lean",
+                "detail": "No obvious waste found in your token history.",
+                "savings": 0,
+            })
+        return _ok({"tips": tips, "total_potential_savings": savings})
+    except Exception as e:
+        return _err(str(e))
 
 
 # ════════════════════════════════════════════════════════════════════

@@ -5,7 +5,7 @@
 // v2.3.4: single frontend version constant. The About tab and the ready
 // toast prefer the LIVE backend version (status.version, from
 // tera_pilot/__init__.py) and fall back to this when opened standalone.
-const APP_VERSION = '2.3.4';
+const APP_VERSION = '2.3.5';
 
 window.__apiBase = null;  // Set by __teraPilotReady from the local API server
 // v1.0.5-security: bearer token for mutating endpoints on the local HTTP
@@ -752,9 +752,13 @@ if(agentModeToggle){
 async function checkAgentIntent(text){ return "action"; }
 
 async function handleSend(){
-  let text=composerInput.value.trim();if(!text)return;
+  // v2.3.4-fix (Stop button dead): the Stop branch must run BEFORE the
+  // empty-input guard. While the agent is generating, the composer was
+  // already cleared, so `let text=...; if(!text) return;` swallowed the
+  // Stop click — the button appeared to do nothing, no animation, and
+  // the agent kept running to completion.
   if(state.isGenerating){
-    state.isGenerating=false;updateSendButton();composerStatus.textContent='Stopped';hideActivity();
+    state.isGenerating=false;updateSendButton();composerStatus.textContent='Stopped';hideActivity();toast('Stopping agent…','warning');
     // v1.0.5-security: in agent mode, call stop_agent (cancels the agent
     // worker thread). Previously the Stop button only called
     // stop_generation, which doesn't touch the agent worker — so the
@@ -785,6 +789,8 @@ async function handleSend(){
     const msgs=chatView.querySelectorAll('.msg');const last=msgs[msgs.length-1];if(last){last.querySelector('.msg-body').classList.remove('stream-cursor')}
     return;
   }
+
+  let text=composerInput.value.trim();if(!text)return;
 
   // v1.0.9: slash commands — /context, /clear, /compact
   // These are handled locally (no LLM call) and show their result
@@ -942,6 +948,21 @@ async function handleSend(){
                 }
               }
               composerStatus.textContent='Waiting for diff review…';
+            }
+            // v2.3.4: generic action confirmation (execute_command /
+            // delete_file / ... under autonomy always_ask) over HTTP.
+            // Previously the agent never asked over HTTP (fail-open), so
+            // "Always ask" was silently bypassed in the browser GUI.
+            else if(data.type==='action_confirm'){
+              window.__pendingConfirmId = data.confirm_id;
+              showActionConfirm(data);
+              composerStatus.textContent='Waiting for approval…';
+            }
+            // v2.3.4: Guardian MODIFY-verdict review over HTTP.
+            else if(data.type==='guardian_review'){
+              window.__pendingGuardianId = data.review_id;
+              showGuardianConfirm(data);
+              composerStatus.textContent='Waiting for guardian review…';
             }
             else if(data.type==='error'){assistantEl.querySelector('.msg-body').textContent='Error: '+data.message;toast(data.message,'error');state.isGenerating=false;updateSendButton();composerStatus.textContent='Ready';assistantEl.querySelector('.msg-body').classList.remove('stream-cursor');hideActivity();if(window.__activateNeuralPixels)window.__activateNeuralPixels(false);if(window.__activateSynapse)window.__activateSynapse(false)}
           }catch(e){}}}
@@ -3048,8 +3069,9 @@ async function _renderToolsSub(body, id, meta, renderers){
 async function renderAgentTab(body){
   let autonomy='always_ask', diffReview=true;
   let guardianLevel='off';
+  let osSandbox='auto';
   if(isBackendAvailable()){
-    try{autonomy=await callBridge('get_agent_autonomy')}catch(e){}
+    try{const a=await callBridge('get_agent_autonomy');if(a&&a.ok&&a.agent){if(a.agent.autonomy)autonomy=a.agent.autonomy;if(a.agent.os_sandbox)osSandbox=a.agent.os_sandbox}}catch(e){}
     try{const s=await callBridge('get_settings');if(s&&typeof s.diff_review==='boolean')diffReview=s.diff_review}catch(e){}
     try{const g=await callBridge('get_guardian_level');if(g&&g.ok)guardianLevel=g.level||'off'}catch(e){}
   }
@@ -3062,6 +3084,11 @@ async function renderAgentTab(body){
     {id:'off',label:'Off',desc:'Guardian disabled. The agent uses only the autonomy rules above. Fastest, but no LLM safety review.'},
     {id:'dangerous_only',label:'Dangerous tools only (recommended)',desc:'An LLM reviewer inspects only high-risk tool calls (file paths in /etc, /usr, rm -rf, etc.) and can Approve / Reject / propose a safer alternative.'},
     {id:'all',label:'All tools',desc:'An LLM reviewer inspects every medium+ risk tool call. Most cautious; adds latency to each side-effecting action.'},
+  ];
+  const osSandboxModes=[
+    {id:'auto',label:'Auto (recommended)',desc:'Wrap every command / code run in the OS sandbox when a backend is available (macOS sandbox-exec / Linux bubblewrap): network denied, writes restricted to the workspace, ~/.ssh and other secrets unreadable. Runs unwrapped only when no backend exists.'},
+    {id:'on',label:'On — always',desc:'Require the OS sandbox and FAIL CLOSED (refuse to run) when no backend is available.'},
+    {id:'off',label:'Off',desc:'No OS-level isolation — the path sandbox, command policy and confirmations still apply. Needed only for commands that legitimately need network (git push/fetch, npm install).'},
   ];
   body.innerHTML=`
     <div class="settings-section">
@@ -3089,6 +3116,18 @@ async function renderAgentTab(body){
       </div>
     </div>
     <div class="settings-section">
+      <div class="settings-section-title">OS sandbox (code &amp; commands)</div>
+      <div class="provider-config-card" style="margin-bottom:0">
+        <div style="display:flex;flex-direction:column;gap:var(--s-8)">
+          ${osSandboxModes.map(l=>`
+            <label class="autonomy-option${osSandbox===l.id?' selected':''}" data-os-sandbox="${l.id}" style="display:flex;gap:var(--s-12);align-items:flex-start;padding:var(--s-12);border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer">
+              <input type="radio" name="osSandboxMode" value="${l.id}" ${osSandbox===l.id?'checked':''} style="margin-top:2px">
+              <div><div style="font-weight:600;font-size:13px">${l.label}</div><div style="font-size:12px;color:var(--text-secondary);margin-top:2px">${l.desc}</div></div>
+            </label>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div class="settings-section">
       <div class="settings-section-title">File writes</div>
       <div class="toggle-row">
         <div><div style="font-weight:500;font-size:13px">Show diff before writing files</div><div style="font-size:12px;color:var(--text-muted)">Review a green/red diff and approve it before write_file or str_replace touches disk.</div></div>
@@ -3110,6 +3149,15 @@ async function renderAgentTab(body){
       body.querySelectorAll('.autonomy-option[data-guardian]').forEach(el=>el.classList.toggle('selected',el.dataset.guardian===level));
       if(!isBackendAvailable()){toast('Backend not connected','error');return}
       try{await callBridge('set_guardian_level',level);toast('Guardian level set to '+level.replace(/_/g,' '),'success')}
+      catch(e){toast('Failed: '+e.message,'error')}
+    });
+  });
+  body.querySelectorAll('input[name="osSandboxMode"]').forEach(inp=>{
+    inp.addEventListener('change',async()=>{
+      const mode=inp.value;
+      body.querySelectorAll('.autonomy-option[data-os-sandbox]').forEach(el=>el.classList.toggle('selected',el.dataset.osSandbox===mode));
+      if(!isBackendAvailable()){toast('Backend not connected','error');return}
+      try{await callBridge('set_os_sandbox',mode);toast('OS sandbox set to '+mode,'success')}
       catch(e){toast('Failed: '+e.message,'error')}
     });
   });
@@ -3931,7 +3979,7 @@ function _loadPluginAssets(){
     })
     .catch(function(e){console.warn('[tera_pilot] plugin asset load failed',e)});
 }
-window.__teraPilotReady=function(status){console.log('[tera_pilot] backend ready',status);if(status.api_base)window.__apiBase=status.api_base;else if(status.api_port)window.__apiBase='http://127.0.0.1:'+status.api_port;if(status.api_token)window.__apiToken=status.api_token;if(status.project){state.projectRoot=status.project;updateProjectBreadcrumb();updateAgentModeToggleUI()}_loadPluginAssets()};
+window.__teraPilotReady=function(status){console.log('[tera_pilot] backend ready',status);if(status.api_base)window.__apiBase=status.api_base;else if(status.api_port)window.__apiBase='http://127.0.0.1:'+status.api_port;var _tok=status.api_token||window.__TERA_PILOT_TOKEN||null;if(_tok)window.__apiToken=_tok;if(status.project){state.projectRoot=status.project;updateProjectBreadcrumb();updateAgentModeToggleUI()}_loadPluginAssets()};
 
 // v1.0.4: called from main_window.py after Ctrl+O picks a new project folder
 window.__teraPilotProjectOpened=function(result){
@@ -4114,6 +4162,12 @@ function showDiffReview(info){
 // v1.1.1: generic action confirmation modal — shown for execute_command /
 // delete_file / rename_file / apply_diff / write_binary_file / git_commit,
 // gated by the agent_autonomy setting (Settings → Agent → Autonomy).
+// v2.3.4-fix: the buttons now answer the HTTP-path confirmation directly
+// (POST /api/action/respond with the SSE-issued confirm_id). Previously
+// they called respond_action_confirm, whose route did not exist on the
+// backend — and the agent never even asked over HTTP (fail-open), so
+// "Always ask" autonomy was silently bypassed. The SSE handler in
+// handleSend() sets window.__pendingConfirmId from the agent stream.
 function showActionConfirm(info){
   const modal=document.getElementById('actionConfirmModal');
   const typeEl=document.getElementById('actionConfirmType');
@@ -4128,8 +4182,26 @@ function showActionConfirm(info){
   // pattern as the diff-review modal above.
   const newAllow=allowBtn.cloneNode(true);allowBtn.parentNode.replaceChild(newAllow,allowBtn);
   const newDeny=denyBtn.cloneNode(true);denyBtn.parentNode.replaceChild(newDeny,denyBtn);
-  newAllow.addEventListener('click',()=>{modal.style.display='none';if(isBackendAvailable())callBridge('respond_action_confirm',true)});
-  newDeny.addEventListener('click',()=>{modal.style.display='none';if(isBackendAvailable())callBridge('respond_action_confirm',false);toast('Action denied','warning')});
+  newAllow.addEventListener('click',()=>{
+    modal.style.display='none';
+    _respondActionConfirm(true, info.confirm_id || window.__pendingConfirmId);
+    toast('Action allowed','success');
+  });
+  newDeny.addEventListener('click',()=>{
+    modal.style.display='none';
+    _respondActionConfirm(false, info.confirm_id || window.__pendingConfirmId);
+    toast('Action denied','warning');
+  });
+}
+
+// v2.3.4: answer an action-confirm over the HTTP path; falls back to the
+// legacy bridge method (which the shim maps to the same route).
+function _respondActionConfirm(accepted, confirmId){
+  if(window.__apiBase){
+    fetch(window.__apiBase+'/api/action/respond',{method:'POST',headers:_apiHeaders(),body:JSON.stringify({accepted:!!accepted,confirm_id:confirmId||''})}).catch(function(e){console.warn('[tera_pilot] action respond failed:',e)});
+    return;
+  }
+  if(isBackendAvailable())callBridge('respond_action_confirm',!!accepted);
 }
 
 // v1.2: Guardian Safety Review modal — shown for risky tool calls with MODIFY verdict
@@ -4149,7 +4221,9 @@ function showGuardianConfirm(info){
 
   actionEl.textContent=(info.action||'action').replace(/_/g,' ');
   verdictEl.textContent='VERDICT: '+(info.guardian_verdict||'MODIFY');
-  summaryEl.textContent=info.summary||'';
+  // v2.3.4: the SSE guardian event carries the tool args (no legacy
+  // `summary` field), so fall back to rendering the args as the summary.
+  summaryEl.textContent=info.summary || JSON.stringify(info.args||{}).slice(0,400);
 
   // Rationale (optional)
   if(info.rationale){
@@ -4178,16 +4252,27 @@ function showGuardianConfirm(info){
 
   newApprove.addEventListener('click',()=>{
     modal.style.display='none';
-    if(isBackendAvailable())callBridge('respond_guardian_review','approve');
+    _respondGuardianReview('approve', info.review_id || window.__pendingGuardianId);
   });
   newReject.addEventListener('click',()=>{
     modal.style.display='none';
-    if(isBackendAvailable())callBridge('respond_guardian_review','reject');toast('Guardian review rejected','warning');
+    _respondGuardianReview('reject', info.review_id || window.__pendingGuardianId);
+    toast('Guardian review rejected','warning');
   });
   newUseFix.addEventListener('click',()=>{
     modal.style.display='none';
-    if(isBackendAvailable())callBridge('respond_guardian_review','use_fix');
+    _respondGuardianReview('use_fix', info.review_id || window.__pendingGuardianId);
   });
+}
+
+// v2.3.4: answer a guardian review over the HTTP path; falls back to the
+// legacy bridge method (which the shim maps to the same route).
+function _respondGuardianReview(verdict, reviewId){
+  if(window.__apiBase){
+    fetch(window.__apiBase+'/api/guardian/respond',{method:'POST',headers:_apiHeaders(),body:JSON.stringify({verdict:verdict,review_id:reviewId||''})}).catch(function(e){console.warn('[tera_pilot] guardian respond failed:',e)});
+    return;
+  }
+  if(isBackendAvailable())callBridge('respond_guardian_review',verdict);
 }
 
 // Connect Guardian signal from bridge
@@ -5522,13 +5607,16 @@ window.finalizeMessage = function(result) {
   // ── Send a Heavy Code message ─────────────────────────────────
   async function sendHCMessage() {
     if (!hcComposerInput) return;
-    const text = hcComposerInput.value.trim();
-    if (!text) return;
 
+    // v2.3.4-fix (same bug as the main composer): the cancel branch must
+    // run BEFORE the empty-input guard — the HC composer is cleared while
+    // generating, so `if (!text) return;` used to swallow the Stop click
+    // and the Heavy Code agent kept running.
     if (hcIsGenerating) {
       // Cancel
       hcIsGenerating = false;
       updateHCSendBtn();
+      toast('Stopping agent…', 'warning');
       if (isBackendAvailable()) {
         callBridge('stop_agent').catch(() => {});
         // v1.1.1: also cancel via HTTP (the HC agent runs via HTTP path)
@@ -5541,6 +5629,9 @@ window.finalizeMessage = function(result) {
       }
       return;
     }
+
+    const text = hcComposerInput.value.trim();
+    if (!text) return;
 
     if (!isBackendAvailable()) {
       toast('Backend not connected', 'error');
@@ -5693,6 +5784,48 @@ window.finalizeMessage = function(result) {
     }
     if (data.type === 'done') {
       if (data.text) bodyEl.textContent = data.text;
+      return;
+    }
+    // v2.3.4: Heavy Code runs over the same /api/agent/stream endpoint, so
+    // it can pause on diff review / action confirmation / guardian review
+    // too. Route them to the SAME modals the main chat uses (they answer
+    // via POST to the HTTP endpoints, which unblock whichever agent thread
+    // is waiting). Previously these events were ignored here, so a Heavy
+    // Code run stalled for the full 300s review timeout with no dialog.
+    if (data.type === 'diff_review') {
+      window.__pendingReviewId = data.review_id;
+      showDiffReview(data);
+      var dmod = document.getElementById('diffModal');
+      if (dmod) {
+        var dApply = document.getElementById('diffApply');
+        var dReject = document.getElementById('diffReject');
+        if (dApply) {
+          var ndA = dApply.cloneNode(true); dApply.parentNode.replaceChild(ndA, dApply);
+          ndA.addEventListener('click', async () => {
+            dmod.style.display = 'none';
+            try { await fetch(window.__apiBase + '/api/agent/diff_review', { method: 'POST', headers: _apiHeaders(), body: JSON.stringify({ accepted: true, review_id: window.__pendingReviewId }) }); } catch (e) {}
+            toast('Change applied', 'success');
+          });
+        }
+        if (dReject) {
+          var ndR = dReject.cloneNode(true); dReject.parentNode.replaceChild(ndR, dReject);
+          ndR.addEventListener('click', async () => {
+            dmod.style.display = 'none';
+            try { await fetch(window.__apiBase + '/api/agent/diff_review', { method: 'POST', headers: _apiHeaders(), body: JSON.stringify({ accepted: false, review_id: window.__pendingReviewId }) }); } catch (e) {}
+            toast('Change rejected', 'warning');
+          });
+        }
+      }
+      return;
+    }
+    if (data.type === 'action_confirm') {
+      window.__pendingConfirmId = data.confirm_id;
+      showActionConfirm(data);
+      return;
+    }
+    if (data.type === 'guardian_review') {
+      window.__pendingGuardianId = data.review_id;
+      showGuardianConfirm(data);
       return;
     }
     if (data.type === 'error') {

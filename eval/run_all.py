@@ -145,9 +145,11 @@ def run_one(task_id: str, manifest: dict, api_base: str, api_token: str,
         test_res = er.run_test_command(
             workspace, manifest.get("test_command"), manifest.get("test_timeout_secs", 120)
         )
+        # v2.3.4 (P1.8): record the ACTUAL diff the agent produced.
+        diff = er.compute_workspace_diff(manifest, workspace)
         result = er.build_result(
             manifest, driver_out, test_res, base_hash, base_commit,
-            "api", 0.0, baseline,
+            "api", 0.0, baseline, diff=diff,
         )
         schema.validate_result(result)
         return result
@@ -245,6 +247,11 @@ def main(argv=None) -> int:
                    help="per-task wall-clock deadline in seconds "
                         "(default: manifest timeout_secs + 120)")
     p.add_argument("--keep-workspace", action="store_true")
+    # v2.3.4 (P1.6): run each selected task N times on fresh workspaces —
+    # the plan's "5-10 repeats per task on one model". Each repeat gets
+    # its own clean workspace and its own result file.
+    p.add_argument("--repeat", type=int, default=1,
+                   help="run each task N times on fresh workspaces (default 1)")
     args = p.parse_args(argv)
 
     out_dir = Path(args.out)
@@ -267,22 +274,25 @@ def main(argv=None) -> int:
     try:
         results = []
         t_start = time.time()
+        repeat = max(1, int(args.repeat or 1))
         for i, (task_id, manifest) in enumerate(selected, 1):
             # Skip if a result for this task already exists.
             if args.skip_existing and any(out_dir.glob(f"{task_id}_*.json")):
                 print(f"[{i}/{len(selected)}] {task_id}: already has a result — skipping")
                 continue
-            print(f"[{i}/{len(selected)}] running {task_id} ...", flush=True)
-            t0 = time.time()
-            try:
-                result = run_one(
-                    task_id, manifest, api_base, api_token, out_dir,
-                    timeout_secs=args.task_timeout,
-                )
-            except Exception as e:
-                print(f"  ! {task_id} FAILED to run: {e}", file=sys.stderr)
-                continue
-            dt = time.time() - t0
+            for r in range(1, repeat + 1):
+                label = task_id if repeat == 1 else f"{task_id} (repeat {r}/{repeat})"
+                print(f"[{i}/{len(selected)}] running {label} ...", flush=True)
+                t0 = time.time()
+                try:
+                    result = run_one(
+                        task_id, manifest, api_base, api_token, out_dir,
+                        timeout_secs=args.task_timeout,
+                    )
+                except Exception as e:
+                    print(f"  ! {task_id} FAILED to run: {e}", file=sys.stderr)
+                    continue
+                dt = time.time() - t0
             # Driver doesn't report duration — time it here.
             result["metrics"]["duration_sec"] = round(dt, 3)
             fname = f"{task_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{__import__('uuid').uuid4().hex[:6]}.json"

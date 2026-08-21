@@ -141,9 +141,36 @@ class ToolEngine:
         #                      brand-new path; everything else asks
         #   'never_ask'      — never ask (previous, implicit default)
         self.autonomy: str = "always_ask"
+        # v2.3.4-security (P0.4): headless confirmation policy — what to
+        # do when a confirmation is requested but NO UI callback is wired
+        # (daemon, ACP, embedded use). 'fail_closed' (default): the action
+        # is BLOCKED and logged loudly — silent fail-open would let
+        # side-effecting actions run with zero human oversight. 'allow':
+        # explicit opt-in for headless automation (daemon/ACP pass
+        # --no-confirm / --allow-dangerous to set this).
+        self.headless_confirm: str = "fail_closed"
+        # v2.3.4-security (P1.10): OS-level sandbox mode for code/command
+        # execution — 'off' | 'auto' | 'on'. 'auto' (default) wraps
+        # execute_command / run_code / detected test-lint commands in the
+        # OS sandbox (sandbox-exec on macOS, bubblewrap on Linux) when a
+        # backend is available: network denied, writes restricted to the
+        # workspace + tmp, sensitive paths unreadable. 'on' FAILS CLOSED
+        # when no backend exists. Overridable via env TERA_PILOT_OS_SANDBOX
+        # and the config key agent_os_sandbox.
+        self.os_sandbox: str = os.environ.get("TERA_PILOT_OS_SANDBOX", "auto")
         self._confirm_callback: Optional[Callable] = None
         self._confirm_event = threading.Event()
         self._confirm_accepted: Optional[bool] = None
+        # v2.3.4: Guardian MODIFY-verdict review state. When a UI callback
+        # is wired (set_guardian_callback), a MODIFY verdict pauses the
+        # tool call and asks the user to approve the ORIGINAL call, reject
+        # it, or apply the guardian's suggested fix — instead of silently
+        # applying the fix. Previously _guardian_callback was never invoked
+        # anywhere, so the suggested args were applied without any review
+        # and the UI's Guardian modal could never open.
+        self._guardian_callback: Optional[Callable] = None
+        self._guardian_event = threading.Event()
+        self._guardian_decision: Optional[str] = None  # approve | reject | use_fix
         # v1.1.1: cooperative cancellation. AgentWorker hands us a
         # zero-arg callable that returns True once the user has clicked
         # Stop — we poll it between iterations AND while blocked waiting
@@ -336,6 +363,15 @@ class ToolEngine:
         self._confirm_accepted = accepted
         self._confirm_event.set()
 
+    def respond_guardian(self, decision: str) -> None:
+        """Called from the main thread when the user answers a Guardian
+        MODIFY-verdict review: "approve" (run the original call),
+        "reject", or "use_fix" (apply the guardian's suggested args)."""
+        if decision not in ("approve", "reject", "use_fix"):
+            decision = "reject"
+        self._guardian_decision = decision
+        self._guardian_event.set()
+
     def _request_confirmation(self, action: str, summary: str, is_new: bool = False) -> bool:
         """Ask the UI to confirm a side-effecting action that ISN'T
         already covered by diff-review, honoring the configured autonomy
@@ -352,10 +388,23 @@ class ToolEngine:
         if self.is_cancelled():
             return False
         if not self._confirm_callback:
-            # No UI wired up (e.g. headless use) — fail open so we don't
-            # deadlock the caller, but log loudly so it's not silent.
-            logger.warning("[agent] confirmation requested but no UI callback wired — allowing: %s", action)
-            return True
+            # No UI wired up (headless: daemon/ACP/embedded). P0.4: fail
+            # CLOSED by default — a side-effecting action must not run
+            # silently with zero human oversight. The only way through is
+            # an explicit opt-in (``headless_confirm = 'allow'``, set by
+            # the daemon/ACP --no-confirm / --allow-dangerous flag).
+            if self.headless_confirm == "allow":
+                logger.warning(
+                    "[agent] confirmation requested but no UI callback wired — "
+                    "headless auto-approve enabled (--no-confirm): %s", action,
+                )
+                return True
+            logger.error(
+                "[agent] confirmation requested but no UI callback wired — "
+                "BLOCKING %s (headless fail-closed; pass --no-confirm to "
+                "the daemon/ACP to auto-approve)", action,
+            )
+            return False
         self._confirm_event.clear()
         self._confirm_accepted = None
         self._confirm_callback({"action": action, "summary": summary})
@@ -363,6 +412,50 @@ class ToolEngine:
         if not ok:
             return False
         return bool(self._confirm_accepted)
+
+    def _sandboxed_args(self, args: List[str]) -> Optional[List[str]]:
+        """Wrap argv in the OS-level sandbox (P1.10) when enabled.
+
+        Returns the wrapped argv, or None when the sandbox is REQUIRED
+        (mode 'on') but unavailable — the caller must then refuse to run.
+        """
+        try:
+            from tera_pilot.os_sandbox import wrap_command
+            wrapped, backend = wrap_command(
+                args,
+                str(self.workspace) if self.workspace else None,
+                self.os_sandbox,
+            )
+            if backend:
+                logger.debug(
+                    "[os_sandbox] wrapping %s with backend %s (mode=%s)",
+                    args[0] if args else "?", backend, self.os_sandbox,
+                )
+            return wrapped
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error("[os_sandbox] wrapper failed: %s", exc)
+            if self.os_sandbox == "on":
+                return None
+            return list(args)
+
+    def _emit(self, event, **data) -> None:
+        """Forward an AgentEvent to the wired UI callback.
+
+        v2.3.4-fix: this method was USED by _guardian_review (GUARDIAN_REVIEW
+        events) but never DEFINED on ToolEngine — so the very first
+        ``self._emit(...)`` in a guardian review raised AttributeError,
+        which ``execute()`` swallowed as "Guardian review failed
+        (non-reject)". Net effect: Guardian never actually blocked or
+        modified anything on ANY surface (TUI included), the risk
+        assessment was computed and then thrown away. Mirror the
+        AgentRuntime._emit contract: forward to ``on_event`` if wired.
+        """
+        cb = getattr(self, "on_event", None)
+        if cb is not None:
+            try:
+                cb(event, data)
+            except Exception as e:
+                logger.debug("Event callback error: %s", e)
 
     def _guardian_review(self, tool_name: str, args: dict[str, Any]) -> None:
         """Run Guardian risk assessment and optional LLM review.
@@ -456,10 +549,14 @@ class ToolEngine:
             provider = self._registry.active
 
         if provider is None:
-            logger.warning("guardian: no provider available, defaulting to APPROVE")
+            # P0.4-security: fail CLOSED — an unavailable LLM must not
+            # silently approve the risky call. The rule-based risk
+            # assessment already flagged this call as worth reviewing;
+            # with no reviewer we reject rather than approve.
+            logger.warning("guardian: no provider available — REJECTING call (fail closed)")
             verdict = GuardianVerdict(
-                verdict="APPROVE",
-                rationale="No LLM provider available — defaulting to approve",
+                verdict="REJECT",
+                rationale="No LLM provider available — defaulting to reject (fail closed)",
                 suggested_args=None,
             )
         else:
@@ -492,33 +589,68 @@ class ToolEngine:
                     # Parse JSON from response
                     verdict = _parse_verdict(raw)
                     if verdict is None:
-                        logger.warning("guardian: failed to parse verdict from LLM, defaulting to APPROVE")
+                        # P0.4-security: an unparseable review is a failed
+                        # review — fail CLOSED (reject) instead of silently
+                        # approving the risky call.
+                        logger.warning(
+                            "guardian: failed to parse verdict from LLM — REJECTING call (fail closed)"
+                        )
                         verdict = GuardianVerdict(
-                            verdict="APPROVE",
-                            rationale="LLM response unparseable — defaulting to approve",
+                            verdict="REJECT",
+                            rationale="LLM response unparseable — defaulting to reject (fail closed)",
                             suggested_args=None,
                         )
                     breaker.record(ok=True)
                 except Exception as e:
                     logger.exception("guardian: LLM call failed: %s", e)
                     breaker.record(ok=False, rate_limited=_looks_like_rate_limit(e))
-                    # Default behavior on error
+                    # P0.4-security: an LLM error must NOT silently approve
+                    # a risky call — fail CLOSED (reject). The old default
+                    # was APPROVE, which made Guardian a rubber stamp any
+                    # time the reviewer provider hiccuped.
                     verdict = GuardianVerdict(
-                        verdict="APPROVE",
-                        rationale=f"LLM error — defaulting to approve: {e}",
+                        verdict="REJECT",
+                        rationale=f"LLM error — defaulting to reject (fail closed): {e}",
                         suggested_args=None,
                     )
 
-        # Store pending args for UI to apply on "use_fix"
+        # v2.3.4-fix: MODIFY verdict — do NOT silently apply the suggested
+        # fix. When a UI callback is wired, pause and ask the user to
+        # approve the ORIGINAL call, reject it, or apply the suggested fix
+        # ("use_fix"). Headless runs (no UI wired — eval harness, daemon)
+        # keep the previous auto-apply behavior. Previously
+        # _guardian_callback was never invoked, so every MODIFY verdict
+        # mutated the tool args invisibly and the UI's Guardian review
+        # modal could never open.
         if verdict.verdict == "MODIFY" and verdict.suggested_args:
             self._guardian_pending_args = verdict.suggested_args
+            if self._guardian_callback is not None:
+                self._guardian_event.clear()
+                self._guardian_decision = None
+                self._guardian_callback({
+                    "action": tool_name,
+                    "args": dict(args),
+                    "guardian_verdict": "MODIFY",
+                    "suggested_args": dict(verdict.suggested_args),
+                    "rationale": verdict.rationale,
+                    "risk_level": risk.level,
+                    "reasons": risk.reasons,
+                })
+                ok = self._wait_interruptible(self._guardian_event, timeout=300)
+                decision = self._guardian_decision if ok else "reject"
+                self._guardian_decision = None
+                if decision == "reject":
+                    self._guardian_pending_args = None
+                    raise RuntimeError(f"Guardian rejected: {verdict.rationale}")
+                if decision == "use_fix":
+                    args.clear()
+                    args.update(verdict.suggested_args)
+                # "approve" → leave the ORIGINAL args untouched
+            else:
+                args.clear()
+                args.update(verdict.suggested_args)
         else:
             self._guardian_pending_args = None
-
-        # Update call.args if MODIFY
-        if verdict.verdict == "MODIFY" and verdict.suggested_args:
-            args.clear()
-            args.update(verdict.suggested_args)
 
         # Emit final event
         self._emit(
@@ -969,6 +1101,19 @@ class ToolEngine:
             ):
                 return f"[REJECTED BY USER] {path} — write cancelled"
 
+        # v2.3.4-security (P0.4): when diff review is enabled but the
+        # file is brand-new there is no diff to review — previously the
+        # write went through with NO gate at all. Honor autonomy via
+        # _request_confirmation (is_new, so 'new_files_only' auto-
+        # approves creation).
+        if self.diff_review_enabled and not p.exists():
+            if not self._request_confirmation(
+                "write_file",
+                f"Create file: {path}",
+                is_new=True,
+            ):
+                return f"[REJECTED BY USER] {path} — write cancelled"
+
         # v1.0.4: diff-review — pause and ask UI if enabled.
         # v1.0.5-correctness: fail-open when no UI callback is wired
         # (headless mode, test harness, CLI use). Previously the wait
@@ -979,12 +1124,21 @@ class ToolEngine:
             diff_text = _compute_diff_text(path, original, content)
             if diff_text:  # only ask if there are actual changes
                 if self._diff_review_callback is None:
-                    # No UI wired — fail open (mirror _request_confirmation's
-                    # behaviour at line ~516). Log loudly so it's not silent.
-                    logger.warning(
-                        "[agent] diff-review requested for %s but no UI callback "
-                        "wired — applying write (headless mode)", path,
-                    )
+                    # No UI wired (headless daemon/ACP/embedding) — P0.4:
+                    # fail CLOSED by default, never silently apply. Route
+                    # through _request_confirmation so autonomy + the
+                    # headless_confirm policy decide (the default
+                    # 'fail_closed' blocks the write; the explicit
+                    # --no-confirm opt-in auto-approves). The old code
+                    # applied the write with NO gate at all, which let a
+                    # headless run overwrite existing files silently even
+                    # when the operator did NOT pass --no-confirm.
+                    if not self._request_confirmation(
+                        "write_file",
+                        f"Overwrite file: {path}",
+                        is_new=False,
+                    ):
+                        return f"[REJECTED BY USER] {path} — write cancelled"
                 else:
                     self._diff_review_event.clear()
                     self._diff_review_accepted = None
@@ -1090,11 +1244,16 @@ class ToolEngine:
             diff_text = _compute_diff_text(path, original, patched)
             if diff_text:
                 if self._diff_review_callback is None:
-                    # No UI wired — fail open (headless mode).
-                    logger.warning(
-                        "[agent] diff-review requested for %s but no UI callback "
-                        "wired — applying str_replace (headless mode)", path,
-                    )
+                    # No UI wired (headless daemon/ACP/embedding) — P0.4:
+                    # fail CLOSED by default, never silently apply (same
+                    # rule as _write_file). Previously this applied the
+                    # edit with NO gate at all.
+                    if not self._request_confirmation(
+                        "str_replace",
+                        f"Edit file: {path}",
+                        is_new=False,
+                    ):
+                        return f"[REJECTED BY USER] {path} — str_replace cancelled"
                 else:
                     self._diff_review_event.clear()
                     self._diff_review_accepted = None
@@ -1197,6 +1356,12 @@ class ToolEngine:
 
     def _mkdir(self, path: str) -> str:
         p = self._resolve_path(path)
+        # v2.3.4-security (P0.4): mkdir is a side effect — under
+        # autonomy='always_ask' it must be confirmed like every other
+        # change (previously it ran unconditionally). Marked is_new so
+        # 'new_files_only' autonomy auto-approves directory creation.
+        if not self._request_confirmation("mkdir", f"Create directory: {path}", is_new=True):
+            return f"[REJECTED BY USER] {path} — mkdir cancelled"
         p.mkdir(parents=True, exist_ok=True)
         return f"[MKDIR] {path}"
 
@@ -1213,7 +1378,15 @@ class ToolEngine:
     def _write_binary_file(self, path: str, content: str) -> str:
         p = self._resolve_path(path)
         is_new = not p.exists()
-        if not is_new and not self._request_confirmation("write_binary_file", f"Overwrite binary file: {path}"):
+        # v2.3.4-security (P0.4): confirm BOTH new and overwrite under
+        # 'always_ask' (previously only overwrites were gated, so a brand-
+        # new binary file was written silently). 'new_files_only' still
+        # auto-approves creation via is_new.
+        if not self._request_confirmation(
+            "write_binary_file",
+            f"{'Create' if is_new else 'Overwrite'} binary file: {path}",
+            is_new=is_new,
+        ):
             return f"[REJECTED BY USER] {path} — write cancelled"
         p.parent.mkdir(parents=True, exist_ok=True)
         if p.exists() and p.is_file():
@@ -1336,6 +1509,13 @@ class ToolEngine:
         if not git:
             return "[GIT ERROR] not a git repository"
         try:
+            # v2.3.4-security (P0.4): staging is a side effect on git
+            # state — confirm under 'always_ask' like git_commit.
+            if not self._request_confirmation(
+                "git_stage",
+                f"Stage files in git: {len(paths) if paths else 'all changes'}",
+            ):
+                return "[REJECTED BY USER] git_stage cancelled"
             if not paths:
                 ok = git.stage_all()
                 return "[GIT] staged all changes" if ok else "[GIT ERROR] stage_all failed"
@@ -2329,9 +2509,19 @@ class ToolEngine:
             "Run detected test/lint command: " + " ".join(args),
         ):
             return "[REJECTED BY USER] test/lint command cancelled"
+        # v2.3.4-security (P1.10): OS-level sandbox around the detected
+        # test/lint command — a malicious repo's own test script is the
+        # classic payload vector, so it runs network-denied and with
+        # writes restricted to the workspace.
+        sandboxed_argv = self._sandboxed_args(list(args))
+        if sandboxed_argv is None:
+            return (
+                "[SECURITY ERROR] OS sandbox requested (mode=on) but no backend "
+                "available — refusing to run test/lint command unsandboxed."
+            )
         try:
             proc = subprocess.Popen(
-                args, shell=False,
+                sandboxed_argv, shell=False,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 cwd=self.workspace,
             )
@@ -2607,8 +2797,17 @@ class ToolEngine:
                 # for up to RUN_TIMEOUT with no cancellation.
                 # v2.1.0 (Loop 2): use configurable per-call timeout
                 # instead of the global RUN_TIMEOUT constant.
+                # v2.3.4-security (P1.10): OS-level sandbox — run_code is
+                # the highest-exfiltration-risk surface, so it runs
+                # network-denied with writes limited to workspace + tmp.
+                sandboxed_argv = self._sandboxed_args(cmd)
+                if sandboxed_argv is None:
+                    return (
+                        "[SECURITY ERROR] OS sandbox requested (mode=on) but no "
+                        "backend available — refusing to run code unsandboxed."
+                    )
                 proc = subprocess.Popen(
-                    cmd, shell=False,
+                    sandboxed_argv, shell=False,
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     cwd=tmpdir, env=sandbox_env,
                 )
@@ -2794,14 +2993,21 @@ class ToolEngine:
             p = self._resolve_path(path)
             if not p.exists():
                 return f"[FILE NOT FOUND] {path}"
-            if not self._request_confirmation("apply_diff", f"Patch: {path}"):
-                return f"[REJECTED BY USER] {path} — apply_diff cancelled"
 
             # v1.0.6: multi-file diff support (M-RT-3). If the diff
             # contains --- a/ / +++ b/ headers for MULTIPLE files, split
             # and apply each file's hunks separately. Otherwise apply
             # as a single-file diff (backward compat).
             files_diffs = _split_multi_file_diff(diff)
+            if len(files_diffs) > 1:
+                # v2.3.4-security (P0.4): surface the scope of a multi-
+                # file patch in the confirmation summary so the user
+                # knows the ONE confirm covers N files.
+                summary = f"Patch: {path} ({len(files_diffs)} files)"
+            else:
+                summary = f"Patch: {path}"
+            if not self._request_confirmation("apply_diff", summary):
+                return f"[REJECTED BY USER] {path} — apply_diff cancelled"
             if len(files_diffs) == 1:
                 # Single-file diff (or no file headers at all)
                 original = p.read_text(encoding="utf-8")
@@ -3046,12 +3252,22 @@ class ToolEngine:
         except Exception:
             pass  # never break execution on hardening failure
 
+        # v2.3.4-security (P1.10): OS-level sandbox (network denied,
+        # writes restricted to the workspace, sensitive paths hidden).
+        sandboxed_argv = self._sandboxed_args(exec_args)
+        if sandboxed_argv is None:
+            return (
+                "[SECURITY ERROR] OS sandbox requested (mode=on) but no "
+                "backend available (need sandbox-exec on macOS or bwrap "
+                "on Linux) — refusing to run unsandboxed."
+            )
+
         try:
             # v1.0.6: use Popen + polling so Stop can abort the
             # subprocess (M-RT-7). subprocess.run blocks up to
             # timeout with no cancellation path.
             proc = subprocess.Popen(
-                exec_args, shell=False,
+                sandboxed_argv, shell=False,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 cwd=self.workspace,
             )
@@ -3258,20 +3474,24 @@ class ToolEngine:
                 f"[WEB_FETCH ERROR] only http(s) URLs are allowed "
                 f"(got {url[:80]!r})"
             )
-        # v2.3.4-security: block loopback targets. The local API server
-        # exposes its bearer token at GET /api/status (and other local
-        # services may hold secrets) — a prompt-injected agent could
-        # fetch http://127.0.0.1:<port>/api/status to read api_token and
-        # exfiltrate it (T5). The agent never needs to fetch localhost.
+        # v2.3.4-security: block internal targets (P0.2). The local API
+        # server holds secrets (and other local services may too) — a
+        # prompt-injected agent could fetch http://127.0.0.1:<port>/api/status
+        # to read the token and exfiltrate it (T5). This fast pre-check
+        # rejects literal loopback/private/link-local IPs (IPv4 + IPv6)
+        # and localhost names WITHOUT any DNS lookup; hostnames that only
+        # RESOLVE to an internal address (DNS rebinding) are caught by
+        # ``_check_fetch_target`` inside ``fetch_url_as_text``, which also
+        # re-validates every redirect hop.
         try:
             from urllib.parse import urlparse as _urlparse
+            from tera_pilot.web_search_backend import _looks_like_internal_host
             _host = (_urlparse(url).hostname or "").lower()
-            _loopback = {"localhost", "127.0.0.1", "::1"}
-            if _host in _loopback or _host.startswith("127."):
+            if _looks_like_internal_host(_host):
                 return (
-                    f"[WEB_FETCH REJECTED] loopback address {_host!r} — "
+                    f"[WEB_FETCH REJECTED] internal/loopback address {_host!r} — "
                     f"the agent cannot fetch local services (prevents "
-                    f"reading the local API token)"
+                    f"reading the local API token and SSRF)"
                 )
         except Exception:
             pass

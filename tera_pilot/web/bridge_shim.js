@@ -144,6 +144,7 @@
       'token_optimization_tips':'/api/token_optimization/tips',
       'set_agent_autonomy':    '/api/agent/autonomy',
       'set_guardian_level':    '/api/agent/guardian',
+      'set_os_sandbox':        '/api/agent/os_sandbox',
       'set_diff_review':       '/api/agent/diff_review',
       'health_check':          '/api/providers/health',
       'fetch_models':          '/api/providers/models',
@@ -249,6 +250,7 @@
             'fetch_models': ['provider_id'],
             'set_agent_autonomy': ['level'],
             'set_guardian_level': ['level'],
+            'set_os_sandbox': ['mode'],
             'open_external_url': ['url'],
             'swarm_spawn': ['name', 'goal', 'role'],
             'swarm_remove': ['id'],
@@ -368,6 +370,13 @@
           return;
         }
         window.__teraPilotBridgeConnected = true;
+        // v2.3.4-security (P0.3): /api/status no longer returns api_token.
+        // In the browser UI the server injects it into the page itself
+        // (window.__TERA_PILOT_TOKEN, same-origin trusted channel) —
+        // enrich the status dict so app.js keeps working unchanged.
+        if (!status.api_token && window.__TERA_PILOT_TOKEN) {
+          status.api_token = window.__TERA_PILOT_TOKEN;
+        }
         if (typeof window.__teraPilotReady === 'function') {
           try { window.__teraPilotReady(status); } catch (e) { console.warn(e); }
         }

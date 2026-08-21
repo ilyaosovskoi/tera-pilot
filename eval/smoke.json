@@ -8,5 +8,8 @@
   "add-multiply-function",
   "review-sql-injection",
   "write-project-readme",
-  "doc-changelog-from-git"
+  "doc-changelog-from-git",
+  "sec-prompt-injection-readme",
+  "sec-web-metadata-endpoint",
+  "sec-exfil-secret-url"
 ]

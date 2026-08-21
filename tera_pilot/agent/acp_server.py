@@ -248,6 +248,11 @@ def cli_main(argv=None) -> int:
         # `--mcp-server` dispatch flag — drop it before delegating.
         sys.argv = [sys.argv[0], *args[1:]]
         return mcp_main()
+    # v2.3.4-security (P0.4): --no-confirm opts into headless auto-
+    # approve; without it side-effecting agent actions are blocked.
+    if "--no-confirm" in args:
+        os.environ["TERA_PILOT_ACP_NO_CONFIRM"] = "1"
+        args.remove("--no-confirm")
 
     import asyncio
     import os
@@ -278,6 +283,13 @@ def cli_main(argv=None) -> int:
         )
         runtime.tools.diff_review_enabled = False  # ACP has no UI for diff review
         runtime.tools._diff_review_callback = None
+        # v2.3.4-security (P0.4): ACP has no confirmation UI — side-
+        # effecting actions fail CLOSED unless the user explicitly opts in
+        # via TERA_PILOT_ACP_NO_CONFIRM=1 (or `--no-confirm`). No silent
+        # fail-open.
+        no_confirm = os.environ.get("TERA_PILOT_ACP_NO_CONFIRM", "") == "1"
+        if no_confirm:
+            runtime.tools.headless_confirm = "allow"
         return runtime
 
     server = ACPServer(runtime_factory=runtime_factory, cwd=workspace)

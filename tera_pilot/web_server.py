@@ -40,8 +40,12 @@ Design notes
   HTML/CSS/JS frontend keeps working — only the QWebChannel script
   tag was removed from ``index.html``.
 * The same auth bearer token that protected the legacy HTTP API
-  protects the new one — it is shipped to the browser via
-  ``GET /api/status`` in the initial handshake.
+  protects the new one. v2.3.4-security (P0.3): it is NO LONGER
+  shipped via the public ``GET /api/status`` JSON (a cross-origin
+  reader could steal it); instead the server injects it into the
+  HTML page it serves — the same-origin trusted channel
+  (``_inject_api_token``). The token-bearing HTML never gets a CORS
+  header, so only the page itself can read it.
 """
 
 from __future__ import annotations
@@ -65,7 +69,7 @@ from .utils import setup_logging
 
 logger = logging.getLogger(__name__)
 
-__version__ = "2.3.4"
+__version__ = "2.3.5"
 
 # Default port — kept identical to the legacy embedded API server so
 # existing users / scripts that hit ``http://127.0.0.1:18732`` keep
@@ -160,6 +164,27 @@ def _content_type_for(path: Path) -> str:
     return _CONTENT_TYPES.get(path.suffix.lower(), "application/octet-stream")
 
 
+def _inject_api_token(html: bytes, token: str) -> bytes:
+    """Embed the API bearer token into the served HTML page.
+
+    v2.3.4-security (P0.3): the token is delivered ONLY through this
+    same-origin trusted channel (the page the server itself serves) —
+    it was removed from the public ``GET /api/status`` JSON. The
+    injected script sets ``window.__TERA_PILOT_TOKEN`` which
+    ``app.js`` / ``bridge_shim.js`` pick up and send as
+    ``Authorization: Bearer <token>`` on mutating requests.
+    """
+    text = html.decode("utf-8", errors="replace")
+    script = f"<script>window.__TERA_PILOT_TOKEN={json.dumps(token)};</script>"
+    lower = text.lower()
+    if "</body>" in lower:
+        idx = lower.rindex("</body>")
+        text = text[:idx] + script + text[idx:]
+    else:
+        text = text + script
+    return text.encode("utf-8")
+
+
 # ── Combined handler (static + API) ────────────────────────────────────
 
 class TeraPilotWebHandler(TeraPilotAPIHandler):
@@ -209,11 +234,24 @@ class TeraPilotWebHandler(TeraPilotAPIHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        is_html = file_path.suffix.lower() == ".html"
+        if is_html:
+            # v2.3.4-security (P0.3): the HTML document carries the API
+            # token (same-origin trusted channel) — embed it now.
+            data = _inject_api_token(data, self.ctx._auth_token)
         self.send_response(200)
         self.send_header("Content-Type", _content_type_for(file_path))
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        if not is_html:
+            # Token-bearing HTML is meant to be read ONLY same-origin.
+            # Emitting Access-Control-Allow-Origin here (even '*' or a
+            # loopback echo) would let a cross-origin script — e.g. a
+            # sandboxed iframe sending Origin: null, or another local
+            # dev server — read the embedded token. No CORS header =
+            # the browser blocks every cross-origin reader; the page
+            # itself needs no CORS for its own fetches.
+            self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         if not head_only:
             try:
@@ -376,7 +414,7 @@ class TeraPilotWebServer:
 def _parse_args(argv: Optional[list] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="tera_pilot",
-        description="Tera Pilot v2.3.4 — local-first AI IDE (web UI).",
+        description="Tera Pilot v2.3.5 — local-first AI IDE (web UI).",
     )
     p.add_argument(
         "--host", default=os.environ.get("TERA_PILOT_HOST", DEFAULT_HOST),

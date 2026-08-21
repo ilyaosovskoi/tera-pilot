@@ -38,7 +38,12 @@ from tera_pilot.agent.encrypted_prompt import (  # noqa: E402
 
 
 def _engine(tmp_path) -> ToolEngine:
-    return ToolEngine(str(tmp_path))
+    e = ToolEngine(str(tmp_path))
+    # P0.4: ToolEngine now fails CLOSED on confirmations when no UI
+    # callback is wired. These unit tests exercise the sandbox guards,
+    # not the confirmation policy — opt in to headless auto-approve.
+    e.headless_confirm = "allow"
+    return e
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -363,6 +368,147 @@ def test_web_fetch_rejects_loopback(tmp_path):
     assert "loopback" not in e._web_fetch("http://example.com/x")
 
 
+def test_web_fetch_rejects_private_and_metadata_ips(tmp_path):
+    """P0.2: private / link-local / cloud-metadata / IPv6 internal
+    addresses must be rejected by the pre-check — the same SSRF class as
+    loopback (T5). No DNS lookup is involved for literal IPs."""
+    e = _engine(tmp_path)
+    for url in (
+        "http://10.0.0.5/secret",
+        "http://192.168.1.1/admin",
+        "http://172.16.0.5:8080/",
+        "http://172.31.255.255/x",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://169.254.0.1/x",
+        "http://[fc00::1]/x",
+        "http://[fd12:3456::1]/x",
+        "http://[fe80::1]/x",
+        "http://0.0.0.0:18732/api/status",
+        "http://[::ffff:127.0.0.1]:18732/api/status",
+        "http://[::ffff:10.0.0.1]/x",
+    ):
+        res = e._web_fetch(url)
+        assert "REJECTED" in res, f"{url} must be rejected, got: {res[:80]!r}"
+
+
+def test_web_fetch_precheck_rejects_literal_ip_rebinding_hosts(tmp_path):
+    """Hostnames that START with a loopback prefix (the classic DNS-
+    rebinding trick, e.g. 127.0.0.1.evil.com) are conservatively
+    rejected up front too. ``localhost.evil.com`` is a legitimate public
+    hostname — it passes the pre-check and is instead handled by the
+    fetch-time DNS check (rejected only if it RESOLVES internally)."""
+    e = _engine(tmp_path)
+    assert "REJECTED" in e._web_fetch("http://127.0.0.1.evil.com/x")
+    assert "REJECTED" in e._web_fetch("http://127.8.8.8.evil.com/x")
+
+
+# ── P0.2 SSRF: IP classification / DNS rebinding / redirect hops ────────
+
+from tera_pilot import web_search_backend as _wsb  # noqa: E402
+
+
+@pytest.mark.parametrize("ip,cat", [
+    ("127.0.0.1", "loopback"),
+    ("127.8.8.8", "loopback"),
+    ("10.0.0.1", "private"),
+    ("172.16.0.1", "private"),
+    ("172.31.255.255", "private"),
+    ("192.168.1.1", "private"),
+    ("169.254.169.254", "link_local"),
+    ("169.254.0.1", "link_local"),
+    ("0.0.0.0", "unspecified"),
+    ("::1", "loopback"),
+    ("::", "unspecified"),
+    ("fc00::1", "private"),
+    ("fd12:3456::1", "private"),
+    ("fe80::1", "link_local"),
+    ("::ffff:127.0.0.1", "loopback"),
+    ("::ffff:10.0.0.1", "private"),
+    ("::ffff:169.254.169.254", "link_local"),
+    ("8.8.8.8", None),
+    ("93.184.216.34", None),
+    ("2606:4700::1111", None),
+])
+def test_classify_ip(ip, cat):
+    assert _wsb._classify_ip(ip) == cat
+
+
+def test_check_fetch_target_rejects_dns_rebinding(monkeypatch):
+    """A hostname that RESOLVES to an internal address (DNS rebinding)
+    must be rejected even though the literal hostname looks public."""
+    monkeypatch.setattr(_wsb, "_resolve_host_ips", lambda host: ["10.0.0.5"])
+    reason = _wsb._check_fetch_target("http://internal.corp/secret")
+    assert reason is not None
+    assert "10.0.0.5" in reason and "internal" in reason
+    # A public resolution is fine.
+    monkeypatch.setattr(_wsb, "_resolve_host_ips", lambda host: ["93.184.216.34"])
+    assert _wsb._check_fetch_target("http://example.com/x") is None
+
+
+def test_fetch_url_as_text_rejects_internal_before_network(monkeypatch):
+    """fetch_url_as_text itself refuses internal literals (and DNS-
+    rebinding hostnames) BEFORE opening any connection."""
+    monkeypatch.setattr(_wsb, "_resolve_host_ips", lambda host: ["10.1.2.3"])
+    for url in (
+        "http://127.0.0.1:9/api/status",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://10.1.2.3/x",
+        "http://internal.corp/x",
+    ):
+        with pytest.raises(urllib.error.URLError, match="blocked"):
+            _wsb.fetch_url_as_text(url)
+
+
+def test_redirect_handler_rejects_internal_hop():
+    """Every redirect hop is re-validated: a 302 to localhost must be
+    blocked before it is followed."""
+    handler = _wsb._SSRFSafeRedirectHandler()
+    req = urllib.request.Request("http://example.com/start")
+    with pytest.raises(urllib.error.URLError, match="redirect blocked"):
+        handler.redirect_request(
+            req, None, 302, "Found",
+            {"Location": "http://127.0.0.1:9999/api/status"},
+            "http://127.0.0.1:9999/api/status",
+        )
+
+
+def test_redirect_handler_rejects_metadata_hop():
+    handler = _wsb._SSRFSafeRedirectHandler()
+    req = urllib.request.Request("http://example.com/start")
+    with pytest.raises(urllib.error.URLError, match="redirect blocked"):
+        handler.redirect_request(
+            req, None, 302, "Found",
+            {"Location": "http://169.254.169.254/latest/meta-data/"},
+            "http://169.254.169.254/latest/meta-data/",
+        )
+
+
+def test_redirect_handler_rejects_rebinding_hop(monkeypatch):
+    """A redirect to a hostname that resolves internally is blocked too."""
+    monkeypatch.setattr(_wsb, "_resolve_host_ips", lambda host: ["10.0.0.5"])
+    handler = _wsb._SSRFSafeRedirectHandler()
+    req = urllib.request.Request("http://example.com/start")
+    with pytest.raises(urllib.error.URLError, match="redirect blocked"):
+        handler.redirect_request(
+            req, None, 302, "Found",
+            {"Location": "http://internal.corp/x"},
+            "http://internal.corp/x",
+        )
+
+
+def test_redirect_handler_allows_public_hop(monkeypatch):
+    """Public redirect hops still work (regression guard)."""
+    monkeypatch.setattr(_wsb, "_resolve_host_ips", lambda host: ["93.184.216.34"])
+    handler = _wsb._SSRFSafeRedirectHandler()
+    req = urllib.request.Request("http://example.com/start")
+    new = handler.redirect_request(
+        req, None, 302, "Found",
+        {"Location": "http://example.com/next"},
+        "http://example.com/next",
+    )
+    assert isinstance(new, urllib.request.Request)
+
+
 # ═══════════════════════════════════════════════════════════════════
 # T1 — prompt scaffold guardrails
 # ═══════════════════════════════════════════════════════════════════
@@ -560,3 +706,90 @@ def test_cors_preflight_evil_origin_not_echoed(api):
         acao = r.headers.get("Access-Control-Allow-Origin")
     assert "evil.example" not in acao
     assert acao == "http://localhost"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# P0.3 — bearer token out of the public /api/status (trusted channel)
+# ═══════════════════════════════════════════════════════════════════
+
+@pytest.fixture(scope="module")
+def web(tmp_path_factory):
+    """A full TeraPilotWebServer (static HTML + API) on an ephemeral port."""
+    home = tmp_path_factory.mktemp("security_web_home")
+    old_home = os.environ.get("HOME")
+    os.environ["HOME"] = str(home)
+    try:
+        from tera_pilot.web_server import TeraPilotWebServer
+        server = TeraPilotWebServer(host="127.0.0.1", port=0, project=str(home), open_browser=False)
+        server.start()
+        real_port = server._http.server_address[1]
+        yield {"port": real_port, "token": server.api_token}
+        server.stop()
+    finally:
+        if old_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = old_home
+
+
+def _web_get(port, path, origin=None):
+    headers = {}
+    if origin is not None:
+        headers["Origin"] = origin
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, dict(r.headers), r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers), e.read().decode("utf-8", "replace")
+
+
+def test_public_status_does_not_expose_api_token(web):
+    """P0.3: the token must not be readable from the public status JSON —
+    a cross-origin reader could previously steal it via CORS."""
+    st, _, body = _web_get(web["port"], "/api/status")
+    assert st == 200
+    assert '"api_token"' not in body
+    assert web["token"] not in body
+
+
+def test_html_page_embeds_token_via_trusted_channel(web):
+    """P0.3: the token reaches the frontend only through the served HTML
+    (same-origin trusted channel), never through a CORS-readable JSON."""
+    st, headers, body = _web_get(web["port"], "/")
+    assert st == 200
+    assert "text/html" in headers.get("Content-Type", "")
+    assert f"window.__TERA_PILOT_TOKEN={json.dumps(web['token'])}" in body
+    # The token-bearing document must NOT be CORS-readable cross-origin.
+    assert "Access-Control-Allow-Origin" not in headers
+
+
+def test_html_page_not_cors_readable_from_other_origin(web):
+    """A cross-origin script (evil page, or a null-origin sandboxed
+    iframe) must not be able to read the token-bearing HTML."""
+    st, headers, body = _web_get(web["port"], "/", origin="https://evil.example")
+    assert st == 200
+    assert "Access-Control-Allow-Origin" not in headers
+    assert web["token"] not in "".join(str(v) for v in headers.values())
+
+
+def test_non_html_asset_still_cors_open(web):
+    """Only the token-bearing HTML loses CORS; other static assets keep
+    the permissive header (they hold no secrets)."""
+    st, headers, _ = _web_get(web["port"], "/app.js")
+    assert st == 200
+    assert headers.get("Access-Control-Allow-Origin") == "*"
+
+
+@pytest.mark.parametrize("origin", ["null", "file://"])  # sandboxed iframe / file page
+@pytest.mark.parametrize("path", ["/", "/index.html"])
+def test_html_not_cors_readable_from_null_origin(web, origin, path):
+    """P0.3 (plan: 'Origin: null scenarios browser-tested'): a sandboxed
+    iframe sends Origin: null; the API server previously returned '*' for
+    it, which would have let the iframe read the token-bearing HTML. The
+    HTML must not be CORS-readable from a null/file origin either."""
+    st, headers, _ = _web_get(web["port"], path, origin=origin)
+    assert st == 200
+    # No CORS header → the browser blocks every cross-origin reader,
+    # including null-origin sandboxed iframes.
+    assert "Access-Control-Allow-Origin" not in headers

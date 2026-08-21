@@ -199,6 +199,51 @@ class RequestQueue:
         finally:
             self._release_pending_slot()
 
+    # ── Streaming ────────────────────────────────────────────────────
+
+    def serialized_stream(self, gen_factory: Callable[..., Any], *args, **kwargs):
+        """Run a sync generator under the queue's concurrency slot.
+
+        Unlike :meth:`submit_sync`, the slot is held for the ENTIRE
+        iteration of the generator — not just its creation. Without
+        this, a stream wrapper that submits a generator-returning call
+        would release the semaphore the moment the generator object is
+        created, so concurrent streams would run simultaneously and
+        the cooldown/rate-limit gating would never apply to the actual
+        streaming.
+
+        The slot is acquired LAZILY on the first ``next()`` — merely
+        creating the generator never blocks, so a caller that builds
+        several stream objects before consuming them cannot deadlock.
+        If the consumer abandons the generator early, the slot is
+        released when the generator is exhausted or garbage-collected
+        (its ``finally`` runs). Raises :class:`QueueFullError` (from
+        the first ``next()``) when the queue is full.
+        """
+
+        def _inner():
+            slot_acquired = False
+            sem_acquired = False
+            try:
+                # Acquire the pending slot + semaphore only when the
+                # stream actually starts.
+                if not self._acquire_pending_slot():
+                    raise QueueFullError(f"queue {self._name!r} is full")
+                slot_acquired = True
+                self._stats["submitted"] += 1
+                self._wait_for_cooldown(wait=True)
+                self._sem.acquire()
+                sem_acquired = True
+                yield from gen_factory(*args, **kwargs)
+                self._stats["completed"] += 1
+            finally:
+                if sem_acquired:
+                    self._sem.release()
+                if slot_acquired:
+                    self._release_pending_slot()
+
+        return _inner()
+
     # ── Internal helpers ─────────────────────────────────────────────
 
     def _acquire_pending_slot(self) -> bool:
@@ -404,9 +449,12 @@ def wrap_provider(
     if has_stream:
         @functools.wraps(provider._unwrapped_stream)
         def wrapped_stream(*args, **kwargs):
-            # Streaming is sync-generator-based; wrap each call in a sync
-            # submit that returns the generator object.
-            return queue.submit_sync(provider._unwrapped_stream, *args, **kwargs)
+            # Streaming is sync-generator-based. The queue slot must be
+            # held for the whole iteration (see RequestQueue.serialized_stream)
+            # — a plain submit_sync would release the semaphore as soon as
+            # the generator object was created, so concurrent streams would
+            # not actually be serialized.
+            return queue.serialized_stream(provider._unwrapped_stream, *args, **kwargs)
 
         provider.stream = wrapped_stream
     provider._request_queue = queue

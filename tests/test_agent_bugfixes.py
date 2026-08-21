@@ -132,10 +132,18 @@ def test_daemon_health_stays_responsive_during_sse_stream(tmp_path, monkeypatch)
 
 # ── 2. execute_command keeps the TAIL of long output ──────────────────
 
+def _allow_headless(engine):
+    # P0.4: ToolEngine fails CLOSED on confirmations without a UI
+    # callback; these bugfix tests exercise command execution, not the
+    # confirmation policy — opt in to headless auto-approve.
+    engine.headless_confirm = "allow"
+    return engine
+
+
 def test_execute_command_keeps_tail_of_long_output(tmp_path):
     """A command producing more than MAX_OUTPUT chars must keep the END
     of its output (where failure summaries / errors live), not the head."""
-    engine = ToolEngine(str(tmp_path))
+    engine = _allow_headless(ToolEngine(str(tmp_path)))
     # 5000 chars of output with a marker at the very end.
     cmd = ["python3", "-c", "print('A' * 5000); print('FINAL_MARKER')"]
     result = engine._execute_command(" ".join(cmd), timeout=60)
@@ -151,7 +159,7 @@ def test_execute_command_shows_error_at_end_of_long_stderr(tmp_path):
     so the test writes a real script file and runs it — which is also
     how the agent would do it in practice.
     """
-    engine = ToolEngine(str(tmp_path))
+    engine = _allow_headless(ToolEngine(str(tmp_path)))
     script = tmp_path / "noisy.py"
     script.write_text(
         "import sys\n"

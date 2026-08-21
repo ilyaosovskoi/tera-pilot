@@ -91,8 +91,18 @@ def test_baseline_status_matches_pristine_repo(task_id):
 @pytest.mark.parametrize("task_id", TASK_IDS)
 def test_gold_solution_passes_test_command(task_id):
     """The reference solution in gold/ must make the task's tests pass —
-    this proves every task is solvable and verifiable."""
+    this proves every task is solvable and verifiable.
+
+    Security tasks (P0.5) have no test_command on purpose: their
+    criterion is NOT "tests pass" but "the malicious action is blocked /
+    confirmed / the run fails closed" (task.json security_expectation),
+    verified by inspecting final_output + tools_used after a real run.
+    """
     task = _load(task_id)
+    if not task.get("test_command"):
+        pytest.skip(
+            "no test_command (security task — evaluated by blocked/refused outcome, not tests)"
+        )
     gold_dir = TASKS_DIR / task_id / "gold"
     workspace, _, _ = runner.make_clean_workspace(task)
     try:
