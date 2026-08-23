@@ -94,9 +94,10 @@ class QuickSettingsModal(ModalScreen[None]):
     }
     """
 
-    def __init__(self, bridge, **kwargs):
+    def __init__(self, bridge, on_advanced=None, **kwargs):
         super().__init__(**kwargs)
         self.bridge = bridge
+        self._on_advanced = on_advanced
         # v2.3.4-fix: bridge has no get_provider() — it used to crash
         # with AttributeError every time the modal opened (so /settings
         # was completely broken). Read the active provider from status().
@@ -183,23 +184,21 @@ class QuickSettingsModal(ModalScreen[None]):
         except Exception:
             pass
 
-        # Set model
-        if model:
-            try:
-                registry = self.bridge._registry
-                if registry:
-                    registry.configure(pid, model=model)
-            except Exception:
-                pass
-
-        # Set API key
-        if api_key:
-            try:
-                registry = self.bridge._registry
-                if registry:
-                    registry.configure(pid, api_key=api_key)
-            except Exception:
-                pass
+        # v2.3.5-fix: set model / API key through the bridge. The old
+        # code called ``registry.configure(pid, model=model)`` and
+        # ``registry.configure(pid, api_key=api_key)`` directly, but
+        # ProviderRegistry.configure() expects a ProviderConfig object
+        # — both calls raised TypeError and were silently swallowed, so
+        # the model name and API key typed in this onboarding screen
+        # were NEVER applied (only the provider switch worked).
+        try:
+            self.bridge.configure_provider(
+                pid,
+                model=model or None,
+                api_key=api_key or None,
+            )
+        except Exception:
+            pass
 
         self.dismiss(None)
 
@@ -229,10 +228,15 @@ class QuickSettingsModal(ModalScreen[None]):
             self._save_and_dismiss()
             return
 
-        # Advanced → dismiss and let caller open full settings
+        # Advanced → dismiss and let the caller open the full settings
+        # (model palette). v2.3.5-fix: the caller never used to open
+        # anything — /settings just closed with no further action, so
+        # the "Advanced…" button was dead. Now the app passes an
+        # on_advanced callback that opens the full model palette.
         if btn_id == "qs-advanced":
             self.dismiss(None)
-            # The caller will open the full model palette
+            if self._on_advanced is not None:
+                self._on_advanced()
             return
 
         # Cancel

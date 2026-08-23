@@ -72,23 +72,43 @@ public key (PEM). Used by the test suite (which mints throwaway keypairs)
 and by the seller for key rotation. Same trust level as the dev override —
 test/dev only.
 
-## Issuing keys (seller side)
+## Issuing keys (seller side, v2.3.6 CLI)
 
-```python
-from tera_pilot.licensing import generate_keypair, sign_payload
+Since v2.3.6 there is a seller-side CLI for issuing keys — fully offline,
+zero telemetry (no network call is ever made; the private key never leaves
+your machine). Do this ONCE, on an offline machine, and keep the private
+key there:
 
-priv_pem, pub_pem = generate_keypair()          # store priv offline!
-license_string = sign_payload({
-    "customer_id": "usr_abc123",
-    "tier": "pro",
-    "issued_at": "2026-08-17T00:00:00Z",
-    "expires_at": None,
-    "features": ["second_opinion", "cost_router", "spend_dashboard"],
-}, priv_pem)
+```bash
+# 1. Generate a keypair (private key written with 0600 perms)
+tera-pilot license gen-keypair --out ~/seller-keys
+#    -> ~/seller-keys/license_priv.pem    (KEEP OFFLINE — never ship/commit)
+#    -> ~/seller-keys/license_pubkey.pem  (embed this as tera_pilot/license_pubkey.pem)
+
+# 2. Issue a license for one customer (paste the printed key into your
+#    email / license page — it is self-contained and needs no backend)
+tera-pilot license issue \
+    --private-key ~/seller-keys/license_priv.pem \
+    --customer usr_abc123 \
+    --tier pro \
+    --expires 2027-08-17T00:00:00Z \
+    --features second_opinion,cost_router,spend_dashboard
 ```
 
-`generate_keypair()` / `sign_payload()` exist for this purpose and for
-tests; they are not part of the client verification path.
+`--expires` is optional (omit for a non-expiring key). The issued license
+string is a single line — a customer pastes it into
+`tera-pilot license activate <key>` and it verifies entirely offline
+against the embedded public key. Because verification never phones home,
+you can distribute keys through any channel (email, Gumroad/LemonSqueezy
+fulfilment, a PDF, a pastebin) without running any license server.
+
+The same operations are available as Python helpers
+(`generate_keypair()`, `sign_payload()`, `issue_license()`) for tests and
+custom issuance tooling; they are not part of the client verification path.
+
+When you rotate the embedded public key (new keypair + repackage),
+previously issued keys stop verifying — keep the keypair stable for as
+long as you want existing customers to work.
 
 ## What we are deliberately NOT claiming
 

@@ -205,3 +205,102 @@ async def test_palette_entrance_animation_completes():
         await pilot.pause(0.8)  # longer than the 0.18s animation
         assert app._exception is None, f"animation crashed the app: {app._exception}"
         assert app.screen.query_one("#palette-container").styles.opacity == 1.0
+
+
+# ── Ctrl+P must open the project palette, not Textual's (v2.3.5-fix) ──
+
+
+@pytest.mark.asyncio
+async def test_ctrl_p_opens_project_command_palette():
+    """Textual's App.__init__ auto-binds ctrl+p → command_palette with
+    priority=True UNLESS the app already binds an action literally named
+    ``command_palette``. Our app binds ``open_command_palette``, so
+    Textual added its own system palette and — being priority=True — it
+    won the key: Ctrl+P showed Maximize/Quit/Screenshot instead of the
+    project's slash commands. The project binding must be priority=True
+    so Ctrl+P opens the real palette.
+    """
+    from tera_pilot_tui.app import TeraPilotTUIApp
+
+    app = TeraPilotTUIApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+p")
+        await pilot.pause(0.4)
+        screen = app.screen
+        assert type(screen).__module__ == "tera_pilot_tui.widgets.command_palette", (
+            f"expected project palette, got {type(screen).__module__}"
+        )
+        # The project palette lists the slash commands.
+        from textual.widgets import OptionList
+        ol = screen.query_one("#palette-list", OptionList)
+        labels = [str(ol.get_option_at_index(i).prompt) for i in range(ol.option_count)]
+        assert any("/model" in l for l in labels)
+        assert any("/clear" in l for l in labels)
+        assert not any("Maximize" in l for l in labels), labels
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+
+
+# ── run-ending errors must render exactly once (v2.3.5-fix) ────────────
+
+
+class _FakeTurnResult:
+    """Minimal stand-in for TaskResult (success=False path)."""
+
+    def __init__(self, error: str, output: str = ""):
+        self.success = False
+        self.error = error
+        self.output = output
+        self.metadata = {}
+
+
+@pytest.mark.asyncio
+async def test_run_ending_error_rendered_once():
+    """The agent runtime emits an ERROR event AND returns
+    success=False for the same terminal failure. Regression: the TUI
+    rendered the error twice (once from the event, once from
+    _on_turn_done). A run-ending error must appear exactly once in the
+    ChatLog.
+    """
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.widgets.chat_log import ChatLog
+
+    app = TeraPilotTUIApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        chat = app.query_one(ChatLog)
+        app._handle_event("error", {"error": "boom: connection refused"})
+        app._on_turn_done(_FakeTurnResult(error="boom: connection refused"))
+        await pilot.pause(0.2)
+        rendered = [str(line) for line in chat.lines]
+        assert sum("boom: connection refused" in r for r in rendered) == 1, rendered
+        # The dedup flag must reset so the NEXT distinct error renders.
+        app._handle_event("error", {"error": "second failure"})
+        app._on_turn_done(_FakeTurnResult(error="second failure"))
+        await pilot.pause(0.2)
+        rendered = [str(line) for line in chat.lines]
+        assert sum("second failure" in r for r in rendered) == 1, rendered
+
+
+@pytest.mark.asyncio
+async def test_distinct_error_after_previous_renders():
+    """A NEW turn's error must render even when it matches a previous
+    turn's error (the dedup flag is per-turn, not global)."""
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.widgets.chat_log import ChatLog
+
+    app = TeraPilotTUIApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        chat = app.query_one(ChatLog)
+        # Turn 1: event + result — rendered once.
+        app._handle_event("error", {"error": "first"})
+        app._on_turn_done(_FakeTurnResult(error="first"))
+        # Turn 2: a genuinely NEW error — must still render.
+        app._handle_event("error", {"error": "second"})
+        app._on_turn_done(_FakeTurnResult(error="second"))
+        await pilot.pause(0.2)
+        rendered = [str(line) for line in chat.lines]
+        assert sum("first" in r for r in rendered) == 1, rendered
+        assert sum("second" in r for r in rendered) == 1, rendered

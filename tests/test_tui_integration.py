@@ -514,3 +514,184 @@ def test_backend_runner_reports_provider_error_cleanly(tmp_path, reg, fake):
     assert "API key" in (report.get("error") or "")
     import json
     json.dumps(report)  # must be JSON-serializable
+
+
+# ── provider model/API-key configuration (v2.3.5) ──────────────────────
+
+def test_configure_provider_sets_model_and_key(tmp_path, reg, fake):
+    """bridge.configure_provider() must actually apply model + API key.
+
+    Regression: the Quick Settings modal and `/provider <pid> <model>`
+    called ``registry.configure(pid, model=...)`` / ``(pid, api_key=...)``
+    directly — but ProviderRegistry.configure() takes a ProviderConfig
+    object, so both calls raised TypeError and were silently swallowed
+    (the UI claimed success while nothing changed).
+    """
+    bridge = TeraPilotBridge(workspace=str(tmp_path))
+    r = bridge.configure_provider("fake", model="my-model", api_key="sk-test")
+    assert r.get("ok") is True, r
+    assert r.get("model") == "my-model"
+
+    prov = bridge._registry.get("fake")
+    assert prov.config.model == "my-model"
+    assert prov.config.api_key == "sk-test"
+
+    # Partial update preserves the rest of the config.
+    r2 = bridge.configure_provider("fake", model="other-model")
+    assert r2.get("ok") is True
+    prov2 = bridge._registry.get("fake")
+    assert prov2.config.model == "other-model"
+    assert prov2.config.api_key == "sk-test"  # unchanged
+
+
+def test_configure_provider_unknown_id_fails(tmp_path, reg):
+    bridge = TeraPilotBridge(workspace=str(tmp_path))
+    r = bridge.configure_provider("no_such_provider", model="x")
+    assert r.get("ok") is False
+    assert "no_such_provider" in (r.get("error") or "")
+
+
+def test_registry_configure_rejects_kwargs(reg):
+    """Guard against reintroducing the broken kwargs call pattern."""
+    from tera_pilot.providers import ProviderConfig
+    with pytest.raises(TypeError):
+        reg.configure("fake", model="x")
+    with pytest.raises(TypeError):
+        reg.configure("fake", api_key="x")
+    # The correct call keeps working.
+    reg.configure("fake", ProviderConfig(provider_id="fake", model="ok"))
+    assert reg.get("fake").config.model == "ok"
+
+
+# ── Notifier: status() must not self-deadlock (v2.3.5) ─────────────────
+
+def test_notifier_status_no_self_deadlock(tmp_path):
+    """Notifier.status() must not deadlock on its own lock.
+
+    Regression: Notifier._lock was a plain threading.Lock, and
+    status() called list_backends() while holding that lock —
+    list_backends() takes the same lock, so status() hung forever
+    (a fresh bridge's /notify hung the TUI thread).
+    """
+    import threading
+    from tera_pilot.notifier import Notifier
+
+    n = Notifier()
+
+    # Run in a thread with a timeout; a deadlock would hang here.
+    result = {}
+    t = threading.Thread(
+        target=lambda: result.setdefault("out", n.status()), daemon=True
+    )
+    t.start()
+    t.join(5)
+    assert not t.is_alive(), "Notifier.status() deadlocked on its own lock"
+    assert "total_backends" in result["out"]
+
+
+def test_notifier_rlock_is_reentrant():
+    """The lock must be an RLock so nested locked calls don't hang."""
+    from tera_pilot.notifier import Notifier
+
+    n = Notifier()
+    assert isinstance(n._lock, type(__import__("threading").RLock())), \
+        "Notifier._lock must be reentrant (RLock)"
+
+
+# ── MCP-server status after agent spawn (v2.3.5) ───────────────────────
+
+def test_mcp_server_status_no_agent_no_crash(tmp_path, reg, fake):
+    """/mcp-server must work before AND after the agent is spawned.
+
+    Regression: mcp_server_status() read self._agent.workspace, but the
+    AgentRuntime has no .workspace attribute — so after the first turn
+    (when _agent is set) /mcp-server crashed with AttributeError.
+    """
+    bridge = TeraPilotBridge(workspace=str(tmp_path))
+
+    # Before any agent exists.
+    r1 = bridge.mcp_server_status()
+    assert r1.get("ok") is True
+
+    # Spawn the agent like a real turn does.
+    bridge.ensure_agent()
+
+    # After the agent exists — this used to raise AttributeError.
+    r2 = bridge.mcp_server_status()
+    assert r2.get("ok") is True
+
+
+# ── QuickSettingsModal Advanced button (v2.3.5) ────────────────────────
+
+def test_quick_settings_advanced_callback_fires():
+    """The /settings 'Advanced…' button must hand off to full settings.
+
+    Regression: QuickSettingsModal dismissed to nothing on 'Advanced…'
+    (the code claimed "the caller will open the full model palette" but
+    no callback was ever wired), so the button was dead.
+    """
+    from tera_pilot_tui.widgets.settings_modal import QuickSettingsModal
+
+    fired = []
+    modal = QuickSettingsModal(None, on_advanced=lambda: fired.append(True))
+    assert modal._on_advanced is not None
+    modal._on_advanced()
+    assert fired == [True]
+
+
+# ── GitHub repo set: single "owner/repo" arg (v2.3.5) ───────────────────
+
+def test_github_set_repo_accepts_single_slash_string(tmp_path):
+    """/github repo owner/repo must work with the one-arg form.
+
+    Regression: the TUI's /github repo command passed the whole
+    ``owner/repo`` string as a single argument, but bridge's
+    github_set_repo(owner, repo) required two — TypeError, and the
+    repo was never set.
+    """
+    from tera_pilot_tui.bridge import TeraPilotBridge
+    from tera_pilot.github_automation import get_github_automation
+
+    bridge = TeraPilotBridge(workspace=str(tmp_path))
+
+    # One-arg form (what the TUI sends).
+    r = bridge.github_set_repo("octocat/Hello-World")
+    assert r.get("ok") is True, r
+    assert r.get("repo") == "octocat/Hello-World"
+    assert get_github_automation()._repo == "octocat/Hello-World"
+
+    # Two-arg form still works.
+    r2 = bridge.github_set_repo("octocat", "repo2")
+    assert r2.get("ok") is True, r2
+    assert r2.get("repo") == "octocat/repo2"
+
+    # Invalid forms are rejected, not crashed.
+    r3 = bridge.github_set_repo("not-a-slash-string")
+    assert r3.get("ok") is False
+
+
+# ── Guardian level on a fresh agent (v2.3.5) ───────────────────────────
+
+def test_guardian_level_fresh_agent(tmp_path, reg, fake):
+    """/guardian <level> must work on a freshly-spawned agent.
+
+    Regression: ToolEngine.__init__ sets _guardian_config = None, so
+    ``hasattr`` was always True and set_guardian_level crashed with
+    AttributeError: 'NoneType' object has no attribute 'provider_id'.
+    """
+    from tera_pilot_tui.bridge import TeraPilotBridge
+
+    bridge = TeraPilotBridge(workspace=str(tmp_path))
+
+    r = bridge.set_guardian_level("all")
+    assert r.get("ok") is True, r
+    assert bridge.get_guardian_level().get("level") == "all"
+
+    # Switching levels preserves provider/model from the previous config.
+    r2 = bridge.set_guardian_level("dangerous_only")
+    assert r2.get("ok") is True, r2
+    assert bridge.get_guardian_level().get("level") == "dangerous_only"
+
+    # Invalid level is rejected cleanly.
+    r3 = bridge.set_guardian_level("bogus")
+    assert r3.get("ok") is False

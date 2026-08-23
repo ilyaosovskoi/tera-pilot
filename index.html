@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Tera Pilot — Private, Vendor-Neutral Coding Agents</title>
-<meta name="description" content="Self-hosted, vendor-neutral coding agent for private repos and local models. TUI-first, BYOK across 16 providers or fully offline with Ollama/LM Studio. Every agent action is sandboxed, logged, and signed — built to be verified, not just trusted.">
+<meta name="description" content="Self-hosted, vendor-neutral coding agent for private repos and local models. TUI-first, BYOK across 17 providers or fully offline with Ollama/LM Studio. Commands run in an OS-level sandbox; every agent action is logged and Ed25519-signed — built to be verified, not just trusted.">
 <link rel="icon" href="./tera_pilot.png" type="image/png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,6 +23,7 @@
     --green: #28c840;
     --green-dim: #1a7a2e;
     --green-bg: rgba(40, 200, 64, 0.08);
+    --green-glow: rgba(40, 200, 64, 0.6);
     --blue: #60a5fa;
     --yellow: #febc2e;
     --red: #ef4444;
@@ -30,6 +31,7 @@
     --radius-sm: 10px;
     --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --font-mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --card-glass: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0) 38%), linear-gradient(180deg, rgba(17,17,21,0.92), rgba(11,11,14,0.9));
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -37,7 +39,7 @@
   html { scroll-behavior: smooth; }
 
   body {
-    background: var(--bg);
+    background: linear-gradient(180deg, #0b0b0e 0%, var(--bg) 40%, #07070a 100%);
     color: var(--text);
     font-family: var(--font-sans);
     line-height: 1.6;
@@ -50,7 +52,35 @@
   .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
 
   /* ---------- Dynamic background ---------- */
-  .bg-orbs { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+  .bg-orbs { position: fixed; inset: -80px; z-index: -1; overflow: hidden; pointer-events: none; will-change: transform; }
+
+  /* Film grain — subtle texture over the whole page */
+  .bg-grain {
+    position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: 0.05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.7'/%3E%3C/svg%3E");
+    mix-blend-mode: overlay;
+  }
+
+  /* Soft light pooling behind the hero */
+  .bg-hero-glow {
+    position: fixed; top: -34vh; left: 50%; transform: translateX(-50%);
+    width: 130vw; height: 92vh; z-index: -1; pointer-events: none;
+    background: radial-gradient(50% 52% at 50% 42%, rgba(40,200,64,0.075), rgba(96,165,250,0.03) 55%, transparent 75%);
+  }
+
+  /* Drifting motes (spawned by JS, gated on prefers-reduced-motion) */
+  .particle {
+    position: absolute; border-radius: 50%; pointer-events: none; opacity: 0;
+    background: radial-gradient(circle, rgba(255,255,255,0.95), rgba(40,200,64,0.55) 55%, transparent 75%);
+    box-shadow: 0 0 8px rgba(40,200,64,0.5);
+    animation: floatUp linear infinite;
+  }
+  @keyframes floatUp {
+    0%   { transform: translate3d(0, 0, 0) scale(1); opacity: 0; }
+    8%   { opacity: var(--po, 0.4); }
+    85%  { opacity: var(--po, 0.4); }
+    100% { transform: translate3d(var(--px, 0px), -112vh, 0) scale(0.55); opacity: 0; }
+  }
   .orb { position: absolute; border-radius: 50%; will-change: transform; }
   .orb-1 {
     width: 640px; height: 640px; top: -180px; left: -140px;
@@ -85,6 +115,7 @@
   .scroll-progress {
     position: fixed; top: 0; left: 0; height: 2px; width: 0;
     background: linear-gradient(90deg, var(--green), var(--blue));
+    box-shadow: 0 0 10px rgba(40,200,64,0.55);
     z-index: 70; transition: width 0.1s linear;
   }
 
@@ -96,11 +127,11 @@
   @keyframes fade-up { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
 
   .reveal {
-    opacity: 0; transform: translateY(22px);
-    transition: opacity 0.6s cubic-bezier(.22,.61,.36,1), transform 0.6s cubic-bezier(.22,.61,.36,1);
+    opacity: 0; transform: translateY(24px); filter: blur(7px);
+    transition: opacity 0.6s cubic-bezier(.22,.61,.36,1), transform 0.6s cubic-bezier(.22,.61,.36,1), filter 0.6s cubic-bezier(.22,.61,.36,1);
     transition-delay: var(--d, 0s);
   }
-  .reveal.visible { opacity: 1; transform: none; }
+  .reveal.visible { opacity: 1; transform: none; filter: blur(0); }
 
   /* ---------- Accent shimmer ---------- */
   .hero h1 .accent {
@@ -115,9 +146,15 @@
   /* ---------- Terminal effects ---------- */
   .terminal {
     box-shadow: 0 24px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(40,200,64,0.07), 0 0 60px rgba(40,200,64,0.06);
-    animation: floaty 7s ease-in-out infinite;
+    animation: floaty 7s ease-in-out infinite, glowPulse 5.5s ease-in-out infinite;
+    transform-style: preserve-3d;
   }
+  .terminal.tilting { animation: glowPulse 5.5s ease-in-out infinite; transition: transform 0.18s ease-out; }
   @keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+  @keyframes glowPulse {
+    0%,100% { box-shadow: 0 24px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(40,200,64,0.07), 0 0 60px rgba(40,200,64,0.06); }
+    50%     { box-shadow: 0 24px 64px rgba(0,0,0,0.5), 0 0 0 1px rgba(40,200,64,0.13), 0 0 84px rgba(40,200,64,0.14); }
+  }
   .terminal-body .line-fade { opacity: 0; transform: translateY(4px); transition: opacity 0.45s ease, transform 0.45s ease; }
   .terminal-body .lf1 { transition-delay: 0.12s; }
   .terminal-body .lf2 { transition-delay: 0.24s; }
@@ -153,8 +190,16 @@
     50% { box-shadow: 0 0 0 8px rgba(40,200,64,0); }
   }
 
-  .provider { transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease; }
-  .provider:hover { transform: translateX(4px); border-color: rgba(40,200,64,0.30); background: var(--card-hover); }
+  .provider { position: relative; overflow: hidden; transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease; }
+  .provider::before {
+    content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: linear-gradient(180deg, var(--green), rgba(96,165,250,0.7));
+    box-shadow: 0 0 10px rgba(40,200,64,0.5);
+    opacity: 0; transform: scaleY(0.3); transition: opacity .25s ease, transform .25s ease;
+  }
+  .provider:hover { transform: translateX(5px); border-color: rgba(40,200,64,0.35); background: var(--card-hover); }
+  .provider:hover::before { opacity: 1; transform: scaleY(1); }
 
   .chip { transition: border-color 0.2s ease, transform 0.2s ease, color 0.2s ease; }
   .chip:hover { border-color: rgba(40,200,64,0.4); color: var(--text); transform: translateY(-2px); }
@@ -164,18 +209,22 @@
 
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: 0.001s !important; animation-iteration-count: 1 !important; transition-duration: 0.001s !important; }
-    .hero-anim { opacity: 1 !important; transform: none !important; }
-    .reveal { opacity: 1 !important; transform: none !important; }
-    .bg-orbs, .orb { display: none; }
+    .hero-anim { opacity: 1 !important; transform: none !important; filter: none !important; }
+    .reveal { opacity: 1 !important; transform: none !important; filter: none !important; }
+    .chip { opacity: 1 !important; animation: none !important; }
+    .bg-orbs, .orb, .particle, .bg-grain { display: none; }
   }
 
   /* ---------- Nav ---------- */
   nav {
     position: sticky; top: 0; z-index: 50;
-    background: rgba(10, 10, 10, 0.85);
-    backdrop-filter: blur(12px);
+    background: rgba(10, 10, 10, 0.78);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
     border-bottom: 1px solid var(--border-soft);
+    transition: box-shadow 0.3s ease, background 0.3s ease;
   }
+  nav.scrolled { background: rgba(9, 9, 11, 0.88); box-shadow: 0 10px 30px rgba(0,0,0,0.35); }
   .nav-inner {
     display: flex; align-items: center; justify-content: space-between;
     height: 64px;
@@ -183,8 +232,14 @@
   .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; color: var(--text); }
   .brand img { width: 30px; height: 30px; border-radius: 8px; }
   .nav-links { display: flex; align-items: center; gap: 26px; font-size: 14px; color: var(--text-muted); }
-  .nav-links a { color: var(--text-muted); }
-  .nav-links a:hover { color: var(--text); text-decoration: none; }
+  .nav-links a { position: relative; color: var(--text-muted); }
+  .nav-links a::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: -6px; height: 2px;
+    border-radius: 2px; background: linear-gradient(90deg, var(--green), var(--blue));
+    transform: scaleX(0); transform-origin: left; transition: transform 0.25s ease;
+  }
+  .nav-links a:hover, .nav-links a.active { color: var(--text); text-decoration: none; }
+  .nav-links a:hover::after, .nav-links a.active::after { transform: scaleX(1); }
   .nav-cta { display: flex; align-items: center; gap: 14px; }
   .nav-burger { display: none; background: none; border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 10px; font-size: 16px; cursor: pointer; }
 
@@ -196,17 +251,29 @@
     border: 1px solid transparent; transition: all .15s ease;
     white-space: nowrap;
   }
-  .btn-primary { background: var(--green); color: #04170a; }
-  .btn-primary:hover { background: #34d553; text-decoration: none; }
-  .btn-ghost { background: transparent; color: var(--text); border-color: var(--border); }
-  .btn-ghost:hover { border-color: #33333a; background: var(--card-hover); text-decoration: none; }
+  .btn-primary {
+    background: linear-gradient(180deg, #2fd14d, #1fae3a);
+    color: #04170a;
+    box-shadow: 0 8px 22px rgba(40,200,64,0.26), inset 0 1px 0 rgba(255,255,255,0.25);
+  }
+  .btn-primary:hover {
+    background: linear-gradient(180deg, #3ade5b, #23ba41);
+    transform: translateY(-2px);
+    box-shadow: 0 12px 30px rgba(40,200,64,0.36), inset 0 1px 0 rgba(255,255,255,0.28);
+    text-decoration: none;
+  }
+  .btn-ghost { background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01)); color: var(--text); border-color: var(--border); }
+  .btn-ghost:hover { border-color: #3a3a42; background: var(--card-hover); transform: translateY(-2px); text-decoration: none; }
   .btn-sm { padding: 8px 13px; font-size: 13px; }
 
   /* ---------- Hero ---------- */
   .hero { padding: 88px 0 72px; text-align: center; position: relative; }
   .hero-badge {
     display: inline-flex; align-items: center; gap: 8px;
-    border: 1px solid var(--border); background: var(--bg-soft);
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(255,255,255,0.035), transparent), var(--bg-soft);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 8px 24px rgba(0,0,0,0.3);
     color: var(--text-muted); font-size: 13px;
     padding: 6px 14px; border-radius: 999px; margin-bottom: 28px;
   }
@@ -255,7 +322,12 @@
     font-size: 13px; color: var(--text-muted);
     border: 1px solid var(--border); background: var(--bg-soft);
     padding: 6px 14px; border-radius: 999px;
+    opacity: 0; animation: fade-up 0.6s cubic-bezier(.22,.61,.36,1) backwards;
   }
+  .chip:nth-child(1) { animation-delay: .56s; } .chip:nth-child(2) { animation-delay: .62s; }
+  .chip:nth-child(3) { animation-delay: .68s; } .chip:nth-child(4) { animation-delay: .74s; }
+  .chip:nth-child(5) { animation-delay: .80s; } .chip:nth-child(6) { animation-delay: .86s; }
+  .chip:nth-child(7) { animation-delay: .92s; } .chip:nth-child(8) { animation-delay: .98s; }
   .chip b { color: var(--text); font-weight: 600; }
 
   /* ---------- Sections ---------- */
@@ -263,11 +335,20 @@
   section.alt { background: rgba(12,12,15,0.72); border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
 
   .sec-head { text-align: center; max-width: 720px; margin: 0 auto 52px; }
-  .sec-head h2 { font-size: clamp(28px, 4vw, 40px); font-weight: 800; letter-spacing: -0.02em; margin-bottom: 14px; }
+  .sec-head h2 { font-size: clamp(28px, 4vw, 40px); font-weight: 800; letter-spacing: -0.02em; margin-bottom: 18px; }
+  .sec-head h2::after {
+    content: ""; display: block; width: 58px; height: 3px; margin: 16px auto 0;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--green), var(--blue));
+    box-shadow: 0 0 12px rgba(40,200,64,0.4);
+  }
   .sec-head p { color: var(--text-muted); font-size: 16px; }
   .sec-head .kicker {
+    display: inline-block; padding: 5px 13px; border-radius: 999px;
+    background: var(--green-bg); border: 1px solid rgba(40,200,64,0.22);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
     font-family: var(--font-mono); font-size: 12.5px; text-transform: uppercase;
-    letter-spacing: 0.14em; color: var(--green); margin-bottom: 12px;
+    letter-spacing: 0.14em; color: var(--green); margin-bottom: 14px;
   }
 
   /* ---------- Cards / grids ---------- */
@@ -277,16 +358,50 @@
   .grid-2 { grid-template-columns: repeat(2, 1fr); }
 
   .card {
-    background: var(--card); border: 1px solid var(--border-soft);
+    position: relative; overflow: hidden;
+    background: var(--card-glass);
+    border: 1px solid var(--border-soft);
     border-radius: var(--radius); padding: 24px;
-    transition: border-color .15s ease, background .15s ease;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.045), 0 1px 0 rgba(0,0,0,0.4);
+    transition: border-color .15s ease, background .15s ease, box-shadow .3s ease;
   }
-  .card:hover { border-color: #2a2a30; background: var(--card-hover); }
+  .card:hover {
+    border-color: rgba(40,200,64,0.35); background: var(--card-hover);
+    box-shadow: 0 18px 44px rgba(0,0,0,0.45), 0 0 42px rgba(40,200,64,0.07), inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  /* Sweeping shine on hover */
+  .card::before {
+    content: ""; position: absolute; top: 0; left: -75%; width: 45%; height: 100%;
+    background: linear-gradient(100deg, transparent, rgba(255,255,255,0.055), transparent);
+    transform: skewX(-20deg); transition: left 0.7s ease; pointer-events: none;
+  }
+  .card:hover::before { left: 135%; }
+  /* Orbiting gradient ring on hover */
+  .card::after {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px;
+    background: linear-gradient(115deg, transparent 32%, var(--green-glow) 46%, rgba(96,165,250,0.55) 56%, transparent 70%);
+    background-size: 200% 100%;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    opacity: 0; transition: opacity 0.35s ease; pointer-events: none;
+    animation: border-sweep 3.2s linear infinite;
+  }
+  .card:hover::after { opacity: 1; }
+  @keyframes border-sweep { to { background-position: -200% 0; } }
   .card .icon {
     width: 38px; height: 38px; border-radius: 10px;
     display: flex; align-items: center; justify-content: center;
     font-size: 18px; margin-bottom: 16px;
-    background: var(--green-bg); border: 1px solid rgba(40,200,64,0.25);
+    background: linear-gradient(135deg, rgba(40,200,64,0.18), rgba(40,200,64,0.05) 55%, rgba(96,165,250,0.1));
+    border: 1px solid rgba(40,200,64,0.3);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 6px 16px rgba(0,0,0,0.35);
+    transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+  }
+  .card:hover .icon {
+    transform: scale(1.12) rotate(-6deg);
+    border-color: rgba(40,200,64,0.55);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.1), 0 8px 22px rgba(0,0,0,0.45), 0 0 22px rgba(40,200,64,0.28);
   }
   .card h3 { font-size: 16.5px; font-weight: 700; margin-bottom: 8px; }
   .card p { color: var(--text-muted); font-size: 14px; }
@@ -296,7 +411,10 @@
   .why-item { display: flex; gap: 14px; }
   .why-item .check {
     flex-shrink: 0; width: 24px; height: 24px; margin-top: 2px;
-    border-radius: 7px; background: var(--green-bg); border: 1px solid rgba(40,200,64,0.3);
+    border-radius: 7px;
+    background: linear-gradient(135deg, rgba(40,200,64,0.22), rgba(40,200,64,0.06));
+    border: 1px solid rgba(40,200,64,0.35);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 0 12px rgba(40,200,64,0.15);
     display: flex; align-items: center; justify-content: center; font-size: 13px; color: var(--green);
   }
   .why-item b { display: block; font-size: 15px; margin-bottom: 4px; }
@@ -319,8 +437,14 @@
   .flow { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 40px; }
   .flow-step {
     display: flex; align-items: center; gap: 10px;
-    background: var(--card); border: 1px solid var(--border-soft);
+    background: var(--card-glass); border: 1px solid var(--border-soft);
     border-radius: 999px; padding: 10px 18px; font-size: 14px; font-weight: 600;
+    transition: transform .2s ease, border-color .2s ease, box-shadow .25s ease;
+  }
+  .flow-step:hover {
+    transform: translateY(-3px);
+    border-color: rgba(40,200,64,0.4);
+    box-shadow: 0 10px 26px rgba(0,0,0,0.35), 0 0 18px rgba(40,200,64,0.08);
   }
   .flow-step .num {
     width: 24px; height: 24px; border-radius: 50%;
@@ -328,7 +452,14 @@
     display: flex; align-items: center; justify-content: center;
     font-size: 12.5px; font-weight: 700;
   }
-  .flow-arrow { color: var(--text-dim); font-size: 18px; align-self: center; }
+  .flow-arrow {
+    color: var(--text-dim); font-size: 18px; align-self: center;
+    animation: arrowPulse 2.4s ease-in-out infinite;
+  }
+  .flow-arrow:nth-of-type(2) { animation-delay: .3s; }
+  .flow-arrow:nth-of-type(3) { animation-delay: .6s; }
+  .flow-arrow:nth-of-type(4) { animation-delay: .9s; }
+  @keyframes arrowPulse { 0%,100% { opacity: .4; transform: translateX(0); } 50% { opacity: 1; transform: translateX(5px); } }
 
   /* Tool groups */
   .tool-group { margin-bottom: 14px; }
@@ -338,6 +469,12 @@
     font-family: var(--font-mono); font-size: 12.5px;
     color: var(--text); background: var(--bg-soft);
     border: 1px solid var(--border); border-radius: 7px; padding: 4px 10px;
+    transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease;
+  }
+  .tool-chip:hover {
+    border-color: rgba(40,200,64,0.4);
+    box-shadow: 0 0 12px rgba(40,200,64,0.12);
+    transform: translateY(-1px);
   }
 
   /* Providers */
@@ -356,8 +493,10 @@
   .install-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; align-items: start; }
   .install-block h3 { font-size: 16.5px; margin-bottom: 14px; }
   .code-block {
-    background: var(--bg-soft); border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 30%), var(--bg-soft);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm); padding: 16px 18px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
     font-family: var(--font-mono); font-size: 13px; line-height: 1.8;
     position: relative; overflow-x: auto;
   }
@@ -380,8 +519,15 @@
   /* FAQ */
   .faq-item { margin-bottom: 14px; }
   .faq-item details {
-    background: var(--card); border: 1px solid var(--border-soft);
+    background: var(--card-glass);
+    border: 1px solid var(--border-soft);
     border-radius: var(--radius-sm); padding: 4px 20px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    transition: border-color .2s ease, box-shadow .3s ease, transform .2s ease;
+  }
+  .faq-item details:hover {
+    border-color: rgba(40,200,64,0.3);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 12px 30px rgba(0,0,0,0.35), 0 0 26px rgba(40,200,64,0.05);
   }
   .faq-item summary {
     cursor: pointer; font-weight: 600; font-size: 15px;
@@ -437,6 +583,8 @@
   <div class="orb orb-2"></div>
   <div class="orb orb-3"></div>
 </div>
+<div class="bg-grain" aria-hidden="true"></div>
+<div class="bg-hero-glow" aria-hidden="true"></div>
 <div class="scroll-progress" id="scrollProgress" aria-hidden="true"></div>
 
 <nav>
@@ -464,9 +612,9 @@
 <!-- HERO -->
 <header class="hero">
   <div class="container">
-    <div class="hero-badge hero-anim d1"><span class="dot"></span> Local-first · BYOK · 16 providers · MIT license</div>
+    <div class="hero-badge hero-anim d1"><span class="dot"></span> Local-first · BYOK · 17 providers · MIT license</div>
     <h1 class="hero-anim d2">Private, vendor-neutral<br>coding agents <span class="accent">— built to be verified.</span></h1>
-    <p class="sub hero-anim d3">A self-hosted coding agent for private repositories, local models, CI, and verifiable automation. Textual TUI first, Web UI, HTTP daemon, MCP/ACP — or fully offline with Ollama and LM Studio.</p>
+    <p class="sub hero-anim d3">A self-hosted coding agent for private repositories, local models, CI, and verifiable automation. Textual TUI first, Web UI, HTTP daemon, MCP/ACP — or fully offline with Ollama and LM Studio. Commands run inside an OS-level sandbox with an Ed25519-signed audit trail.</p>
     <div class="hero-cta hero-anim d4">
       <a class="btn btn-primary" href="#install">Get started — it&rsquo;s free</a>
       <a class="btn btn-ghost" href="https://github.com/ilyaosovskoi/tera-pilot">GitHub repo →</a>
@@ -496,6 +644,8 @@
       <span class="chip"><b>Textual</b> TUI</span>
       <span class="chip"><b>macOS · Linux · Windows</b></span>
       <span class="chip"><b>Ollama / LM Studio</b> offline</span>
+      <span class="chip"><b>OS-level sandbox</b> Seatbelt / bwrap</span>
+      <span class="chip"><b>SSRF-hardened</b> web fetch</span>
       <span class="chip"><b>Ed25519</b> signed audit</span>
     </div>
   </div>
@@ -516,7 +666,7 @@
       </div>
       <div class="why-item">
         <div class="check">✓</div>
-        <div><b>Bring your own keys</b><span>Choose among 16 providers and switch models without lock-in to a vendor.</span></div>
+        <div><b>Bring your own keys</b><span>Choose among 17 providers and switch models without lock-in to a vendor.</span></div>
       </div>
       <div class="why-item">
         <div class="check">✓</div>
@@ -686,6 +836,7 @@
       <div class="provider">OpenRouter <span class="kind kind-aggregator">aggregator</span></div>
       <div class="provider">Ollama <span class="kind kind-local">local</span></div>
       <div class="provider">LM Studio <span class="kind kind-local">local</span></div>
+      <div class="provider">Local (OpenAI-compatible) <span class="kind kind-local">local</span></div>
     </div>
   </div>
 </section>
@@ -710,6 +861,11 @@
         <p>Allowed and denied commands are controlled explicitly.</p>
       </div>
       <div class="card">
+        <div class="icon">🏰</div>
+        <h3>OS-level sandbox</h3>
+        <p>Commands run inside a Seatbelt/bubblewrap sandbox — network denied, writes kept to the workspace, secrets unreadable.</p>
+      </div>
+      <div class="card">
         <div class="icon">✅</div>
         <h3>Project approvals</h3>
         <p>A repository cannot silently widen its own permissions.</p>
@@ -717,7 +873,7 @@
       <div class="card">
         <div class="icon">🎚️</div>
         <h3>Autonomy levels</h3>
-        <p><span style="font-family:var(--font-mono);font-size:13px;color:var(--green)">always_ask · new_files_only · never_ask</span></p>
+        <p><span style="font-family:var(--font-mono);font-size:13px;color:var(--green)">always_ask · new_files_only · never_ask</span><br>Headless runs fail closed — side effects are blocked unless explicitly opted in.</p>
       </div>
       <div class="card">
         <div class="icon">👁️</div>
@@ -725,9 +881,14 @@
         <p>Writes can pause for human approval before they land.</p>
       </div>
       <div class="card">
+        <div class="icon">🌐</div>
+        <h3>SSRF-hardened web</h3>
+        <p>web_fetch rejects loopback, private, and cloud-metadata hosts — DNS and every redirect hop re-checked.</p>
+      </div>
+      <div class="card">
         <div class="icon">🧠</div>
         <h3>Guardian</h3>
-        <p>Assesses risky tool calls — approve, reject, or modify them.</p>
+        <p>Assesses risky tool calls — approve, reject, or modify; fails closed on errors.</p>
       </div>
       <div class="card">
         <div class="icon">↩️</div>
@@ -744,10 +905,16 @@
         <h3>Signed audit export</h3>
         <p>Ed25519 signatures + SHA-256 hash chaining for exported records — verify on any machine.</p>
       </div>
+      <div class="card">
+        <div class="icon">🗝️</div>
+        <h3>Offline licensing</h3>
+        <p>Pro features gate on Ed25519-signed license keys — verified entirely offline, zero telemetry, no phone-home.</p>
+      </div>
     </div>
     <p style="text-align:center;color:var(--text-dim);font-size:13.5px;margin-top:28px;">
       These mechanisms provide control and evidence — they are not a claim of SOC 2, ISO 27001, or vulnerability-free code. See
-      <a href="TERA_PILOT_PRODUCT_STRATEGY.md">product strategy</a> and <a href="THREAT_MODEL.md">threat model</a>.
+      <a href="TERA_PILOT_PRODUCT_STRATEGY.md">product strategy</a>, <a href="THREAT_MODEL.md">threat model</a> and <a href="SECURITY.md">security</a>.
+      Every control is covered by automated tests — 210 security/sandbox/command-policy tests plus 58 reproducible eval tasks (incl. 10 adversarial sec-*).
     </p>
   </div>
 </section>
@@ -778,7 +945,9 @@
           <span class="c-green">tera-pilot-acp --help</span><br>
           <span class="c-dim"># Environment doctor / signed audit</span><br>
           <span class="c-green">tera-pilot doctor</span><br>
-          <span class="c-green">tera-pilot audit</span>
+          <span class="c-green">tera-pilot audit</span><br>
+          <span class="c-dim"># Offline license keys (optional Pro features)</span><br>
+          <span class="c-green">tera-pilot license status</span>
         </div>
       </div>
       <div class="install-block">
@@ -860,13 +1029,25 @@
       <div class="faq-item">
         <details>
           <summary>How much does it cost?</summary>
-          <p>Nothing for the software — MIT licensed, free to use, modify and integrate. You only pay for the model providers you choose to bring your own keys to (or nothing at all with local models).</p>
+          <p>Nothing for the software — MIT licensed, free to use, modify and integrate. You only pay for the model providers you choose to bring your own keys to (or nothing at all with local models). A few optional Pro features (second opinion, cost router, spend dashboard) gate on Ed25519-signed license keys issued entirely offline — verification never phones home.</p>
         </details>
       </div>
       <div class="faq-item">
         <details>
           <summary>Can the audit trail be verified on another machine?</summary>
           <p>Yes. Export with <span style="font-family:var(--font-mono);font-size:13px">tera-pilot audit export</span>, then run <span style="font-family:var(--font-mono);font-size:13px">tera-pilot audit verify</span> anywhere using the public key from <span style="font-family:var(--font-mono);font-size:13px">~/.tera_pilot/audit_key.pub</span>. Exit code 0 means the chain is intact.</p>
+        </details>
+      </div>
+      <div class="faq-item">
+        <details>
+          <summary>How does the OS-level sandbox work?</summary>
+          <p><span style="font-family:var(--font-mono);font-size:13px">execute_command</span>, <span style="font-family:var(--font-mono);font-size:13px">run_code</span> and auto-detected test/lint commands run inside an OS-level sandbox when a backend is available (macOS <span style="font-family:var(--font-mono);font-size:13px">sandbox-exec</span>/Seatbelt, Linux <span style="font-family:var(--font-mono);font-size:13px">bubblewrap</span>): network is denied by default, writes are restricted to the workspace and OS temp, and sensitive paths (<span style="font-family:var(--font-mono);font-size:13px">~/.ssh</span>, <span style="font-family:var(--font-mono);font-size:13px">~/.aws</span>, <span style="font-family:var(--font-mono);font-size:13px">~/.gnupg</span>) are unreadable. The mode is configurable (<span style="font-family:var(--font-mono);font-size:13px">auto</span> default / <span style="font-family:var(--font-mono);font-size:13px">on</span> / <span style="font-family:var(--font-mono);font-size:13px">off</span>) and <span style="font-family:var(--font-mono);font-size:13px">on</span> fails closed without a backend. It is a defense layer, not a full VM.</p>
+        </details>
+      </div>
+      <div class="faq-item">
+        <details>
+          <summary>How is the security posture verified?</summary>
+          <p>Security is treated as a continuously tested property: 210 security/sandbox/command-policy tests, plus a reproducible eval harness of 58 repository tasks (incl. 10 adversarial <span style="font-family:var(--font-mono);font-size:13px">sec-*</span> tasks). Five real vulnerabilities found by offensive testing (git alias/config-key execution, CORS origin-prefix matching, npm script aliases, …) were fixed in v2.3.4 with regression tests — see <a href="SECURITY.md">SECURITY.md</a> and <a href="SECURITY_TEST_REPORT.md">SECURITY_TEST_REPORT.md</a>.</p>
         </details>
       </div>
       <div class="faq-item">
@@ -919,7 +1100,7 @@
     </div>
     <div class="footer-bottom">
       <span>© 2026 Tera Pilot Contributors · MIT License</span>
-      <span>Self-hosted · BYOK · TUI-first</span>
+      <span>Self-hosted · BYOK · OS-sandboxed · TUI-first</span>
     </div>
   </div>
 </footer>
@@ -978,6 +1159,87 @@
     navigator.clipboard.writeText(text).then(function () {
       btn.textContent = 'copied ✓';
       setTimeout(function () { btn.textContent = 'copy'; }, 1500);
+    });
+  }
+
+  // Nav: scrolled shadow + scrollspy active link
+  var nav = document.querySelector('nav');
+  window.addEventListener('scroll', function () {
+    nav.classList.toggle('scrolled', window.scrollY > 12);
+  }, { passive: true });
+
+  var spyLinks = document.querySelectorAll('.nav-links a[href^="#"]');
+  if ('IntersectionObserver' in window && spyLinks.length) {
+    var spy = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) {
+          spyLinks.forEach(function (a) {
+            a.classList.toggle('active', a.getAttribute('href') === '#' + en.target.id);
+          });
+        }
+      });
+    }, { rootMargin: '-40% 0px -55% 0px' });
+    document.querySelectorAll('section[id]').forEach(function (s) { spy.observe(s); });
+  }
+
+  // Background: drifting motes
+  if (!reduceMotion) {
+    var motes = document.querySelector('.bg-orbs');
+    var moteCount = window.innerWidth < 768 ? 16 : 34;
+    for (var mi = 0; mi < moteCount; mi++) {
+      var mote = document.createElement('span');
+      mote.className = 'particle';
+      var mSize = (Math.random() * 2.1 + 0.9).toFixed(1);
+      mote.style.cssText = [
+        'left:' + (Math.random() * 100).toFixed(2) + '%',
+        'bottom:' + (-(Math.random() * 12)).toFixed(1) + 'vh',
+        'width:' + mSize + 'px', 'height:' + mSize + 'px',
+        '--px:' + (Math.random() * 140 - 70).toFixed(1) + 'px',
+        '--po:' + (Math.random() * 0.4 + 0.15).toFixed(2),
+        'animation-duration:' + (Math.random() * 20 + 16).toFixed(1) + 's',
+        'animation-delay:' + (Math.random() * 22).toFixed(1) + 's'
+      ].join(';');
+      motes.appendChild(mote);
+    }
+  }
+
+  // Background: gentle mouse parallax on the orb field
+  var orbs = document.querySelector('.bg-orbs');
+  var finePointer = window.matchMedia('(pointer: fine)').matches;
+  if (orbs && !reduceMotion && finePointer) {
+    var px = 0, py = 0, cx = 0, cy = 0, pRaf = null;
+    window.addEventListener('mousemove', function (e) {
+      px = (e.clientX / window.innerWidth - 0.5) * 44;
+      py = (e.clientY / window.innerHeight - 0.5) * 32;
+      if (!pRaf) { pRaf = requestAnimationFrame(parallaxStep); }
+    }, { passive: true });
+    function parallaxStep() {
+      cx += (px - cx) * 0.055; cy += (py - cy) * 0.055;
+      orbs.style.transform = 'translate3d(' + cx.toFixed(2) + 'px,' + cy.toFixed(2) + 'px,0)';
+      if (Math.abs(px - cx) > 0.05 || Math.abs(py - cy) > 0.05) { pRaf = requestAnimationFrame(parallaxStep); }
+      else { pRaf = null; }
+    }
+  }
+
+  // Hero terminal: subtle 3D tilt following the pointer
+  var term = document.querySelector('.terminal');
+  var heroEl = document.querySelector('.hero');
+  if (term && heroEl && !reduceMotion && finePointer) {
+    var tiltRaf = null;
+    heroEl.addEventListener('mousemove', function (e) {
+      if (tiltRaf) { return; }
+      tiltRaf = requestAnimationFrame(function () {
+        var r = term.getBoundingClientRect();
+        var dx = (e.clientX - (r.left + r.width / 2)) / r.width;
+        var dy = (e.clientY - (r.top + r.height / 2)) / r.height;
+        term.classList.add('tilting');
+        term.style.transform = 'perspective(900px) rotateX(' + (-dy * 4).toFixed(2) + 'deg) rotateY(' + (dx * 5).toFixed(2) + 'deg)';
+        tiltRaf = null;
+      });
+    });
+    heroEl.addEventListener('mouseleave', function () {
+      term.classList.remove('tilting');
+      term.style.transform = '';
     });
   }
 </script>

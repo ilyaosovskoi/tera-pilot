@@ -248,7 +248,12 @@ class Notifier:
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         self._backends: Dict[str, NotifierBackend] = {}
-        self._lock = threading.Lock()
+        # v2.3.5-fix: RLock, not Lock — status() calls list_backends()
+        # while holding this lock, which self-deadlocked forever on a
+        # non-reentrant Lock (the TUI's /notify command froze the whole
+        # UI: the handler runs on the main thread and blocked on the
+        # lock it already held).
+        self._lock = threading.RLock()
         self._history: List[Dict[str, Any]] = []
         self._max_history: int = 200
 

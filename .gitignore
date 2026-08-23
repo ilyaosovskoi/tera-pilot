@@ -10,6 +10,10 @@ stderr.txt
 venv/
 .pytest_cache/
 
+# Agent learning-loop runtime state (marker files only, machine-local)
+learnings/
+tera_pilot_tui/learnings/
+
 # Raw eval run logs are development artifacts, not versioned.
 # The human-readable summary is eval/REPORT_*.md; the schema stays tracked.
 eval/results/*.json

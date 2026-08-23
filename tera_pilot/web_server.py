@@ -69,7 +69,7 @@ from .utils import setup_logging
 
 logger = logging.getLogger(__name__)
 
-__version__ = "2.3.5"
+__version__ = "2.3.6"
 
 # Default port — kept identical to the legacy embedded API server so
 # existing users / scripts that hit ``http://127.0.0.1:18732`` keep
@@ -346,6 +346,14 @@ class TeraPilotWebServer:
             self._http = ThreadedHTTPServer(
                 (self.host, self.port), TeraPilotWebHandler,
             )
+        # v2.3.5-fix: when the caller passed port=0 ("let the OS pick"),
+        # self.port stayed 0 even though the socket bound to a real
+        # port — so base_url / the API base reported to clients were
+        # broken (http://host:0). Sync from the actual bound address.
+        try:
+            self.port = int(self._http.server_address[1])
+        except Exception:
+            pass
         self._thread: Optional[threading.Thread] = None
 
     # ── Lifecycle ────────────────────────────────────────────────
@@ -414,7 +422,7 @@ class TeraPilotWebServer:
 def _parse_args(argv: Optional[list] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="tera_pilot",
-        description="Tera Pilot v2.3.5 — local-first AI IDE (web UI).",
+        description="Tera Pilot v2.3.6 — local-first AI IDE (web UI).",
     )
     p.add_argument(
         "--host", default=os.environ.get("TERA_PILOT_HOST", DEFAULT_HOST),

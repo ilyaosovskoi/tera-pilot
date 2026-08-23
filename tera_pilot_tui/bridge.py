@@ -394,6 +394,47 @@ class TeraPilotBridge:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def configure_provider(
+        self,
+        provider_id: str,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Update a provider's model / API key, preserving the rest of
+        its config (api_base, temperature, max_tokens, ...).
+
+        v2.3.5-fix: the Quick Settings modal and the `/provider <pid>
+        <model>` command used to call ``registry.configure(pid,
+        model=...)`` / ``registry.configure(pid, api_key=...)`` — but
+        ProviderRegistry.configure() takes a ProviderConfig object, so
+        both raised TypeError and the model/API key were silently
+        dropped (the UI claimed success while nothing changed).
+        Returns {ok: bool, provider: str, model: str} or an error dict.
+        """
+        if self._registry is None:
+            self._registry = self._build_registry()
+        try:
+            from tera_pilot.providers import ProviderConfig
+            existing = None
+            try:
+                existing = self._registry.get(provider_id).config
+            except Exception:
+                pass
+            cfg = ProviderConfig(
+                provider_id=provider_id,
+                model=model if model is not None else (existing.model if existing else ""),
+                api_key=(api_key if api_key is not None
+                         else (existing.api_key if existing else None)),
+                api_base=existing.api_base if existing else None,
+                temperature=float(getattr(existing, "temperature", 0.2) or 0.2),
+                max_tokens=int(getattr(existing, "max_tokens", 4096) or 4096),
+            )
+            self._registry.configure(provider_id, cfg)
+            self._agent = None  # force rebuild so the new model takes effect
+            return {"ok": True, "provider": provider_id, "model": cfg.model}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def _get_active_model(self) -> Optional[str]:
         """Get the model name of the currently active provider."""
         if self._registry is None:
@@ -526,7 +567,11 @@ class TeraPilotBridge:
             return {"ok": False, "error": f"Invalid level: {level}. Valid: {', '.join(valid_levels)}"}
 
         agent = self.ensure_agent()
-        if not hasattr(agent.tools, "_guardian_config"):
+        # v2.3.5-fix: ToolEngine.__init__ sets _guardian_config = None, so
+        # ``hasattr`` is always True and the else-branch crashed with
+        # AttributeError: 'NoneType' object has no attribute 'provider_id'
+        # — /guardian <level> failed on a fresh agent. Check the VALUE.
+        if getattr(agent.tools, "_guardian_config", None) is None:
             from tera_pilot.agent.guardian import GuardianConfig
             agent.tools._guardian_config = GuardianConfig(level=level)
         else:
@@ -545,8 +590,10 @@ class TeraPilotBridge:
 
     def get_guardian_level(self) -> Dict[str, Any]:
         """Get current Guardian level."""
-        if self._agent is not None and hasattr(self._agent.tools, "_guardian_config") and self._agent.tools._guardian_config:
-            return {"ok": True, "level": self._agent.tools._guardian_config.level}
+        if self._agent is not None:
+            cfg = getattr(self._agent.tools, "_guardian_config", None)
+            if cfg is not None:
+                return {"ok": True, "level": cfg.level}
         return {"ok": True, "level": "off"}
 
     def _save_guardian_config(self, level: str) -> None:
@@ -1895,9 +1942,22 @@ class TeraPilotBridge:
             return {"ok": False, "error": str(e)}
 
 
-    def github_set_repo(self, owner: str, repo: str) -> Dict[str, Any]:
-        """Set the GitHub repository (owner/repo)."""
+    def github_set_repo(self, owner: str, repo: Optional[str] = None) -> Dict[str, Any]:
+        """Set the GitHub repository (owner/repo).
+
+        Accepts either ``github_set_repo("owner", "repo")`` or a single
+        ``"owner/repo"`` string (the TUI's /github repo command passes
+        the whole ``owner/repo`` as one argument — previously this
+        raised TypeError and the repo was never set).
+        """
         try:
+            if repo is None:
+                if "/" not in owner:
+                    return {"ok": False, "error": "Invalid repo. Use: owner/repo"}
+                owner, repo = owner.split("/", 1)
+                owner, repo = owner.strip(), repo.strip()
+                if not owner or not repo:
+                    return {"ok": False, "error": "Invalid repo. Use: owner/repo"}
             from tera_pilot.github_automation import get_github_automation
             get_github_automation().set_repo(owner, repo)
             return {"ok": True, "repo": f"{owner}/{repo}"}
@@ -2009,11 +2069,30 @@ class TeraPilotBridge:
 
     # ── G13: MCP Server ─────────────────────────────────────────────────────
 
+    def _mcp_server_workspace(self) -> str:
+        """Resolve the workspace for MCP server mode.
+
+        v2.3.5-fix: the old code read ``self._agent.workspace``, but
+        AgentRuntime has no ``workspace`` attribute (it lives on
+        ``agent.tools.workspace``) — so once an agent existed, /mcp-server
+        failed with "'AgentRuntime' object has no attribute 'workspace'".
+        Prefer the bridge's own workspace, which is always in sync with
+        /cd and the agent's.
+        """
+        try:
+            if self._agent is not None:
+                ws = getattr(self._agent.tools, "workspace", None)
+                if ws:
+                    return str(ws)
+        except Exception:
+            pass
+        return self.workspace or os.getcwd()
+
     def mcp_server_list_tools(self) -> Dict[str, Any]:
         """List tools available in MCP server mode."""
         try:
             from tera_pilot.mcp_server import MCPServerMode
-            server = MCPServerMode(workspace=str(self._agent.workspace) if self._agent else os.getcwd())
+            server = MCPServerMode(workspace=self._mcp_server_workspace())
             return {"ok": True, "tools": server.list_tools()}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -2023,7 +2102,7 @@ class TeraPilotBridge:
         """Return MCP server status."""
         try:
             from tera_pilot.mcp_server import MCPServerMode
-            server = MCPServerMode(workspace=str(self._agent.workspace) if self._agent else os.getcwd())
+            server = MCPServerMode(workspace=self._mcp_server_workspace())
             return {"ok": True, **server.status()}
         except Exception as e:
             return {"ok": False, "error": str(e)}

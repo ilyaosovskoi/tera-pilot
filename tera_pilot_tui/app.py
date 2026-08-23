@@ -38,7 +38,15 @@ class TeraPilotTUIApp(App):
         Binding("ctrl+c", "interrupt", "Interrupt", priority=True, show=True),
         Binding("ctrl+d", "quit", "Quit", priority=True, show=True),
         Binding("ctrl+g", "launch_gui", "GUI", show=True),
-        Binding("ctrl+p", "open_command_palette", "Commands", show=True),
+        # v2.3.5-fix: priority=True — Textual's App.__init__ auto-binds
+        # ctrl+p → command_palette with priority=True UNLESS the app
+        # already binds an action named ``command_palette``. Our action
+        # is named differently (open_command_palette), so Textual added
+        # its own system palette and (being priority=True) it won the
+        # key — Ctrl+P showed Textual's Maximize/Quit/Screenshot instead
+        # of the project's slash-command palette. Marking ours priority
+        # makes our binding resolve first.
+        Binding("ctrl+p", "open_command_palette", "Commands", priority=True, show=True),
         Binding("ctrl+t", "toggle_theme", "Theme", show=True),
     ]
 
@@ -54,6 +62,12 @@ class TeraPilotTUIApp(App):
         # the modal stayed on screen forever once the agent moved on
         # (stale dialog over an idle app).
         self._approval_modal = None
+        # v2.3.5-fix: last error already rendered via the agent's ERROR
+        # event. The runtime emits an ERROR event AND returns
+        # success=False for the same terminal failure, so without this
+        # the ChatLog showed every run-ending error twice (once from the
+        # event, once from _on_turn_done).
+        self._last_event_error: Optional[str] = None
 
     # ---------------------------------------------------------------- compose
     def compose(self) -> ComposeResult:
@@ -70,7 +84,7 @@ class TeraPilotTUIApp(App):
         try:
             from tera_pilot import __version__ as _tera_pilot_version
         except Exception:
-            _tera_pilot_version = "2.3.5"
+            _tera_pilot_version = "2.3.6"
 
         # Initialize InfoBox with current state
         info = self.query_one(InfoBox)
@@ -276,24 +290,30 @@ class TeraPilotTUIApp(App):
                 # If a second token looks like a model name (contains / or
                 # known model patterns), pass it through.
                 if len(provider_parts) > 1:
-                    # Try setting provider first, then model
+                    # v2.3.5-fix: switch the provider AND configure its
+                    # model via the bridge. The old code called
+                    # ``self.bridge._registry.configure(pid, model=...)``
+                    # which raises TypeError (configure() expects a
+                    # ProviderConfig, not kwargs) and was silently
+                    # swallowed — the UI claimed "model: <m>" while the
+                    # model was never applied.
+                    chat = self.query_one(ChatLog)
                     r = self.bridge.set_provider(pid)
                     if r.get("ok"):
-                        # Also try to set the model on the provider
-                        try:
-                            self.bridge._registry.configure(
-                                pid, model=provider_parts[1]
+                        r2 = self.bridge.configure_provider(pid, model=provider_parts[1])
+                        if not r2.get("ok"):
+                            chat.add_error(
+                                f"Provider switched, but model failed: {r2.get('error', 'unknown')}"
                             )
-                        except Exception:
-                            pass
-                        chat = self.query_one(ChatLog)
+                            self.query_one(InputBox).focus()
+                            return
                         chat.add_system(
                             f"Provider switched to: [b]{r.get('provider', pid)}[/b] "
-                            f"model: [dim]{provider_parts[1]}[/dim]"
+                            f"model: [dim]{r2.get('model', provider_parts[1])}[/dim]"
                         )
                         self._refresh_status("idle")
                     else:
-                        self.query_one(ChatLog).add_error(
+                        chat.add_error(
                             f"Failed to switch provider: {r.get('error', 'unknown')}"
                         )
                     self.query_one(InputBox).focus()
@@ -510,8 +530,17 @@ class TeraPilotTUIApp(App):
     # ── v2.2.4: Quick Settings (/settings) ──────────────────────────
 
     def _open_quick_settings(self) -> None:
-        """Open the simplified two-tier settings modal."""
-        self.push_screen(QuickSettingsModal(self.bridge))
+        """Open the simplified two-tier settings modal.
+
+        v2.3.5-fix: the modal's "Advanced…" button dismisses the quick
+        settings and hands off to the full model palette — pass the
+        callback here (previously the modal dismissed to nothing).
+        """
+
+        def _open_full_settings() -> None:
+            self._open_model_palette()
+
+        self.push_screen(QuickSettingsModal(self.bridge, on_advanced=_open_full_settings))
 
     def _open_model_palette(self) -> None:
         providers = self.bridge.list_providers()
@@ -2413,7 +2442,11 @@ class TeraPilotTUIApp(App):
             # so the StatusBar doesn't get stuck on "tool running".
             self._refresh_status("thinking")
         elif kind == "error":
-            chat.add_error(str(data.get("error", "unknown error")))
+            # v2.3.5-fix: remember the error the event surfaced so
+            # _on_turn_done can skip its duplicate (the runtime emits the
+            # ERROR event AND returns success=False for the same failure).
+            self._last_event_error = str(data.get("error", "unknown error"))
+            chat.add_error(self._last_event_error)
         elif kind == "done":
             pass
 
@@ -2499,7 +2532,14 @@ class TeraPilotTUIApp(App):
             err = getattr(result, "error", None) or output or "task failed"
             if was_streaming:
                 chat.abort_streaming()
-            chat.add_error(str(err))
+            # v2.3.5-fix: skip the duplicate error. The runtime already
+            # emitted this exact error via the ERROR event (rendered by
+            # _handle_event) before returning success=False — adding it
+            # again here made every run-ending failure appear twice in
+            # the ChatLog.
+            if str(err) != (self._last_event_error or ""):
+                chat.add_error(str(err))
+        self._last_event_error = None
         self._turn_running = False
         self._refresh_status("idle")
 

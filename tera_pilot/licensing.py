@@ -391,3 +391,59 @@ def sign_payload(payload: Dict[str, Any], private_key_pem: bytes) -> str:
     canonical = _canonical(payload).encode("utf-8")
     signature = key.sign(canonical)
     return f"{_b64encode(canonical)}.{_b64encode(signature)}"
+
+
+def issue_license(
+    private_key_pem: bytes,
+    *,
+    customer_id: str,
+    tier: str = "pro",
+    features: Optional[List[str]] = None,
+    expires_at: Optional[str] = None,
+    issued_at: Optional[str] = None,
+) -> str:
+    """Seller-side helper: build + sign a license payload in one call.
+
+    This is the companion to :func:`sign_payload` for the seller CLI
+    (``tera-pilot license issue``): it fills in ``issued_at`` when
+    omitted, validates the required fields, and returns the license
+    string ready to hand to a customer. Entirely offline — no network,
+    no telemetry. The private key belongs to the seller and must stay
+    offline, outside the repo (see LICENSING.md).
+
+    ``expires_at``: ISO-8601 string, or None for a non-expiring key.
+    ``features``: feature ids to grant (e.g. ``second_opinion``,
+    ``cost_router``, ``spend_dashboard``); empty list = base Pro tier.
+    """
+    if not isinstance(customer_id, str) or not customer_id.strip():
+        raise LicenseError("customer_id is required")
+    if not isinstance(tier, str) or not tier.strip():
+        raise LicenseError("tier is required")
+    feats = [str(f) for f in (features or []) if str(f).strip()]
+    if expires_at is not None:
+        # Validate early so the seller never hands out an expired key.
+        if _parse_iso(expires_at) <= datetime.now(timezone.utc):
+            raise LicenseError(f"expires_at is in the past: {expires_at}")
+    payload: Dict[str, Any] = {
+        "customer_id": customer_id.strip(),
+        "tier": tier.strip(),
+        "issued_at": issued_at or _now_iso(),
+        "expires_at": expires_at,
+        "features": feats,
+    }
+    return sign_payload(payload, private_key_pem)
+
+
+def load_private_key(path: str) -> bytes:
+    """Read a seller's Ed25519 private key (PEM) from disk.
+
+    Raises ``LicenseError`` when the file is missing or unreadable —
+    never returns an empty key. Used by the seller CLI.
+    """
+    p = Path(path)
+    if not p.is_file():
+        raise LicenseError(f"private key file not found: {path}")
+    data = p.read_bytes()
+    if not data:
+        raise LicenseError(f"private key file is empty: {path}")
+    return data

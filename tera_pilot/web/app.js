@@ -5,7 +5,7 @@
 // v2.3.4: single frontend version constant. The About tab and the ready
 // toast prefer the LIVE backend version (status.version, from
 // tera_pilot/__init__.py) and fall back to this when opened standalone.
-const APP_VERSION = '2.3.5';
+const APP_VERSION = '2.3.6';
 
 window.__apiBase = null;  // Set by __teraPilotReady from the local API server
 // v1.0.5-security: bearer token for mutating endpoints on the local HTTP
@@ -3979,7 +3979,7 @@ function _loadPluginAssets(){
     })
     .catch(function(e){console.warn('[tera_pilot] plugin asset load failed',e)});
 }
-window.__teraPilotReady=function(status){console.log('[tera_pilot] backend ready',status);if(status.api_base)window.__apiBase=status.api_base;else if(status.api_port)window.__apiBase='http://127.0.0.1:'+status.api_port;var _tok=status.api_token||window.__TERA_PILOT_TOKEN||null;if(_tok)window.__apiToken=_tok;if(status.project){state.projectRoot=status.project;updateProjectBreadcrumb();updateAgentModeToggleUI()}_loadPluginAssets()};
+window.__teraPilotReady=function(status){console.log('[tera_pilot] backend ready',status);if(status.api_base)window.__apiBase=status.api_base;else if(status.api_port){if(location.protocol==='http:'||location.protocol==='https:'){/* v2.3.5-fix (LAN): when the page is served by the server itself (localhost OR `--host 0.0.0.0` LAN sharing), use the page's OWN origin as the API base. The old code hardcoded http://127.0.0.1:<port>, so a remote browser on the LAN pointed every request at ITS OWN loopback and the UI died in demo mode. Same-origin requests need no CORS, so the loopback-only CORS policy stays intact. */window.__apiBase=location.origin}else{window.__apiBase='http://127.0.0.1:'+status.api_port}}var _tok=status.api_token||window.__TERA_PILOT_TOKEN||null;if(_tok)window.__apiToken=_tok;if(status.project){state.projectRoot=status.project;updateProjectBreadcrumb();updateAgentModeToggleUI()}_loadPluginAssets()};
 
 // v1.0.4: called from main_window.py after Ctrl+O picks a new project folder
 window.__teraPilotProjectOpened=function(result){

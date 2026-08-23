@@ -77,3 +77,66 @@ def test_cli_usage_errors(env, capsys):
     assert tera_cli.main(["license"]) == 2
     assert tera_cli.main(["license", "bogus-subcommand"]) == 2
     assert tera_cli.main(["license", "activate"]) == 2
+
+
+# ── Seller-side CLI (v2.3.5): gen-keypair + issue, fully offline ────
+
+def test_cli_gen_keypair_and_issue(env, tmp_path, capsys):
+    """The seller can generate a keypair and issue a license from the CLI,
+    then the customer activates it — all offline, no telemetry."""
+    # 1. gen-keypair writes private + public PEMs.
+    code = tera_cli.main(["license", "gen-keypair", "--out", str(tmp_path / "keys")])
+    assert code == 0
+    priv_path = tmp_path / "keys" / "license_priv.pem"
+    pub_path = tmp_path / "keys" / "license_pubkey.pem"
+    assert priv_path.is_file() and pub_path.is_file()
+
+    # 2. Point the verifier at the newly generated PUBLIC key, so the
+    #    issued license verifies against it (simulates embedding it).
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setenv("TERA_PILOT_LICENSE_PUBKEY", str(pub_path))
+    monkeypatch.setenv("HOME", str(tmp_path / "home2"))
+    monkeypatch.delenv("TERA_PILOT_PRO", raising=False)
+
+    # 3. issue a license with the private key.
+    code = tera_cli.main([
+        "license", "issue",
+        "--private-key", str(priv_path),
+        "--customer", "usr_cli_seller",
+        "--tier", "pro",
+        "--features", "second_opinion,cost_router",
+    ])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "usr_cli_seller" in out
+    assert "second_opinion" in out
+    key = out.strip().split("\n")[-1].strip()
+    assert "." in key  # payload.signature
+
+    # 4. Customer activates the issued key.
+    code = tera_cli.main(["license", "activate", key])
+    assert code == 0
+    code = tera_cli.main(["license", "status"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert '"valid": true' in out
+    assert '"customer_id": "usr_cli_seller"' in out
+
+
+def test_cli_issue_requires_key_and_customer(env, capsys):
+    assert tera_cli.main(["license", "issue"]) == 2
+    assert tera_cli.main(["license", "issue", "--private-key", "x.pem"]) == 2
+
+
+def test_cli_issue_missing_private_key_fails(env, tmp_path, capsys):
+    code = tera_cli.main([
+        "license", "issue",
+        "--private-key", str(tmp_path / "nope.pem"),
+        "--customer", "usr_x",
+    ])
+    assert code == 1
+    assert "failed" in capsys.readouterr().err
+
+
+def test_cli_gen_keypair_requires_out(env, capsys):
+    assert tera_cli.main(["license", "gen-keypair"]) == 2

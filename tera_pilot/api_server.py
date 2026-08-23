@@ -1595,7 +1595,13 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                     'text': text_result,
                     'tokens': token_count,
                     'elapsed': elapsed,
-                    'cancelled': False,
+                    # v2.3.5-fix: report the real cancel state. The value
+                    # was hardcoded False, so a stopped chat-mode
+                    # generation (Stop / stop_generation) was saved in the
+                    # chat record as cancelled=True but the SSE done event
+                    # told the UI "normal completion" — no "cancelled"
+                    # pill, inconsistent with the saved message.
+                    'cancelled': bool(ctx._stop_event.is_set() or ctx._chat_cancel_event.is_set()),
                     'chat_id': chat_id,
                 })
 
@@ -2104,6 +2110,16 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                     # would show as a normal completion.
                     'cancelled': bool(ctx.is_agent_cancelled() or (result.error == 'Cancelled by user')),
                     'chat_id': chat_id,
+                    # v2.3.5-fix (eval reporting): identify the provider and
+                    # model that actually served this run. The eval harness
+                    # reads these from the SSE stream, and previously the
+                    # only source was the `router_decision` event — which is
+                    # never emitted when auto_route is disabled — so real
+                    # runs recorded provider/model as None. The registry
+                    # here is the one actually used (agent runs through
+                    # ctx.registry.active).
+                    'provider': provider.provider_id,
+                    'model': getattr(provider.config, 'model', None) or provider.default_model,
                 })
 
                 with ctx._config_lock:
@@ -2398,6 +2414,21 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
                 cfg.setdefault('ui', {})['theme'] = body['theme']
             if 'providers' in body:
                 for pid, pcfg in body['providers'].items():
+                    # v2.3.5-fix (config hygiene): only accept KNOWN
+                    # providers. The previous code created a config entry
+                    # for any pid from the request body, so a stray
+                    # ``providers['undefined']`` (a JS ``card.dataset.id``
+                    # that was never set) was persisted verbatim and then
+                    # warned ``Unknown provider: undefined`` on every
+                    # server start. Unknown ids are dropped — a UI bug can
+                    # no longer corrupt the persisted config.
+                    if not isinstance(pid, str) or not pid:
+                        continue
+                    if pid not in self.ctx.registry._classes:
+                        logger.warning(
+                            "[api] save_settings: ignoring unknown provider %r", pid,
+                        )
+                        continue
                     if pid not in cfg['providers']:
                         if pid in _PROVIDER_DEFAULTS:
                             cfg['providers'][pid] = dict(_PROVIDER_DEFAULTS[pid])
@@ -2415,9 +2446,13 @@ class TeraPilotAPIHandler(BaseHTTPRequestHandler):
 
             _save_config(cfg)
 
-        # Re-apply provider configs
+        # Re-apply provider configs (same unknown-id guard as the save
+        # loop above — a stray pid from the request body must not reach
+        # registry.configure, which would raise for it).
         if 'providers' in body:
             for pid, pcfg in body['providers'].items():
+                if not isinstance(pid, str) or not pid or pid not in self.ctx.registry._classes:
+                    continue
                 try:
                     prov_cfg = ProviderConfig(
                         provider_id=pid,

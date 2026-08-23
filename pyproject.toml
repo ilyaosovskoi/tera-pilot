@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tera-pilot"
-version = "2.3.5"
+version = "2.3.6"
 description = """\
-Tera Pilot v2.3.5 — TUI-first, local-first coding agent with multi-provider support, MCP,
+Tera Pilot v2.3.6 — TUI-first, local-first coding agent with multi-provider support, MCP,
 multi-agent Heavy Code mode, Office Worker section, controlled backend integrations, optional
 Rust native acceleration (sandbox / circuit breaker / compaction / interjection),
 v2 agent runtime (asyncio ChatStateActor + three-tier compaction + sub-agent
@@ -135,7 +135,7 @@ tera_pilot_tui = [
 # iconfile = "assets/logo.icns"
 # bundle-identifier = "io.tera_pilot.app"
 # name = "Tera Pilot"
-# version = "2.3.5"
+# version = "2.3.6"
 # excludes = ["tkinter", "test", "tests", "unittest"]
 # resources = ["assets", "tera_pilot/web"]
 # plist-file = "Info.plist"

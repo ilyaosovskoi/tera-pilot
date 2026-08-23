@@ -468,6 +468,29 @@ def test_settings_save(api):
     assert data.get("ok") is True
 
 
+def test_settings_save_ignores_unknown_provider(api):
+    """v2.3.5-fix (config hygiene): a stray provider id in the settings
+    body (e.g. a JS ``card.dataset.id`` that was never set → "undefined")
+    must NOT be persisted into config.json — the old code created the
+    entry verbatim and then warned ``Unknown provider: undefined`` on
+    every server start."""
+    st, data = _post(api, "/api/settings/save", {
+        "providers": {
+            "openrouter": {"model": "anthropic/claude-sonnet-5"},
+            "undefined": {"model": "", "api_key": "", "api_base": ""},
+            "totally-bogus": {"model": "x"},
+        },
+    })
+    assert st == 200
+    assert data.get("ok") is True
+
+    cfg = api["server"].ctx.config["providers"]
+    assert "openrouter" in cfg, "known provider must still be saved"
+    assert cfg["openrouter"]["model"] == "anthropic/claude-sonnet-5"
+    assert "undefined" not in cfg, "garbage provider id must not persist"
+    assert "totally-bogus" not in cfg, "unknown provider id must not persist"
+
+
 def test_chat_stop(api):
     st, data = _post(api, "/api/chat/stop")
     assert st == 200

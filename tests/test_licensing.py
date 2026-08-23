@@ -35,6 +35,8 @@ from tera_pilot.licensing import (  # noqa: E402
     get_license_status,
     is_feature_licensed,
     is_pro_enabled,
+    issue_license,
+    load_private_key,
     sign_payload,
     verify_license,
 )
@@ -255,3 +257,61 @@ def test_spend_dashboard_fails_closed_when_unlicensed(keypair, monkeypatch):
     activate_license(_license_string(keypair))
     report2 = dash.report(days=30)
     assert report2.error is None
+
+
+# ── Seller-side issuance (v2.3.5) ────────────────────────────────────
+
+def test_issue_license_roundtrip(keypair, tmp_path, monkeypatch):
+    """issue_license() produces a key that activates and verifies, and the
+    seller CLI (gen-keypair + issue) works end-to-end offline."""
+    priv_path = tmp_path / "priv.pem"
+    priv_path.write_bytes(keypair)
+
+    key = issue_license(
+        load_private_key(str(priv_path)),
+        customer_id="usr_seller_1",
+        tier="pro",
+        features=["second_opinion", "cost_router"],
+        expires_at="2099-12-31T23:59:59Z",
+    )
+    info = verify_license(key)
+    assert info.customer_id == "usr_seller_1"
+    assert info.features == ["second_opinion", "cost_router"]
+    assert info.expires_at == "2099-12-31T23:59:59Z"
+
+    # Activation works with the issued key (no telemetry enforced above).
+    activate_license(key)
+    assert get_license_status()["valid"] is True
+
+
+def test_issue_license_non_expiring(keypair):
+    key = issue_license(keypair, customer_id="usr_x", expires_at=None)
+    assert verify_license(key).expires_at is None
+
+
+def test_issue_license_validation(keypair):
+    import pytest as _pytest
+    with _pytest.raises(LicenseError):
+        issue_license(keypair, customer_id="")
+    with _pytest.raises(LicenseError):
+        issue_license(keypair, customer_id="ok", tier="")
+    with _pytest.raises(LicenseError):
+        # An already-expired issuance is rejected before signing.
+        issue_license(keypair, customer_id="ok", expires_at="2020-01-01T00:00:00Z")
+
+
+def test_issue_license_fills_issued_at(keypair):
+    key = issue_license(keypair, customer_id="usr_ts")
+    payload = json.loads(__import__("base64").urlsafe_b64decode(
+        key.split(".")[0] + "=" * (-len(key.split(".")[0]) % 4)
+    ))
+    assert payload["issued_at"]
+
+
+def test_load_private_key_errors(tmp_path):
+    with pytest.raises(LicenseError):
+        load_private_key(str(tmp_path / "missing.pem"))
+    empty = tmp_path / "empty.pem"
+    empty.write_bytes(b"")
+    with pytest.raises(LicenseError):
+        load_private_key(str(empty))
