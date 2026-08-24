@@ -22,6 +22,13 @@
 
 <br/>
 
+> **Development status: testing phase.** Tera Pilot is being tested with a small
+> group of early users before the public release. Everything here is MIT-licensed
+> and free to use, but you may run into rough edges — especially when installing
+> via npm (see [Quick Start](#quick-start) for a reliable fallback). Paid/Pro
+> features are not available yet and will be enabled later; until then the
+> open-source core is the whole product.
+
 ## Why Tera Pilot?
 
 AI coding agents are becoming capable of editing repositories, running commands, calling external tools, and completing multi-step engineering tasks. The hard part is no longer only generation quality — it is **trust, control, and evidence**.
@@ -52,6 +59,12 @@ npm install -g tera-pilot
 The npm `postinstall` step creates an isolated Python virtualenv at
 `~/.tera_pilot/venv` and installs the bundled Python package plus its
 dependencies into it, so all launchers work out of the box:
+
+> **Note:** the npm path is still settling during the testing phase — on some
+> machines the `postinstall` step needs a retry, or a Python interpreter that
+> isn't the system default (see `TERA_PILOT_PYTHON` below). If `npm install -g
+> tera-pilot` gives you trouble, use the [source install](#install-from-source)
+> below — it takes one extra command and is the most reliable path right now.
 
 ```bash
 tera-pilot                              # Web UI
@@ -180,7 +193,7 @@ Tera Pilot treats autonomy as a policy decision, not a binary marketing label.
 - **Checkpoints and undo** provide recovery paths for file changes.
 - **Activity and audit logs** record tool execution and agent identity.
 - **Signed audit support** uses Ed25519 signatures and hash chaining for exported records.
-- **Offline licensing** (Pro gating) uses Ed25519-signed keys verified entirely offline — zero telemetry, no phone-home (see [`LICENSING.md`](LICENSING.md)). Since v2.3.6 the seller can issue keys from the CLI without any server: `tera-pilot license gen-keypair --out <dir>` + `tera-pilot license issue --private-key <key.pem> --customer <id> [--tier pro] [--expires ISO] [--features a,b,c]`.
+- **Offline licensing** (Pro gating) uses Ed25519-signed keys verified entirely offline — zero telemetry, no phone-home (see [`LICENSING.md`](LICENSING.md)). Since v2.3.6 the seller can issue keys from the CLI without any server: `tera-pilot license gen-keypair --out <dir>` + `tera-pilot license issue --private-key <key.pem> --customer <id> [--tier pro] [--expires ISO] [--features a,b,c]`. During the testing phase the paid tier is **not enabled** — the Pro-gated features stay usable from the open-source core, and paid unlocks will follow in a later release.
 
 These mechanisms provide control and evidence; they are not a claim of formal SOC 2, ISO 27001, or vulnerability-free code. See [`TERA_PILOT_PRODUCT_STRATEGY.md`](TERA_PILOT_PRODUCT_STRATEGY.md) for the security and product roadmap, and [`THREAT_MODEL.md`](THREAT_MODEL.md) for the public threat model and trust boundaries.
 
