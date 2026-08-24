@@ -69,7 +69,7 @@ from .utils import setup_logging
 
 logger = logging.getLogger(__name__)
 
-__version__ = "2.3.6"
+__version__ = "2.3.7"
 
 # Default port — kept identical to the legacy embedded API server so
 # existing users / scripts that hit ``http://127.0.0.1:18732`` keep
@@ -422,7 +422,7 @@ class TeraPilotWebServer:
 def _parse_args(argv: Optional[list] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="tera_pilot",
-        description="Tera Pilot v2.3.6 — local-first AI IDE (web UI).",
+        description="Tera Pilot v2.3.7 — local-first AI IDE (web UI).",
     )
     p.add_argument(
         "--host", default=os.environ.get("TERA_PILOT_HOST", DEFAULT_HOST),
