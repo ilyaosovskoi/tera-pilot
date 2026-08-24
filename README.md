@@ -381,6 +381,14 @@ The **direct (no-agent) driver** (v2.3.6) sends the same task prompt straight to
 
 **New tasks (v2.3.6, added 2026-08-22):** `fix-median-mutates-input` (bug_fix — `median()` must not mutate its input), `add-binary-search` (feature — binary search with edge cases), `refactor-extract-currency-symbol` (refactor — extract a helper without changing behavior), `repair-test-wrong-expected-value-format` (test_repair — fix the stale test assertion, not the module), `review-path-traversal` (code_review — read-only review identifying a path-traversal flaw in `REVIEW.md`). All pass the quality gate (manifest structure, `baseline_status` matches the pristine repo, `gold/` passes `test_command`).
 
+## Developing & Contributing
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to report bugs, open PRs, and the
+  project's conventions (claims discipline, hermetic tests, commit style).
+- [`DEVELOPING.md`](DEVELOPING.md) — a codebase map, how the agent loop works,
+  recipes for adding a tool / provider / eval task / slash command / API
+  endpoint, and where the project needs help.
+
 ## Audit Export & Verification
 
 Every tool call is recorded in the process-scoped activity log. For tamper-evident evidence you can export the log with Ed25519 signatures and a SHA-256 hash chain, then verify it — even on a different machine using the public key from `~/.tera_pilot/audit_key.pub`:

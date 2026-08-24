@@ -5,6 +5,11 @@ with a strong focus on **trust, control and verifiable evidence**. This guide
 explains how to contribute code, docs, and issues without tripping over the
 project's conventions.
 
+> **New here?** Start with [`DEVELOPING.md`](DEVELOPING.md) — a codebase map,
+> how the agent loop works, recipes for common tasks (new tool, provider, eval
+> task, slash command, endpoint) and where the project needs help. This file
+> covers the *process*; that one covers the *code*.
+
 ## TL;DR
 
 - Repository: <https://github.com/ilyaosovskoi/tera-pilot>
