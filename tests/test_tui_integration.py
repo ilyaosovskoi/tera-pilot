@@ -385,6 +385,260 @@ def test_set_provider_switches_model_and_rebuilds(tmp_path, reg, fake):
     assert result is not None
 
 
+def test_get_active_provider_id_follows_switches(tmp_path, reg, fake):
+    """get_active_provider_id() must report the currently active provider.
+    The TUI's `/model <model>` command relies on it to set a custom
+    model on the active provider without switching."""
+    bridge = TeraPilotBridge(
+        workspace=str(tmp_path),
+        provider=ProviderChoice(provider_id="fake"),
+    )
+    assert bridge.get_active_provider_id() == "fake"
+    r = bridge.set_provider("ollama")
+    assert r.get("ok") is True
+    assert bridge.get_active_provider_id() == "ollama"
+
+
+def test_bridge_applies_saved_config_from_disk(tmp_path, reg, fake):
+    """The TUI bridge must apply ~/.tera_pilot/config.json (api_key,
+    model, active_provider) when building its registry — exactly like
+    the daemon does. Before the fix it ignored the file and silently
+    fell back to the built-in defaults (no key, hardcoded model)."""
+    from tera_pilot.utils import save_config
+
+    save_config({
+        "active_provider": "fake",
+        "providers": {
+            "fake": {
+                "api_key": "sk-saved-key",
+                "model": "saved-model",
+                "api_base": "http://localhost:9999/v1",
+            },
+        },
+    })
+
+    # No explicit ProviderChoice overrides — everything must come from disk.
+    bridge = TeraPilotBridge(workspace=str(tmp_path))
+    bridge.list_providers()  # trigger the lazy registry build
+
+    assert bridge.get_active_provider_id() == "fake"
+    assert bridge._get_active_model() == "saved-model"
+    cfg = bridge._registry.get("fake").config
+    assert cfg.api_key == "sk-saved-key"
+    assert cfg.api_base == "http://localhost:9999/v1"
+
+
+def test_bridge_honors_agent_max_iterations_from_config(tmp_path, reg, fake):
+    """The TUI must honor `agent_max_iterations` from config.json — not
+    hardcode 8 (the user saw "Max iterations (8) reached" despite
+    having configured 12)."""
+    from tera_pilot.utils import save_config
+
+    save_config({"agent_max_iterations": 15, "providers": {}})
+    bridge = TeraPilotBridge(workspace=str(tmp_path))
+    assert bridge.max_iterations == 15
+
+
+def test_bridge_explicit_max_iterations_wins(tmp_path, reg, fake):
+    """An explicit max_iterations argument must win over config.json."""
+    from tera_pilot.utils import save_config
+
+    save_config({"agent_max_iterations": 15, "providers": {}})
+    bridge = TeraPilotBridge(workspace=str(tmp_path), max_iterations=3)
+    assert bridge.max_iterations == 3
+
+
+def test_bridge_default_max_iterations_when_no_config(tmp_path, reg, fake):
+    """No config → the historical default of 8."""
+    bridge = TeraPilotBridge(workspace=str(tmp_path))
+    assert bridge.max_iterations == 8
+
+
+def test_budget_iterations_knob_is_applied(tmp_path, reg, fake):
+    """v2.3.6: `/budget iterations N` (token_budget.max_iterations) must
+    actually reach the agent loop once changed from its module default.
+    Previously it was persisted and displayed but never applied."""
+    from tera_pilot.token_budget import set_token_budget, reset_token_budget
+
+    set_token_budget(max_iterations=15)
+    try:
+        bridge = TeraPilotBridge(workspace=str(tmp_path))
+        bridge.ensure_agent()
+        assert bridge._agent.max_iterations == 15
+    finally:
+        reset_token_budget()
+
+
+def test_default_budget_does_not_override_config_iterations(tmp_path, reg, fake):
+    """v2.3.6: the token budget's DEFAULT max_iterations (8) must not
+    clobber agent_max_iterations from config.json."""
+    from tera_pilot.utils import save_config
+
+    save_config({"agent_max_iterations": 12, "providers": {}})
+    bridge = TeraPilotBridge(workspace=str(tmp_path))
+    bridge.ensure_agent()
+    assert bridge._agent.max_iterations == 12
+
+
+def test_explicit_max_iterations_wins_over_budget(tmp_path, reg, fake):
+    """v2.3.6: an explicit CLI --max-iterations must beat the token
+    budget knob."""
+    from tera_pilot.token_budget import set_token_budget, reset_token_budget
+
+    set_token_budget(max_iterations=20)
+    try:
+        bridge = TeraPilotBridge(workspace=str(tmp_path), max_iterations=5)
+        bridge.ensure_agent()
+        assert bridge._agent.max_iterations == 5
+    finally:
+        reset_token_budget()
+
+
+def test_heavy_code_section_gets_iteration_floor(tmp_path, reg, fake):
+    """v2.3.6: the heavy_code section gets at least 20 iterations,
+    mirroring the API server."""
+    bridge = TeraPilotBridge(
+        workspace=str(tmp_path), section="heavy_code", max_iterations=3,
+    )
+    bridge.ensure_agent()
+    assert bridge._agent.max_iterations == 20
+
+
+def test_status_reports_active_provider_without_prior_turn(tmp_path, reg, fake):
+    """v2.3.6: status() must report the real provider/model on the FIRST
+    call — the InfoBox used to show "unknown" until the first turn built
+    the registry (and /settings silently defaulted to OpenAI)."""
+    bridge = TeraPilotBridge(workspace=str(tmp_path))
+    s = bridge.status()
+    assert s.get("provider") is not None
+    assert s.get("model") is not None
+    assert s["provider"] == "fake"
+
+
+def test_runtime_tracks_touched_files_on_agent(tmp_path, reg, fake):
+    """v2.3.6: the runtime's ToolEngine is reachable as ``agent.tools``
+    and tracks written files there — /checkpoint save reads this (it
+    used to poke ``agent._tool_engine`` which never existed, so the
+    backup manifest was always empty)."""
+    fake._script = [
+        FakeProvider.tool_call("write_file", {"path": "a.txt", "content": "x"}),
+        FakeProvider.final_answer("done"),
+    ]
+    bridge = TeraPilotBridge(
+        workspace=str(tmp_path),
+        provider=ProviderChoice(provider_id="fake"),
+    )
+    _auto_approve(bridge)
+    t, holder = run_in_thread(bridge, "write a file")
+    result = _wait_result(t, holder)
+
+    assert result.success is True
+    assert "a.txt" in (bridge._agent.tools._touched_files or [])
+
+
+def test_productive_run_auto_extends_past_soft_cap(tmp_path, reg, fake):
+    """v2.3.6: a run that keeps doing real work (executing tools) must
+    NOT be cut off at the soft iteration cap. The budget auto-extends
+    while a tool ran successfully recently, so big multi-step tasks
+    finish instead of dying with "Max iterations reached" mid-work."""
+    fake._script = [
+        FakeProvider.tool_call("write_file", {"path": "f1.txt", "content": "1"}),
+        FakeProvider.tool_call("write_file", {"path": "f2.txt", "content": "2"}),
+        FakeProvider.tool_call("write_file", {"path": "f3.txt", "content": "3"}),
+        FakeProvider.tool_call("write_file", {"path": "f4.txt", "content": "4"}),
+        FakeProvider.tool_call("write_file", {"path": "f5.txt", "content": "5"}),
+        FakeProvider.final_answer("finished the big task"),
+    ]
+    bridge = TeraPilotBridge(
+        workspace=str(tmp_path),
+        provider=ProviderChoice(provider_id="fake"),
+        max_iterations=3,  # fewer than the 5 tool steps the task needs
+    )
+    _auto_approve(bridge)
+    t, holder = run_in_thread(bridge, "do a big multi-step task")
+    result = _wait_result(t, holder)
+
+    assert result.success is True
+    assert result.output == "finished the big task"
+    for i in range(1, 6):
+        assert (tmp_path / f"f{i}.txt").read_text() == str(i)
+
+
+def test_stuck_run_does_not_auto_extend(tmp_path, reg, fake):
+    """v2.3.6: a run that keeps FAILING its tool calls (e.g. reading a
+    file that does not exist) must NOT extend the budget — the soft cap
+    still stops it. Auto-extension requires recent SUCCESSFUL tool work."""
+    fake._script = [
+        FakeProvider.tool_call("read_file", {"path": "/no/such/file.txt"}),
+        FakeProvider.tool_call("read_file", {"path": "/no/such/file.txt"}),
+        FakeProvider.tool_call("read_file", {"path": "/no/such/file.txt"}),
+        FakeProvider.tool_call("read_file", {"path": "/no/such/file.txt"}),
+    ]
+    bridge = TeraPilotBridge(
+        workspace=str(tmp_path),
+        provider=ProviderChoice(provider_id="fake"),
+        max_iterations=3,
+    )
+    _auto_approve(bridge)
+    t, holder = run_in_thread(bridge, "read a file")
+    result = _wait_result(t, holder)
+
+    assert result.success is False
+    assert "Max iterations (3) reached" in (result.error or "")
+
+
+def test_auto_extension_stops_at_hard_cap(tmp_path, reg, fake):
+    """v2.3.6: auto-extension is bounded — even a productive run stops
+    at the hard ceiling instead of looping forever."""
+    fake._script = [
+        FakeProvider.tool_call("write_file", {"path": f"f{i}.txt", "content": str(i)})
+        for i in range(1, 7)
+    ]
+    bridge = TeraPilotBridge(
+        workspace=str(tmp_path),
+        provider=ProviderChoice(provider_id="fake"),
+        max_iterations=3,
+    )
+    _auto_approve(bridge)
+    bridge.ensure_agent()
+    bridge._agent.hard_max_iterations = 5  # shrink the ceiling for the test
+    t, holder = run_in_thread(bridge, "do a long task")
+    result = _wait_result(t, holder)
+
+    assert result.success is False
+    assert "Max iterations (5) reached" in (result.error or "")
+    # The 5 allowed iterations ran; iteration 6 never started.
+    for i in range(1, 6):
+        assert (tmp_path / f"f{i}.txt").read_text() == str(i)
+    assert not (tmp_path / "f6.txt").exists()
+
+
+def test_bridge_explicit_provider_choice_overrides_saved_config(tmp_path, reg, fake):
+    """A ProviderChoice passed explicitly (e.g. from the CLI) must win
+    over ~/.tera_pilot/config.json."""
+    from tera_pilot.utils import save_config
+
+    save_config({
+        "active_provider": "ollama",
+        "providers": {
+            "fake": {"api_key": "sk-saved-key", "model": "saved-model"},
+        },
+    })
+
+    bridge = TeraPilotBridge(
+        workspace=str(tmp_path),
+        provider=ProviderChoice(provider_id="fake", model="cli-model"),
+    )
+    bridge.list_providers()
+
+    assert bridge.get_active_provider_id() == "fake"
+    assert bridge._get_active_model() == "cli-model"
+    cfg = bridge._registry.get("fake").config
+    # Saved key is preserved; only the explicitly overridden field changes.
+    assert cfg.api_key == "sk-saved-key"
+    assert cfg.model == "cli-model"
+
+
 # ── long output / partial failure ──────────────────────────────────────
 
 
@@ -549,6 +803,84 @@ def test_configure_provider_unknown_id_fails(tmp_path, reg):
     r = bridge.configure_provider("no_such_provider", model="x")
     assert r.get("ok") is False
     assert "no_such_provider" in (r.get("error") or "")
+
+
+def test_configure_provider_persists_to_config(tmp_path, reg, fake):
+    """v2.3.6: model + API key set through configure_provider (Quick
+    Settings / `/model <pid> <model>`) must survive a restart — the
+    old code applied them live but never wrote config.json, so the next
+    launch reverted to the saved (old) values."""
+    from tera_pilot.utils import load_config, save_config
+
+    save_config({"active_provider": "fake", "providers": {}})
+    bridge = TeraPilotBridge(workspace=str(tmp_path))
+    bridge.list_providers()  # build the registry
+
+    r = bridge.configure_provider("fake", model="persisted-model", api_key="sk-persist")
+    assert r.get("ok") is True, r
+
+    cfg = load_config()
+    entry = (cfg.get("providers") or {}).get("fake") or {}
+    assert entry.get("model") == "persisted-model"
+    assert entry.get("api_key") == "sk-persist"
+    assert cfg.get("active_provider") == "fake"
+
+    # A fresh bridge (simulating restart) loads the persisted values.
+    bridge2 = TeraPilotBridge(workspace=str(tmp_path))
+    bridge2.list_providers()
+    assert bridge2._get_active_model() == "persisted-model"
+    assert bridge2._registry.get("fake").config.api_key == "sk-persist"
+
+
+def test_set_provider_with_model_preserves_api_key(tmp_path, reg, fake):
+    """v2.3.6: set_provider(pid, model) must NOT wipe the saved
+    api_key / api_base — the cost-router path calls it with a model,
+    and the old code built a bare ProviderConfig that dropped the
+    credentials (a cost-router switch silently broke the provider)."""
+    from tera_pilot.utils import save_config
+
+    save_config({
+        "active_provider": "fake",
+        "providers": {"fake": {"api_key": "sk-keep", "model": "m1"}},
+    })
+    bridge = TeraPilotBridge(workspace=str(tmp_path))
+    bridge.list_providers()
+
+    r = bridge.set_provider("fake", model="m2")
+    assert r.get("ok") is True, r
+
+    cfg = bridge._registry.get("fake").config
+    assert cfg.model == "m2"
+    assert cfg.api_key == "sk-keep"  # not wiped
+
+    # And the switch is persisted with both fields.
+    from tera_pilot.utils import load_config
+    entry = (load_config().get("providers") or {}).get("fake") or {}
+    assert entry.get("model") == "m2"
+    assert entry.get("api_key") == "sk-keep"
+
+
+def test_bridge_tolerates_stale_active_provider_in_config(tmp_path, reg, fake):
+    """v2.3.6: an active_provider in config.json that is no longer
+    registered (stale id / failed custom provider) must not crash the
+    bridge — fall back to a registered provider, like the daemon does.
+    Previously _build_registry raised ProviderError and the TUI became
+    unusable on startup."""
+    from tera_pilot.utils import save_config
+
+    save_config({"active_provider": "no-such-provider", "providers": {}})
+    bridge = TeraPilotBridge(workspace=str(tmp_path))
+
+    # These all used to raise; now they must return sane values.
+    providers = bridge.list_providers()
+    assert providers, "should still list registered providers"
+    assert bridge.get_active_provider_id() in {p["id"] for p in providers}
+    s = bridge.status()
+    assert s.get("provider") is not None
+
+    # ensure_agent must also survive.
+    bridge.ensure_agent()
+    assert bridge._agent is not None
 
 
 def test_registry_configure_rejects_kwargs(reg):

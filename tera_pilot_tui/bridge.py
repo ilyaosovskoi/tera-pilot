@@ -53,12 +53,31 @@ class TeraPilotBridge:
         workspace: Optional[str] = None,
         provider: Optional[ProviderChoice] = None,
         section: str = "general",
-        max_iterations: int = 8,
+        max_iterations: Optional[int] = None,
         enable_planning: bool = False,
     ) -> None:
         self.workspace = workspace or os.getcwd()
         self.section = section
-        self.max_iterations = max_iterations
+        # v2.3.6-fix: honor `agent_max_iterations` from
+        # ~/.tera_pilot/config.json instead of a hardcoded 8 — the user
+        # configured 12 but the TUI still capped runs at 8 ("Max
+        # iterations (8) reached"). An explicit argument (CLI) still wins.
+        # NOTE: capture whether the CALLER passed max_iterations BEFORE
+        # the config fallback mutates it (otherwise the flag is always
+        # True and the token_budget knob below can never apply).
+        _explicit_max_iterations = max_iterations is not None
+        if max_iterations is None:
+            try:
+                from tera_pilot.utils import load_config
+                max_iterations = int((load_config() or {}).get("agent_max_iterations", 8))
+            except Exception:
+                max_iterations = 8
+        self.max_iterations = max(1, min(50, int(max_iterations or 8)))
+        # v2.3.6: remember whether the caller passed max_iterations
+        # explicitly (CLI --max-iterations) so ensure_agent() can let a
+        # changed token_budget knob override the config but never an
+        # explicit command-line value.
+        self._max_iterations_explicit = _explicit_max_iterations
         self.enable_planning = enable_planning
         self._provider = provider or ProviderChoice()
 
@@ -87,29 +106,88 @@ class TeraPilotBridge:
 
     def _build_registry(self):
         from tera_pilot.providers import get_registry, ProviderConfig
+        from tera_pilot.utils import load_config
 
         registry = get_registry()
         try:
             providers = registry.list_providers()
             if not providers:
                 registry.register_default()
-        except Exception as e:
+        except Exception:
             # If list_providers fails (import error), just register defaults
             registry.register_default()
 
-        pid = self._provider.provider_id or registry.active_id or "ollama"
+        # v2.3.6-fix: load the saved provider configs from
+        # ~/.tera_pilot/config.json (mirroring tera_pilot/daemon.py and the
+        # API server) so the TUI actually uses the API keys / models /
+        # api_base the user configured. Before this fix the bridge only
+        # applied explicit ProviderChoice overrides and silently fell back
+        # to the built-in defaults — a key present in config.json was
+        # ignored and the hardcoded default model was used.
+        cfg = load_config() or {}
+        for pid, pcfg in (cfg.get("providers") or {}).items():
+            try:
+                extra = {}
+                if pcfg.get("reasoning_effort"):
+                    extra["reasoning_effort"] = pcfg["reasoning_effort"]
+                registry.configure(
+                    pid,
+                    ProviderConfig(
+                        provider_id=pid,
+                        model=pcfg.get("model", ""),
+                        api_key=pcfg.get("api_key") or None,
+                        api_base=pcfg.get("api_base") or None,
+                        temperature=float(pcfg.get("temperature", 0.2)),
+                        max_tokens=int(pcfg.get("max_tokens", 4096)),
+                        extra=extra,
+                    ),
+                )
+            except Exception:
+                continue
+
+        # Explicit CLI/TUI overrides win over the saved config.
+        pid = (
+            self._provider.provider_id
+            or cfg.get("active_provider")
+            or registry.active_id
+            or "ollama"
+        )
         p = self._provider
-        # Only reconfigure when the caller actually overrode something,
-        # otherwise trust the saved config for this provider.
         if p.model or p.api_key or p.api_base:
-            cfg = ProviderConfig(
-                provider_id=pid,
-                model=p.model or "",
-                api_key=(p.api_key or os.environ.get(f"{pid.upper()}_API_KEY") or None),
-                api_base=(p.api_base or None),
+            existing = None
+            try:
+                existing = registry.get(pid).config
+            except Exception:
+                pass
+            registry.configure(
+                pid,
+                ProviderConfig(
+                    provider_id=pid,
+                    model=p.model or (existing.model if existing else ""),
+                    api_key=(p.api_key
+                             or os.environ.get(f"{pid.upper()}_API_KEY")
+                             or (existing.api_key if existing else None)),
+                    api_base=(p.api_base or (existing.api_base if existing else None)),
+                    temperature=float(getattr(existing, "temperature", 0.2) or 0.2),
+                    max_tokens=int(getattr(existing, "max_tokens", 4096) or 4096),
+                ),
             )
-            registry.configure(pid, cfg)
-        registry.set_active(pid)
+        # v2.3.6-fix: a stale/unknown active_provider in config.json (e.g.
+        # a provider id removed from the registry, or a custom provider
+        # that failed to load) used to raise ProviderError out of
+        # _build_registry — which then crashed the whole TUI on startup
+        # (and made /model and /settings unusable). Fall back to a
+        # registered provider, mirroring daemon.py / api_server.py.
+        try:
+            registry.set_active(pid)
+        except Exception:
+            try:
+                registry.set_active(registry.active_id or "ollama")
+            except Exception:
+                try:
+                    registry.set_active("openai")
+                except Exception:
+                    pass
         return registry
 
     def ensure_agent(self):
@@ -122,10 +200,33 @@ class TeraPilotBridge:
         self._registry = self._build_registry()
         self._tracker = get_token_tracker()
 
+        # v2.3.6: effective iteration budget. Precedence:
+        #   1. explicit CLI --max-iterations (never overridden below);
+        #   2. token_budget.max_iterations — but only when the user
+        #      actually changed it (the module default is 8, so a
+        #      non-default value means it was set via `/budget
+        #      iterations` or the config). Previously this knob was
+        #      persisted and displayed but never applied to the loop;
+        #   3. agent_max_iterations from config.json (self.max_iterations);
+        #   4. the historical default of 8.
+        # heavy_code gets a floor of 20, mirroring the API server.
+        soft = self.max_iterations
+        if not self._max_iterations_explicit:
+            try:
+                from tera_pilot.token_budget import get_token_budget
+                _bi = int(get_token_budget().max_iterations or 0)
+                if _bi and _bi != 8:  # 8 = module default → "never changed"
+                    soft = _bi
+            except Exception:
+                pass
+        if self.section == "heavy_code":
+            soft = max(int(soft or 0), 20)
+        soft = max(1, min(50, int(soft or 8)))
+
         agent = AgentRuntime(
             registry=self._registry,
             workspace=self.workspace,
-            max_iterations=self.max_iterations,
+            max_iterations=soft,
             enable_planning=self.enable_planning,
             on_event=self._on_agent_event,
             token_tracker=self._tracker,
@@ -291,6 +392,15 @@ class TeraPilotBridge:
     def status(self) -> Dict[str, Any]:
         provider = None
         model = None
+        # v2.3.6-fix: build the registry lazily so status() reports the
+        # REAL provider/model from config.json on the very first call —
+        # the InfoBox used to show "unknown" until the first turn built
+        # the registry (which also made /settings default to OpenAI).
+        if self._registry is None:
+            try:
+                self._registry = self._build_registry()
+            except Exception:
+                pass
         if self._registry is not None:
             try:
                 for p in self._registry.list_providers():
@@ -369,14 +479,17 @@ class TeraPilotBridge:
             self._registry.set_active(provider_id)
 
             if model:
-                try:
-                    cfg = ProviderConfig(
-                        provider_id=provider_id,
-                        model=model,
-                    )
-                    self._registry.configure(provider_id, cfg)
-                except Exception:
-                    pass  # Ignore config errors
+                # v2.3.6-fix: apply the model through the merge path
+                # (configure_provider) which PRESERVES api_key / api_base /
+                # temperature — the old code built a bare
+                # ``ProviderConfig(provider_id, model)`` here, which wiped
+                # the saved api_key and api_base on every model change (the
+                # cost-router path apply_cost_route_decision() calls
+                # set_provider(pid, model), so a cost-router switch
+                # destroyed the user's credentials).
+                r = self.configure_provider(provider_id, model=model)
+                if not r.get("ok"):
+                    return r
 
             # Persist to config
             try:
@@ -431,9 +544,32 @@ class TeraPilotBridge:
             )
             self._registry.configure(provider_id, cfg)
             self._agent = None  # force rebuild so the new model takes effect
+            # v2.3.6-fix: persist the change so it survives a restart.
+            # Quick Settings called set_provider() (persists the active
+            # provider only) and then this method — which applied the
+            # model/API key live but NEVER wrote them to config.json, so
+            # a restart reverted to the saved (old) values.
+            try:
+                self._save_provider_config(
+                    provider_id, cfg.model or None, api_key=cfg.api_key or None,
+                )
+            except Exception:
+                pass
             return {"ok": True, "provider": provider_id, "model": cfg.model}
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
+    def get_active_provider_id(self) -> Optional[str]:
+        """Get the id of the currently active provider (or None)."""
+        if self._registry is None:
+            self._registry = self._build_registry()
+        try:
+            for p in self._registry.list_providers():
+                if p.get("active"):
+                    return p.get("id")
+        except Exception:
+            pass
+        return None
 
     def _get_active_model(self) -> Optional[str]:
         """Get the model name of the currently active provider."""
@@ -447,22 +583,36 @@ class TeraPilotBridge:
             pass
         return None
 
-    def _save_provider_config(self, provider_id: str, model: Optional[str]) -> None:
-        """Persist the provider selection to ~/.tera_pilot/config.json."""
-        config_path = Path.home() / ".tera_pilot" / "config.json"
+    def _save_provider_config(
+        self,
+        provider_id: str,
+        model: Optional[str],
+        api_key: Optional[str] = None,
+    ) -> None:
+        """Persist the provider selection to ~/.tera_pilot/config.json.
+
+        v2.3.6-fix: also persist the API key (and create the ``providers``
+        entry when missing). The old code only wrote ``active_provider``
+        and the model — and only when a ``providers`` section already
+        existed — so an API key set in Quick Settings was lost on restart
+        (the daemon/API server then loaded a keyless provider config).
+        """
+        # v2.3.6-fix: write through tera_pilot.utils.save_config() — the
+        # same atomic, lock-protected writer the daemon and API server
+        # use. The old code wrote the file directly with json.dump, which
+        # could tear a partial write if the process crashed mid-save, and
+        # raced with a concurrent server-side save of the same file.
         try:
-            if config_path.exists():
-                with open(config_path, "r") as f:
-                    cfg = json.load(f)
-            else:
-                cfg = {}
+            from tera_pilot.utils import load_config, save_config
+            cfg = load_config()
             cfg["active_provider"] = provider_id
-            if model and "providers" in cfg:
-                providers = cfg["providers"]
-                if provider_id in providers:
-                    providers[provider_id]["model"] = model
-            with open(config_path, "w") as f:
-                json.dump(cfg, f, indent=2)
+            providers = cfg.setdefault("providers", {})
+            entry = providers.setdefault(provider_id, {})
+            if model:
+                entry["model"] = model
+            if api_key:
+                entry["api_key"] = api_key
+            save_config(cfg)
         except Exception:
             pass
 

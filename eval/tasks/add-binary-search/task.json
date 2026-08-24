@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "add-binary-search",
+  "name": "Add binary_search with edge cases",
+  "category": "feature",
+  "prompt": "search.py has a binary_search(items, target) stub that raises NotImplementedError. Implement it: return the index of target in the sorted list items, or -1 if target is absent. It must handle empty lists, single elements, targets at the first/last position, and absent targets. The tests in test_search.py verify the behavior.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

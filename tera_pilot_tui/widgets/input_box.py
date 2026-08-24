@@ -36,8 +36,8 @@ class InputBox(Input):
     def set_placeholder_for_command(self, cmd: str) -> None:
         """Set placeholder hint based on the command being typed."""
         hints = {
-            "/model": " > /model [provider_id]  (e.g., openai, groq, ollama) ",
-            "/provider": " > /provider [provider_id]  (e.g., openai, groq, ollama) ",
+            "/model": " > /model [provider_id | model]  (e.g., openrouter, ox-alpha) ",
+            "/provider": " > /provider [provider_id | model]  (e.g., openrouter, ox-alpha) ",
             "/chat": " > /chat [chat_id]  (e.g., auto-generated id) ",
             "/cd": " > /cd [path]  (e.g., /Users/you/projects) ",
             "/section": " > /section [general|heavy_code|office]  ",

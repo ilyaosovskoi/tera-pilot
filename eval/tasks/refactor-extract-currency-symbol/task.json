@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "refactor-extract-currency-symbol",
+  "name": "Extract currency_symbol helper",
+  "category": "refactor",
+  "prompt": "price_label(amount, currency) in currency.py formats a price but duplicates currency-symbol logic in a long if/elif chain. Refactor it: extract a small currency_symbol(currency) helper that returns the symbol for a currency code ('USD' -> '$', 'EUR' -> '€', 'GBP' -> '£', anything else -> the code itself), and use it inside price_label. Do not change price_label's output. The tests in test_currency.py verify both the helper and the formatting.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

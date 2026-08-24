@@ -40,7 +40,7 @@ SECTIONS = [
 
 BUILTIN_COMMANDS: List[CommandEntry] = [
     CommandEntry("section", "/section", "Switch runtime section (General / Heavy Code / Office)", "navigation", True),
-    CommandEntry("model", "/model", "Switch AI provider/model", "navigation", True),
+    CommandEntry("model", "/model", "Switch provider / set model (e.g. /model ox-alpha)", "navigation", True),
     CommandEntry("settings", "/settings", "Quick settings (provider, model, API key, theme)", "navigation", False),
     CommandEntry("chat", "/chat", "List and switch to saved chats", "navigation", True),
     CommandEntry("cd", "/cd", "Change workspace directory", "navigation", True),

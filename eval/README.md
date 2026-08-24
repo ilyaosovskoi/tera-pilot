@@ -2,9 +2,11 @@
 
 > From `TERA_PILOT_PRODUCT_READINESS.md`, P0.1: "Reproducible evaluation
 > harness". Status: **implemented** — runner with a baseline mode,
-> machine-readable result schema, 43 tasks in 6 categories,
+> machine-readable result schema, 58 tasks in 7 categories,
 > a smoke set for CI and quality-gate tests. Baseline runs (metrics on
-> real providers) are the next step.
+> real providers) are shipped: see `REPORT_2026-08-19.md`,
+> `REPORT_2026-08-21.md` and the OpenRouter `stealth/ox-alpha` batch in
+> `../AGENT_EVAL_AND_SECURITY_REPORT_2026-08-22.md`.
 
 ## Why
 
@@ -258,12 +260,22 @@ the manifest, that `baseline_status` matches the real state of the
 pristine repo, and that `test_command` passes with the reference
 solution from `gold/`.
 
-## Baseline run (next step)
+## Real-provider batches (done)
+
+Real provider batches are now shipped, not "next step":
+
+1. **2026-08-19** — first analyzed batch (30 runs / 9 tasks) → `REPORT_2026-08-19.md`.
+2. **2026-08-21** — local LM Studio model (2.6B), 4/5 tasks solved → `REPORT_2026-08-21.md`.
+3. **2026-08-22** — OpenRouter `stealth/ox-alpha`, 5 new tasks solved 5/5 plus an
+   adversarial security task correctly refused (SSRF blocked) →
+   `../AGENT_EVAL_AND_SECURITY_REPORT_2026-08-22.md`.
+
+Method for a new batch:
 
 1. Start Tera Pilot (Web UI / daemon), configure a provider.
-2. Run the set: `python3 -m eval.runner run <task> --driver api
-   --api-base <url> --api-token <token> --baseline` for each task
-   (or in a loop).
+2. Run the set: `python3 -m eval.run_all --tasks <ids>` (boots an in-process
+   server) or `python3 -m eval.runner run <task> --driver api
+   --api-base <url> --api-token <token> --baseline` per task.
 3. Aggregate the report: `python3 -m eval.runner report --dir eval/results`.
-4. Publish only measured claims in the README (task success rate,
-   test pass rate, cost, latency) with the methodology and run date.
+4. Publish only measured claims (task success rate, test pass rate, cost,
+   latency) with the methodology and run date.

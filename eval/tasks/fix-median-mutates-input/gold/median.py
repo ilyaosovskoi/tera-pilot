@@ -1,0 +1,11 @@
+"""Statistics helpers."""
+
+
+def median(numbers):
+    """Return the median of *numbers* without mutating the input."""
+    ordered = sorted(numbers)
+    n = len(ordered)
+    mid = n // 2
+    if n % 2 == 1:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0

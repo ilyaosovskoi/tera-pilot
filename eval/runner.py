@@ -380,7 +380,6 @@ def run_api_driver(task, workspace, api_base, api_token=None, request_timeout=No
         the request because another agent run was in progress (parallel
         launches collide on the single-agent server)."""
         tokens = 0
-        cost = 0.0
         iterations = 0
         tools = []
         final = ""
@@ -409,6 +408,9 @@ def run_api_driver(task, workspace, api_base, api_token=None, request_timeout=No
         # SSE error event when the server closes the socket while the
         # client still has unread data (macOS sends RST in that case).
         transport_error = False
+        # v2.3.5-fix (eval reporting): real usage from the agent-path
+        # `done` event (runtime-accumulated tokens_in/out), when present.
+        _done_usage = None
         read_timeout = request_timeout or (task.get("timeout_secs", 300) + 120)
         try:
             with urllib.request.urlopen(req, timeout=read_timeout) as resp:
@@ -462,6 +464,24 @@ def run_api_driver(task, workspace, api_base, api_token=None, request_timeout=No
                         status = "success" if evt.get("ok", True) else "failed"
                         cancelled = bool(evt.get("cancelled"))
                         final = final or evt.get("output") or evt.get("text") or ""
+                        # v2.3.5-fix (eval reporting): with auto_route
+                        # disabled the server never emits a
+                        # `router_decision` event, so provider/model stayed
+                        # None even though the run used a real provider.
+                        # The agent-path `done` event now carries them;
+                        # take the first non-None value (router_decision
+                        # wins when both are present). The same event also
+                        # reports REAL usage (runtime-accumulated
+                        # tokens_in/out), which is more accurate than the
+                        # before/after usage-endpoint delta — remember it
+                        # as a fallback below.
+                        provider = evt.get("provider_id") or evt.get("provider") or provider
+                        model = evt.get("model") or model
+                        if evt.get("tokens_in") is not None or evt.get("tokens_out") is not None:
+                            _done_usage = {
+                                "tokens_in": int(evt.get("tokens_in") or 0),
+                                "tokens_out": int(evt.get("tokens_out") or 0),
+                            }
                     elif etype == "error":
                         # v2.3.4-fix: a parallel launch collides on the
                         # single-agent server BEFORE the run starts (0
@@ -518,6 +538,7 @@ def run_api_driver(task, workspace, api_base, api_token=None, request_timeout=No
             "final_output": final,
             "status": status,
             "cancelled": cancelled,
+            "_done_usage": _done_usage,
             "provider_errors": provider_errors,
             "tool_errors": tool_errors,
             "self_verify": self_verify,
@@ -550,16 +571,27 @@ def run_api_driver(task, workspace, api_base, api_token=None, request_timeout=No
     after = _usage_stats(api_base, api_token)
     tokens_in = tokens_out = request_count = 0
     cost = 0.0
+    # v2.3.5-fix (eval reporting): the agent-path `done` event carries
+    # runtime-accumulated tokens_in/out — prefer it over the usage-
+    # endpoint delta (the endpoint can lag or be session-scoped).
+    # v2.3.6-fix: only prefer it when it actually carries tokens — a
+    # CANCELLED run's `done` event explicitly sends 0/0 (the api_server
+    # sends tokens_in: 0, tokens_out: 0 on the cancel path), which would
+    # otherwise override the REAL usage delta and under-report a run that
+    # did partial work before the user stopped it.
+    done_usage = driver_out.pop("_done_usage", None)
+    if done_usage is not None and (done_usage["tokens_in"] + done_usage["tokens_out"]) > 0:
+        tokens_in = done_usage["tokens_in"]
+        tokens_out = done_usage["tokens_out"]
     if before and after:
-        tokens_in = max(0, after["tokens_in"] - before["tokens_in"])
-        tokens_out = max(0, after["tokens_out"] - before["tokens_out"])
+        if done_usage is None or (done_usage["tokens_in"] + done_usage["tokens_out"]) == 0:
+            tokens_in = max(0, after["tokens_in"] - before["tokens_in"])
+            tokens_out = max(0, after["tokens_out"] - before["tokens_out"])
         cost = max(0.0, round(after["cost"] - before["cost"], 6))
         request_count = max(0, after["requests"] - before["requests"])
-        tokens = driver_out.get("tokens", 0)
-        if tokens == 0:
-            tokens = tokens_in + tokens_out
-    else:
-        tokens = driver_out.get("tokens", 0)
+    tokens = driver_out.get("tokens", 0)
+    if tokens == 0:
+        tokens = tokens_in + tokens_out
     if driver_out.get("cancelled") and driver_out["status"] == "success":
         driver_out["status"] = "failed"
 

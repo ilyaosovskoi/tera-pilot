@@ -68,6 +68,9 @@ class TeraPilotTUIApp(App):
         # the ChatLog showed every run-ending error twice (once from the
         # event, once from _on_turn_done).
         self._last_event_error: Optional[str] = None
+        # v2.3.6: animated "thinking…" status line while a turn runs.
+        self._status_state: str = "idle"
+        self._status_frame: int = 0
 
     # ---------------------------------------------------------------- compose
     def compose(self) -> ComposeResult:
@@ -108,6 +111,9 @@ class TeraPilotTUIApp(App):
         sug = self.query_one(CommandSuggestions)
         sug.set_commands(BUILTIN_COMMANDS)
         sug.set_on_select(self._on_suggestion_selected)
+
+        # v2.3.6: drive the animated "thinking…" status line.
+        self.set_interval(0.15, self._tick_status_animation)
 
         self.query_one(InputBox).focus()
 
@@ -281,44 +287,13 @@ class TeraPilotTUIApp(App):
         elif cmd == "/settings":
             self._open_quick_settings()
         elif cmd == "/provider":
+            # /provider is an alias for /model — switch provider and/or
+            # set the model. _exec_model handles "<provider>",
+            # "<provider> <model>" and a bare "<model>" (applied to the
+            # currently active provider), so both aliases share one path.
             self.query_one(ChatLog).add_user(prompt)
             if arg:
-                # /provider is an alias for /model — switch provider/model.
-                # Parse "provider_id model" or just "provider_id".
-                provider_parts = arg.split(None, 1)
-                pid = provider_parts[0]
-                # If a second token looks like a model name (contains / or
-                # known model patterns), pass it through.
-                if len(provider_parts) > 1:
-                    # v2.3.5-fix: switch the provider AND configure its
-                    # model via the bridge. The old code called
-                    # ``self.bridge._registry.configure(pid, model=...)``
-                    # which raises TypeError (configure() expects a
-                    # ProviderConfig, not kwargs) and was silently
-                    # swallowed — the UI claimed "model: <m>" while the
-                    # model was never applied.
-                    chat = self.query_one(ChatLog)
-                    r = self.bridge.set_provider(pid)
-                    if r.get("ok"):
-                        r2 = self.bridge.configure_provider(pid, model=provider_parts[1])
-                        if not r2.get("ok"):
-                            chat.add_error(
-                                f"Provider switched, but model failed: {r2.get('error', 'unknown')}"
-                            )
-                            self.query_one(InputBox).focus()
-                            return
-                        chat.add_system(
-                            f"Provider switched to: [b]{r.get('provider', pid)}[/b] "
-                            f"model: [dim]{r2.get('model', provider_parts[1])}[/dim]"
-                        )
-                        self._refresh_status("idle")
-                    else:
-                        chat.add_error(
-                            f"Failed to switch provider: {r.get('error', 'unknown')}"
-                        )
-                    self.query_one(InputBox).focus()
-                else:
-                    self._exec_model(arg)
+                self._exec_model(arg)
             else:
                 self._open_model_palette()
         elif cmd == "/chat":
@@ -706,25 +681,70 @@ class TeraPilotTUIApp(App):
             )
         self.query_one(InputBox).focus()
 
-    def _exec_model(self, provider_id: str = "") -> None:
-        """Switch provider/model. If no arg, show interactive picker."""
+    def _exec_model(self, arg: str = "") -> None:
+        """Switch provider and/or set a custom model.
+
+        /model                       — interactive picker
+        /model <provider_id>         — switch provider (keeps its model)
+        /model <provider_id> <model> — switch provider AND set the model
+        /model <model>               — set the model on the currently
+                                       active provider (e.g. /model ox-alpha)
+        """
         chat = self.query_one(ChatLog)
 
-        # If no provider_id given, show palette (same as /model without args)
-        if not provider_id or provider_id.strip() == "":
+        # No arg — show the interactive provider picker.
+        if not arg or arg.strip() == "":
             self._open_model_palette()
             return
 
-        # If provider_id given, try to switch to it
-        result = self.bridge.set_provider(provider_id)
-        if result.get("ok"):
+        parts = arg.split(None, 1)
+        first = parts[0]
+        rest = parts[1] if len(parts) > 1 else None
+        provider_ids = {p.get("id") for p in self.bridge.list_providers()}
+
+        if first in provider_ids:
+            # Provider-id form: switch, optionally with a model.
+            r = self.bridge.set_provider(first)
+            if not r.get("ok"):
+                chat.add_error(f"Failed to switch provider: {r.get('error', 'unknown')}")
+                self.query_one(InputBox).focus()
+                return
+            model = r.get("model", "?")
+            if rest:
+                # v2.3.5-fix: apply the model through configure_provider
+                # which preserves api_base/api_key (set_provider(model=...)
+                # builds a bare ProviderConfig and would wipe them).
+                r2 = self.bridge.configure_provider(first, model=rest)
+                if not r2.get("ok"):
+                    chat.add_error(
+                        f"Provider switched, but model failed: {r2.get('error', 'unknown')}"
+                    )
+                    self.query_one(InputBox).focus()
+                    return
+                model = r2.get("model", rest)
             chat.add_system(
-                f"Provider switched to: [b]{result.get('provider', provider_id)}[/b] "
-                f"model: [dim]{result.get('model', '?')}[/dim]"
+                f"Provider switched to: [b]{r.get('provider', first)}[/b] "
+                f"model: [dim]{model}[/dim]"
             )
             self._refresh_status("idle")
         else:
-            chat.add_error(f"Failed to switch provider: {result.get('error', 'unknown')}")
+            # Model-name form: set the model on the currently active provider.
+            active_pid = self.bridge.get_active_provider_id()
+            if not active_pid:
+                chat.add_error(
+                    "No active provider. Pick one first: /model <provider_id> "
+                    f"(e.g. {', '.join(sorted(provider_ids)) or 'none configured'})"
+                )
+                self.query_one(InputBox).focus()
+                return
+            r = self.bridge.configure_provider(active_pid, model=arg)
+            if r.get("ok"):
+                chat.add_system(
+                    f"Model set on [b]{active_pid}[/b]: [dim]{r.get('model', arg)}[/dim]"
+                )
+                self._refresh_status("idle")
+            else:
+                chat.add_error(f"Failed to set model: {r.get('error', 'unknown')}")
         self.query_one(InputBox).focus()
 
     def _exec_chat(self, chat_id: str) -> None:
@@ -798,8 +818,8 @@ class TeraPilotTUIApp(App):
             "[b]Slash Commands[/b]",
             "",
             "  [cyan]/section[/cyan]   Switch section (General / Heavy Code / Office)",
-            "  [cyan]/model[/cyan]     Switch AI provider/model",
-            "  [cyan]/provider[/cyan]  Switch AI provider (alias for /model)",
+            "  [cyan]/model[/cyan]     Switch provider or set model (e.g. /model ox-alpha)",
+            "  [cyan]/provider[/cyan]  Switch provider (alias for /model)",
             "  [cyan]/chat[/cyan]      List and browse saved chats",
             "  [cyan]/cd[/cyan]        Change workspace directory",
             "  [cyan]/usage[/cyan]     Show session token usage & cost",
@@ -2532,6 +2552,15 @@ class TeraPilotTUIApp(App):
             err = getattr(result, "error", None) or output or "task failed"
             if was_streaming:
                 chat.abort_streaming()
+            # v2.3.6: when the run hit the iteration cap, don't throw the
+            # partial work away — surface whatever the agent produced so
+            # far as the answer (the error line already says why it
+            # stopped).
+            if "max iterations" in str(err).lower() and output and output.strip():
+                chat.add_system(
+                    "[dim]Hit the iteration cap — showing the partial result below.[/dim]"
+                )
+                chat.add_final(output)
             # v2.3.5-fix: skip the duplicate error. The runtime already
             # emitted this exact error via the ERROR event (rendered by
             # _handle_event) before returning success=False — adding it
@@ -2595,6 +2624,7 @@ class TeraPilotTUIApp(App):
 
     def _refresh_status(self, state: str) -> None:
         """Update InfoBox with current status (model, provider, etc)."""
+        self._status_state = state
         try:
             status = self.bridge.status()
             info = self.query_one(InfoBox)
@@ -2605,6 +2635,8 @@ class TeraPilotTUIApp(App):
                 # workspace but the InfoBox kept showing the old path.
                 directory=self.bridge.workspace,
             )
+            if state not in ("thinking", "running"):
+                info.clear_status()
         except Exception:
             pass
         # v2.3.1: mark the input box with the "working" class while the
@@ -2616,6 +2648,23 @@ class TeraPilotTUIApp(App):
                 box.set_class(working, "working")
         except Exception:
             pass
+
+    def _tick_status_animation(self) -> None:
+        """v2.3.6: animate the status line ("thinking…") while a turn runs.
+
+        Runs on a 0.15s timer; no-ops when idle. The word follows the
+        current phase (thinking / running), the dots cycle 0→3.
+        """
+        if not self._turn_running or self._status_state not in ("thinking", "running"):
+            return
+        try:
+            info = self.query_one(InfoBox)
+        except Exception:
+            return
+        self._status_frame += 1
+        word = "thinking" if self._status_state == "thinking" else "running"
+        dots = "." * (self._status_frame % 4)
+        info.update_status(f"{word}{dots:<3}")
 
     # ------------------------------------------------------------------ actions
     def action_interrupt(self) -> None:
@@ -2803,12 +2852,16 @@ class TeraPilotTUIApp(App):
                     msg_count = len(agent.memory.messages)
             except Exception:
                 pass
-            # Get touched files
+            # Get touched files. v2.3.6-fix: the runtime's ToolEngine lives
+            # at ``agent.tools`` (NOT ``agent._tool_engine``, which never
+            # existed) — so /checkpoint save used to record 0 touched
+            # files even after the agent wrote files, and the backup
+            # manifest was always empty.
             touched = []
             try:
                 agent = self.bridge._agent
-                if agent is not None and hasattr(agent, '_tool_engine'):
-                    touched = list(agent._tool_engine._touched_files)
+                if agent is not None:
+                    touched = list(getattr(agent.tools, "_touched_files", []) or [])
             except Exception:
                 pass
             r = self.bridge.create_checkpoint(

@@ -117,12 +117,37 @@ ApprovalModal {
 
 #approval-buttons {
     height: auto;
+    layout: horizontal;
     align: center middle;
+    margin-top: 1;
 }
 
 #approval-buttons Button {
-    margin: 1 1 0 1;
-    width: 100%;
+    width: 22;
+    margin: 0 1;
+    padding: 0 2;
+}
+
+#approval-buttons #approve {
+    background: #1e7a34;
+    color: #ffffff;
+    text-style: bold;
+}
+
+#approval-buttons #approve:hover {
+    background: #2c9c46;
+    text-style: bold;
+}
+
+#approval-buttons #deny {
+    background: #8f2d24;
+    color: #ffffff;
+    text-style: bold;
+}
+
+#approval-buttons #deny:hover {
+    background: #b03a2f;
+    text-style: bold;
 }
 
 /* ── Guardian Modal ─────────────────────────────────────────────── */
@@ -174,12 +199,48 @@ GuardianModal {
 
 #guardian-buttons {
     height: auto;
+    layout: horizontal;
     align: center middle;
+    margin-top: 1;
 }
 
 #guardian-buttons Button {
-    margin: 1 1 0 1;
-    width: 100%;
+    width: 22;
+    margin: 0 1;
+    padding: 0 2;
+}
+
+#guardian-buttons #approve {
+    background: #1e7a34;
+    color: #ffffff;
+    text-style: bold;
+}
+
+#guardian-buttons #approve:hover {
+    background: #2c9c46;
+    text-style: bold;
+}
+
+#guardian-buttons #use_fix {
+    background: #3d5a99;
+    color: #ffffff;
+    text-style: bold;
+}
+
+#guardian-buttons #use_fix:hover {
+    background: #4f6fb8;
+    text-style: bold;
+}
+
+#guardian-buttons #reject {
+    background: #8f2d24;
+    color: #ffffff;
+    text-style: bold;
+}
+
+#guardian-buttons #reject:hover {
+    background: #b03a2f;
+    text-style: bold;
 }
 
 /* ── Verification Modal (G4) ────────────────────────────────────── */

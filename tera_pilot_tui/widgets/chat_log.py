@@ -10,6 +10,7 @@ v2.1.0 (Loop 3): Warm, Modern, Content-Forward redesign.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Optional
 
 from rich.markdown import Markdown
@@ -20,6 +21,28 @@ from textual.widgets import RichLog
 
 # Tools that involve code editing
 _CODE_TOOLS = {"write_file", "str_replace", "create_file", "edit_file"}
+
+# v2.3.6-fix (rendering garbage): model-generated text can carry ANSI
+# escape sequences / control characters (some models "colorize" their
+# thinking). Written verbatim into a RichLog they render as stray
+# fragments — e.g. isolated "u"-looking glyphs from half-consumed CSI
+# sequences — and the user mistakes them for a model bug. Strip them
+# before rendering; the TUI's own styles (grey thoughts, white answers)
+# stay the source of color.
+_ANSI_OSC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+_ANSI_CSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+_ANSI_OTHER = re.compile(r"\x1b[@-Z\\-_]")
+_CTRL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def clean_display_text(text: str) -> str:
+    """Strip ANSI escapes and stray control characters from model text."""
+    if not text:
+        return text
+    text = _ANSI_OSC.sub("", text)
+    text = _ANSI_CSI.sub("", text)
+    text = _ANSI_OTHER.sub("", text)
+    return _CTRL_CHARS.sub("", text)
 
 # v2.1.0 (Loop 3): Terracotta accent color for AI headers
 _TERRACOTTA = "#d77757"
@@ -73,7 +96,7 @@ class ChatLog(RichLog):
     def add_plan(self, plan: str) -> None:
         """Display a plan proposal."""
         self.write(Text("[plan]", style="bold #888888"), animate=True)
-        self.write(Markdown(plan), animate=True)
+        self.write(Markdown(clean_display_text(plan)), animate=True)
         self.write(Text(""))
 
     # ---- separators (Loop 3) ────────────────────────────────────────────
@@ -91,7 +114,7 @@ class ChatLog(RichLog):
         """Display agent thinking (greyed out)."""
         if not text:
             return
-        self.write(Text(text.rstrip(), style="grey62"))
+        self.write(Text(clean_display_text(text).rstrip(), style="grey62"))
 
     def append_token_delta(self, chunk: str) -> None:
         """Append a streaming token chunk to the live assistant response.
@@ -112,12 +135,12 @@ class ChatLog(RichLog):
             self._streaming_text = chunk
             if self._size_known:
                 self._stream_baseline = len(self.lines)
-                self.write(Text(self._streaming_text, style="white"))
+                self.write(Text(clean_display_text(self._streaming_text), style="white"))
         else:
             self._streaming_text += chunk
             if self._size_known:
                 self._rollback_stream_entry()
-                self.write(Text(self._streaming_text, style="white"))
+                self.write(Text(clean_display_text(self._streaming_text), style="white"))
 
     def _rollback_stream_entry(self) -> None:
         """Remove the in-progress streaming entry from the log.
@@ -180,7 +203,7 @@ class ChatLog(RichLog):
             self.end_streaming()
         # AI responses: plain text, white, no container
         # v2.3.1: smooth scroll so the final answer glides into view.
-        self.write(Markdown(text), animate=True)
+        self.write(Markdown(clean_display_text(text)), animate=True)
 
     def add_error(self, text: str) -> None:
         """Display an error message."""
@@ -226,7 +249,7 @@ class ChatLog(RichLog):
 
     def add_tool_result(self, tool: str, result: str) -> None:
         """Display a tool result (no panel)."""
-        preview = (result or "").rstrip()
+        preview = clean_display_text(result or "").rstrip()
         self.write(Text(f"← {tool}", style="dim #888888"))
         self.write(Text(preview or "(no output)", style="#aaaaaa"))
         self.write(Text(""))

@@ -135,6 +135,38 @@ The runtime includes tools for:
 - verification: `self_verify`, test execution and reviewer subagents;
 - office workflows: `.docx`, `.xlsx` and `.pptx` operations.
 
+### Iteration budget
+
+Each turn runs a bounded ReAct loop: the agent thinks, calls tools, and
+repeats until it emits a `final_answer`. The loop has an iteration
+budget so a stuck model can never spend forever — but the budget is a
+safety net, not a cap on how much work an agent may do:
+
+- **Soft cap** — the configured iteration limit, taken from
+  `agent_max_iterations` in `~/.tera_pilot/config.json`, from the
+  `/budget iterations <n>` TUI command, or from `--max-iterations` on
+  the CLI. The genuinely stuck cases already exit on their own before
+  the cap matters: prose without tool calls is accepted as a final
+  answer, repetition-dominated text is refused by the repetition guard,
+  and a repeated failing call gets a corrective nudge.
+- **Auto-extension** — if the cap IS reached while the agent is still
+  doing real work (a tool call succeeded within the last two
+  iterations), the budget extends automatically instead of cutting a
+  productive run off mid-task. Large, multi-file tasks therefore run to
+  completion instead of dying with "Max iterations reached".
+- **Hard ceiling** — extension is bounded: 3× the soft cap, at least
+  40, at most 200. A genuinely stuck loop never extends, because
+  extension requires recent *successful* tool work — repeated errors,
+  missing files and blocked commands do not count as progress.
+- **Partial output is kept** — if the hard ceiling is reached, the run
+  reports `Max iterations (N) reached` and surfaces whatever partial
+  result was produced so far instead of discarding it.
+
+Soft-cap priority: explicit `--max-iterations` > a changed
+`token_budget.max_iterations` > `agent_max_iterations` from the config
+> the default of 8. The `heavy_code` section gets a floor of 20
+iterations, mirroring the API server.
+
 ## Trust and Control
 
 Tera Pilot treats autonomy as a policy decision, not a binary marketing label.

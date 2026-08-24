@@ -60,6 +60,21 @@ class AgentRuntime:
     with proper ProviderMessage objects.
     """
 
+    @property
+    def max_iterations(self) -> int:
+        """v2.3.6: the SOFT iteration cap (see the run-loop comment)."""
+        return self._max_iterations
+
+    @max_iterations.setter
+    def max_iterations(self, value: int) -> None:
+        # Keep the hard ceiling derived and in sync: 3× soft, at least 40,
+        # at most 200. Mutations after construction (the API server raises
+        # the cap for heavy_code per request) must not leave a stale ceiling
+        # computed from the original value.
+        value = max(0, int(value or 0))
+        self._max_iterations = value
+        self.hard_max_iterations = min(200, max(value * 3, 40))
+
     def __init__(
         self,
         registry: "ProviderRegistry",
@@ -93,7 +108,23 @@ class AgentRuntime:
         # Pass provider for Guardian LLM calls
         self.tools._provider = registry.active
         self.task_history: List[Task] = []
+        # v2.3.6: max_iterations is a SOFT cap. The loop already exits on
+        # its own for the stuck cases (prose accepted as final, repetition
+        # guard, degenerate-call guard) — the cap only ever trips when the
+        # agent is still doing REAL work (executing tools) without saying
+        # final_answer. For big multi-file tasks that is exactly when we
+        # must NOT cut the run off. So while the agent keeps executing
+        # tools successfully, the budget auto-extends up to this hard
+        # ceiling (derived: 3× soft, at least 40, at most 200). A
+        # genuinely stuck loop (errors, repeated calls, no tools) never
+        # extends because extension requires a recent SUCCESSFUL tool call.
+        #
+        # Implemented as a property so post-construction mutations stay in
+        # sync: the API server sets ``agent.max_iterations`` directly per
+        # request (e.g. the heavy_code floor of 20) and would otherwise
+        # leave the hard ceiling computed from the original value.
         self.max_iterations = max_iterations
+        self._last_successful_tool_iteration = 0
         self.enable_planning = enable_planning
         self.on_event = on_event
         self.verbose = verbose
@@ -1680,7 +1711,58 @@ class AgentRuntime:
         success = True
         error_msg = None
 
-        for iteration in range(1, self.max_iterations + 1):
+        # v2.3.6: SOFT iteration cap. The former for/else became a while
+        # loop so the budget can be extended while the agent is still
+        # doing real work (see hard_max_iterations in __init__). All
+        # `continue` / `break` semantics are preserved; the only
+        # behavioral difference is the extension check at the top. The
+        # stuck cases (prose accepted as final, repetition guard,
+        # degenerate-call guard) already exit on their own BEFORE this
+        # check — so reaching it means the model is still executing
+        # tools, which is exactly when cutting the run off is wrong.
+        self._last_successful_tool_iteration = 0
+        effective_max = self.max_iterations
+        exhausted = False
+        iteration = 0
+        while True:
+            iteration += 1
+            if iteration > effective_max:
+                # Soft cap hit while the agent is still executing tools
+                # (successfully, within the last 2 iterations) — extend
+                # the budget instead of aborting a productive run, up to
+                # the hard ceiling. Spinning loops never extend: repeated
+                # errors / no tools leave `_last_successful_tool_iteration`
+                # stale, so the condition fails and we stop.
+                if (
+                    effective_max < self.hard_max_iterations
+                    # v2.3.6-fix: never extend a run where NO tool ever
+                    # succeeded (``_last_successful_tool_iteration`` stays 0
+                    # from the reset at the top). Without the >0 guard, a
+                    # tiny soft cap (e.g. 1) let a fully-stuck loop extend
+                    # once — ``iteration - 0 <= 2`` is true at iteration 2
+                    # even though the model never did any real work.
+                    and self._last_successful_tool_iteration > 0
+                    and iteration - self._last_successful_tool_iteration <= 2
+                ):
+                    first_extend = effective_max == self.max_iterations
+                    effective_max += 1
+                    if first_extend:
+                        self._emit(
+                            AgentEvent.THOUGHT,
+                            thought=(
+                                "[agent is still making progress — extending "
+                                f"iteration budget beyond {self.max_iterations}]"
+                            ),
+                            iteration=iteration,
+                            note="auto_extend",
+                        )
+                        logger.info(
+                            "[agent] auto-extending iteration budget past %d "
+                            "(still executing tools)", self.max_iterations,
+                        )
+                else:
+                    exhausted = True
+                    break
             # v1.1.1: honor Stop — check BEFORE starting another LLM call /
             # tool call, so cancelling actually halts further agent
             # activity instead of just muting UI updates while the loop
@@ -1708,7 +1790,7 @@ class AgentRuntime:
                 self._emit(AgentEvent.ERROR, error=error_msg, iteration=iteration)
                 break
 
-            self._emit(AgentEvent.ITERATION_START, iteration=iteration, max=self.max_iterations)
+            self._emit(AgentEvent.ITERATION_START, iteration=iteration, max=effective_max)
             # v1.2.0: propagate current iteration to ToolEngine so
             # activity log entries can be tagged with the iteration
             # they occurred in. This is read by record_tool_call().
@@ -1912,6 +1994,16 @@ class AgentRuntime:
                     self._emit(AgentEvent.TOOL_CALLED, **event_payload)
 
                     observation = self.tools.execute(tool_call)
+
+                    # v2.3.6: track the last iteration that did real work
+                    # (a tool call that did NOT fail) — the auto-extension
+                    # check requires this to be recent. Failure markers are
+                    # the ones ToolEngine prefixes on a non-productive call:
+                    # exceptions, missing files, blocked commands.
+                    if not observation.startswith(
+                        ("[TOOL ERROR]", "[FILE NOT FOUND]", "[BLOCKED]")
+                    ):
+                        self._last_successful_tool_iteration = iteration
 
                     step_summary = (
                         f"Step {iteration}: [{tool_name_str}] → "
@@ -2190,12 +2282,11 @@ class AgentRuntime:
 
             all_steps.append(step)
             self._emit(AgentEvent.ITERATION_END, iteration=iteration)
-        else:
-            # for/else: loop completed without `break` — max iterations
-            # exhausted. If `raw` was assigned (at least one iteration
-            # ran before any potential break), use it as the final
-            # output; otherwise (e.g. max_iterations=0) there's nothing
-            # to surface.
+        if exhausted:
+            # Loop ended at the (possibly extended) iteration cap without
+            # a final answer. If `raw` was assigned (at least one
+            # iteration ran), use it as the final output; otherwise
+            # (e.g. max_iterations=0) there's nothing to surface.
             #
             # v1.0.5-correctness: previously ``success = bool(final_output)``
             # was True whenever the model emitted ANY text — but at this
@@ -2211,7 +2302,7 @@ class AgentRuntime:
                 # module-level namespace when called at class scope,
                 # which would falsely report `raw` as defined.
                 final_output = locals().get("raw", "")
-            error_msg = f"Max iterations ({self.max_iterations}) reached"
+            error_msg = f"Max iterations ({effective_max}) reached"
             success = False
 
         tool_calls = [s.action for s in all_steps if s.action]

@@ -16,6 +16,9 @@ class InfoBox(Static):
         self._provider: str = "unknown"
         self._directory: str = "~"
         self._version: str = "2.3.6"
+        # v2.3.6: animated status line ("thinking…") shown while a turn
+        # runs. Cleared when idle.
+        self._status: str = ""
 
     def update_info(
         self,
@@ -35,6 +38,18 @@ class InfoBox(Static):
             self._version = version
         self.update(self._render_text())
 
+    def update_status(self, text: str) -> None:
+        """Set the animated status line (e.g. "thinking…")."""
+        if text != self._status:
+            self._status = text
+            self.update(self._render_text())
+
+    def clear_status(self) -> None:
+        """Hide the status line when the turn ends."""
+        if self._status:
+            self._status = ""
+            self.update(self._render_text())
+
     def _render_text(self) -> Panel:
         """Render the info box content as Rich Panel with solid border."""
         lines = [
@@ -43,6 +58,8 @@ class InfoBox(Static):
             f"| provider:  [white]{self._provider:<20}[/white]  /provider to change",
             f"| directory: [white]{self._directory:<20}[/white]  /cd to change",
         ]
+        if self._status:
+            lines.append(f"| status:    [cyan]{self._status}[/cyan]")
         return Panel(
             Text.from_markup("\n".join(lines)),
             border_style="#1f1f23",

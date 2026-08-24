@@ -27,8 +27,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--section", default="general",
                         choices=["general", "heavy_code", "office"],
                         help="Runtime section (default: general).")
-    parser.add_argument("--max-iterations", type=int, default=8,
-                        help="Max agent iterations per turn (default: 8).")
+    parser.add_argument("--max-iterations", type=int, default=None,
+                        help=("Max agent iterations per turn (soft cap; the agent "
+                              "auto-extends while it is still executing tools). "
+                              "Default: agent_max_iterations from config.json, "
+                              "then /budget iterations, then 8."))
     parser.add_argument("--planning", action="store_true", default=False,
                         help="Enable planning mode (agent creates a plan before executing).")
     args = parser.parse_args(argv)

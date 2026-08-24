@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "repair-test-wrong-expected-value-format",
+  "name": "Fix wrong expected value in format test",
+  "category": "test_repair",
+  "prompt": "format_duration(seconds) in duration.py is CORRECT — do not change it. test_duration.py has a wrong expected value in test_format_duration_large: it asserts the old (buggy) output format. Fix the TEST so it asserts what format_duration actually produces. Run the tests to confirm they pass.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

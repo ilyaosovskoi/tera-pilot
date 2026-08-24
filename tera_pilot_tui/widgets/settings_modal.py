@@ -19,21 +19,26 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical, Horizontal
+from textual.containers import Vertical, Horizontal, Grid
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static, Label
 
 from .motion import entrance
 
 
-# The 6 most popular providers — keep this list short and simple.
+# The most popular providers — keep this list short and simple.
+# v2.3.6: added OpenRouter (one of the most-used cloud providers; it was
+# missing, so users whose active provider was openrouter saw NO button
+# highlighted in quick settings). The active provider is also appended
+# dynamically in __init__ when it isn't in this list.
 QUICK_PROVIDERS = [
-    ("openai",    "OpenAI",        "🟢", True),
-    ("anthropic", "Anthropic",     "🟠", True),
-    ("gemini",    "Google Gemini", "🔵", True),
-    ("deepseek",  "DeepSeek",      "🟣", True),
-    ("groq",      "Groq",          "⚡", True),
-    ("ollama",    "Ollama (local)", "🦙", False),
+    ("openai",     "OpenAI",         "🟢", True),
+    ("anthropic",  "Anthropic",      "🟠", True),
+    ("gemini",     "Google Gemini",  "🔵", True),
+    ("deepseek",   "DeepSeek",       "🟣", True),
+    ("groq",       "Groq",           "⚡", True),
+    ("openrouter", "OpenRouter",     "🟡", True),
+    ("ollama",     "Ollama (local)", "🦙", False),
 ]
 
 
@@ -67,6 +72,9 @@ class QuickSettingsModal(ModalScreen[None]):
         margin-bottom: 0;
     }
     #qs-provider-grid {
+        layout: grid;
+        grid-size: 3;
+        grid-gutter: 0 1;
         height: auto;
         margin-top: 0;
         margin-bottom: 0;
@@ -100,22 +108,37 @@ class QuickSettingsModal(ModalScreen[None]):
         self._on_advanced = on_advanced
         # v2.3.4-fix: bridge has no get_provider() — it used to crash
         # with AttributeError every time the modal opened (so /settings
-        # was completely broken). Read the active provider from status().
+        # was completely broken).
+        # v2.3.6-fix: read the active provider via
+        # get_active_provider_id(), which builds the registry — the old
+        # path used bridge.status(), which returns provider=None until
+        # the registry has been built (first turn / first list_providers
+        # call), so a FRESH app always showed "OpenAI" selected even
+        # when the user's real provider was openrouter.
         self._selected_provider = "openai"
         try:
-            status = bridge.status()
-            if status.get("provider"):
-                self._selected_provider = status["provider"]
+            pid = bridge.get_active_provider_id()
+            if pid:
+                self._selected_provider = pid
         except Exception:
             pass
+        # The provider row shows QUICK_PROVIDERS plus the active provider
+        # (if it isn't in the list) so there is ALWAYS a highlighted
+        # button for the provider the user is actually on.
+        self._providers = list(QUICK_PROVIDERS)
+        known = {p[0] for p in self._providers}
+        if self._selected_provider not in known:
+            self._providers.append(
+                (self._selected_provider, self._selected_provider.title(), "🔘", True)
+            )
 
     def compose(self) -> ComposeResult:
         with Vertical(id="qs-container"):
             yield Label("Settings", id="qs-title")
 
             yield Label("Provider", classes="qs-section-label")
-            with Horizontal(id="qs-provider-grid"):
-                for pid, label, icon, needs_key in QUICK_PROVIDERS:
+            with Grid(id="qs-provider-grid"):
+                for pid, label, icon, needs_key in self._providers:
                     btn = Button(
                         f"{icon} {label}",
                         id=f"qs-prov-{pid}",
@@ -210,9 +233,9 @@ class QuickSettingsModal(ModalScreen[None]):
             pid = btn_id[len("qs-prov-"):]
             self._selected_provider = pid
             # Update active button styles
-            for _, label, icon, _ in QUICK_PROVIDERS:
-                b = self.query_one(f"#qs-prov-{_}", Button)
-                if _ == pid:
+            for prov_pid, _, _, _ in self._providers:
+                b = self.query_one(f"#qs-prov-{prov_pid}", Button)
+                if prov_pid == pid:
                     b.classes = "qs-provider-btn active"
                 else:
                     b.classes = "qs-provider-btn"

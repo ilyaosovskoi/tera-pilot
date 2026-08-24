@@ -7,7 +7,7 @@ drives every selected task through the same SSE endpoint the Web UI uses
 aggregates the results into a metrics report.
 
 Usage:
-    # All 43 tasks, in-process server:
+    # All 58 tasks, in-process server:
     python3 -m eval.run_all
 
     # Only the CI smoke set (10 tasks across all 6 categories):

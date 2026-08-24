@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "fix-median-mutates-input",
+  "name": "Fix median() mutating its input",
+  "category": "bug_fix",
+  "prompt": "median(numbers) in median.py computes the right result but sorts the caller's list in place, so any code that reuses the list after calling median() sees it silently reordered. Fix the function so it returns the correct median WITHOUT mutating the input list. The tests in test_median.py verify both the result and that the input is untouched.",
+  "repo": "repo",
+  "test_command": ["python3", "-m", "pytest", "-q"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

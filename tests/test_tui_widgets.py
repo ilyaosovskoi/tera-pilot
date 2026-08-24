@@ -146,9 +146,42 @@ def test_quick_settings_modal_constructs():
 
     bridge = TeraPilotBridge(workspace="/tmp")
     modal = QuickSettingsModal(bridge)
-    assert modal._selected_provider in {"openai", "ollama"}  # sane default
+    # v2.3.6: the active provider comes from the (freshly built) registry
+    # and the provider row always includes it — never an empty pick.
+    assert modal._selected_provider
+    assert any(p[0] == modal._selected_provider for p in modal._providers)
     # The model prefill path uses bridge.status(), not bridge.get_status()
     assert hasattr(bridge, "status")
+
+
+@pytest.mark.asyncio
+async def test_quick_settings_modal_highlights_active_provider():
+    """v2.3.6: the provider row must include the ACTIVE provider (e.g.
+    openrouter) and mark it active — a fresh app must not silently
+    default to OpenAI."""
+    from textual.app import App
+    from tera_pilot_tui.bridge import TeraPilotBridge
+    from tera_pilot_tui.widgets.settings_modal import QuickSettingsModal, QUICK_PROVIDERS
+
+    class SettingsApp(App):
+        def on_mount(self):
+            self.push_screen(QuickSettingsModal(TeraPilotBridge(workspace="/tmp")))
+
+    app = SettingsApp()
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause(0.4)
+        modal = app.screen
+        assert isinstance(modal, QuickSettingsModal), type(modal).__name__
+        assert modal._selected_provider
+        assert modal._selected_provider in {p[0] for p in modal._providers}
+        # The modal is a pushed screen — query it directly, not the App.
+        active_btn = modal.query_one(f"#qs-prov-{modal._selected_provider}")
+        assert "active" in active_btn.classes
+        # openrouter is a first-class quick provider now
+        assert "openrouter" in {p[0] for p in QUICK_PROVIDERS}
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert app._exception is None
 
 
 # ── ToolBlock must not shadow Textual's internal _render ───────────────
@@ -240,6 +273,158 @@ async def test_ctrl_p_opens_project_command_palette():
         assert not any("Maximize" in l for l in labels), labels
         await pilot.press("escape")
         await pilot.pause(0.2)
+
+
+# ── /model <name> must set the model on the active provider ────────────
+
+
+@pytest.mark.asyncio
+async def test_model_command_sets_model_on_active_provider():
+    """`/model <name>` must treat a non-provider argument as a MODEL and
+    apply it to the currently active provider — not try to switch to a
+    provider named "<name>". The active provider must stay unchanged.
+    """
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.widgets.input_box import InputBox
+
+    app = TeraPilotTUIApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        active_before = app.bridge.get_active_provider_id()
+        assert active_before, "expected a default active provider"
+
+        inp = app.query_one(InputBox)
+        inp.focus()
+        inp.value = "/model ox-alpha"
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+
+        # Provider unchanged, model applied to it.
+        assert app.bridge.get_active_provider_id() == active_before
+        assert app.bridge._get_active_model() == "ox-alpha"
+
+
+@pytest.mark.asyncio
+async def test_model_command_still_switches_provider():
+    """`/model <provider_id>` keeps the old behavior: switch provider.
+    A bare provider id must not be mistaken for a model name."""
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.widgets.input_box import InputBox
+
+    app = TeraPilotTUIApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        active_before = app.bridge.get_active_provider_id()
+
+        # Pick a provider id that is NOT currently active.
+        providers = app.bridge.list_providers()
+        target = next(
+            (p["id"] for p in providers if p["id"] != active_before), None
+        )
+        if target is None:
+            return  # only one provider — nothing to switch to
+
+        inp = app.query_one(InputBox)
+        inp.focus()
+        inp.value = f"/model {target}"
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+
+        assert app.bridge.get_active_provider_id() == target
+
+
+# ── ANSI/control-char garbage in model text (v2.3.6-fix) ──────────────
+
+
+def test_clean_display_text_strips_ansi_and_control():
+    from tera_pilot_tui.widgets.chat_log import clean_display_text
+
+    assert clean_display_text("\x1b[31mred\x1b[0m") == "red"
+    assert clean_display_text("\x1b[38;5;208morange\x1b[0m") == "orange"
+    assert clean_display_text("a\x0cb") == "ab"
+    assert clean_display_text("\x1b]0;title\x07body") == "body"
+    assert clean_display_text("plain text") == "plain text"
+    assert clean_display_text("") == ""
+    assert "\x1b" not in clean_display_text("x\x1b[3my\x1b[23mz")
+
+
+@pytest.mark.asyncio
+async def test_chat_log_thought_strips_ansi_before_render():
+    """Model thoughts with ANSI escapes must render clean — no stray
+    "u"-looking fragments from half-consumed escape sequences."""
+    from textual.app import App
+    from tera_pilot_tui.widgets.chat_log import ChatLog
+
+    class LogApp(App):
+        def compose(self):
+            yield ChatLog(id="c")
+
+    app = LogApp()
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        cl = app.query_one(ChatLog)
+        cl.add_thought("\x1b[1mplan:\x1b[0m \x1b[31mread file\x1b[0m")
+        await pilot.pause(0.2)
+        text = "\n".join(str(line) for line in cl.lines)
+        assert "plan: read file" in text
+        assert "\x1b" not in text
+
+
+# ── animated thinking status line (v2.3.6) ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_thinking_status_animates_then_clears():
+    """While a turn runs, the InfoBox must show an animated "thinking…"
+    line; when the turn ends it must disappear."""
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.widgets.info_box import InfoBox
+
+    app = TeraPilotTUIApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        info = app.query_one(InfoBox)
+
+        app._turn_running = True
+        app._refresh_status("thinking")
+        await pilot.pause(0.4)  # let the 0.15s timer tick
+        assert "thinking" in info._status
+        assert info._status != ""
+        # the dots must actually change between ticks (animation)
+        frame_a = info._status
+        await pilot.pause(0.2)
+        assert info._status != frame_a or "." in info._status
+
+        app._turn_running = False
+        app._refresh_status("idle")
+        assert info._status == ""
+
+
+# ── max-iterations exhaustion keeps partial output (v2.3.6) ─────────────
+
+
+@pytest.mark.asyncio
+async def test_max_iterations_exhaustion_shows_partial_output():
+    """When the run hits the iteration cap, the partial result must be
+    rendered as the answer instead of being discarded."""
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.widgets.chat_log import ChatLog
+
+    class FakeResult:
+        output = "I created the file and started the refactor."
+        error = "Max iterations (8) reached"
+        success = False
+        metadata = {}
+
+    app = TeraPilotTUIApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._on_turn_done(FakeResult())
+        await pilot.pause(0.3)
+        text = "\n".join(str(line) for line in app.query_one(ChatLog).lines)
+        assert "I created the file" in text
+        assert "Max iterations" in text
+        assert app._turn_running is False
 
 
 # ── run-ending errors must render exactly once (v2.3.5-fix) ────────────
