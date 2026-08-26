@@ -135,6 +135,18 @@ before reporting back. Approvals appear inline, the activity stream shows
 every tool call, and `/audit-signed` exports tamper-evident evidence of the
 run.
 
+<div align="center">
+
+![Tera Pilot TUI — fix-missing-return with a local 2.6B model via LM Studio](demo/fix-missing-return-lmstudio.gif)
+
+*End-to-end agent run in the TUI: the agent reads `discount.py`, adds the
+missing `return`, runs `pytest` (red → green, `2 passed`) and reports the
+result. Task: `fix-missing-return` from the eval suite. Model:
+`lfm2.5-2.6b-heretic-abliterated` — a fully local 2.6B model served by
+LM Studio.*
+
+</div>
+
 Measured on real repository tasks (methodology: `eval/README.md`):
 
 - **OpenRouter (2026-08-22): 5/5 tasks solved** end-to-end — including a live
