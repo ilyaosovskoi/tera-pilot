@@ -31,7 +31,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from ..types import AgentEvent, Task, TaskType, ToolCall, ToolName
 from .._helpers import _sanitize_command, _command_blocked_reason
@@ -47,6 +47,9 @@ from tera_pilot.context_manager import get_context_manager
 from tera_pilot.agent.guardian import assess_risk, GuardianVerdict, GuardianConfig
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:  # pragma: no cover — type-only import, never executed
+    from tera_pilot.office_worker import OfficeWorker
 
 
 # ── Subprocess output draining ────────────────────────────────────────

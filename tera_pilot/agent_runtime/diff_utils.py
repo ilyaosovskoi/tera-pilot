@@ -193,7 +193,25 @@ def _backup_file(backup_dir: Path, max_backups: int, p: Path) -> Path:
     v1.0.6: enforces a maximum backup count (M-RT-4).
     """
     backup_dir.mkdir(parents=True, exist_ok=True)
-    # v1.0.6: prune old backups if over the cap (M-RT-4)
+    # v2.3.8-fix: monotonic-nanosecond timestamp. The old code used
+    # ``int(time.time())`` (seconds), so two writes to the same file within
+    # one second produced the SAME backup filename and the second write
+    # silently overwrote the first — undo_write could only ever reach the
+    # latest pre-write state and the prune cap was defeated for fast edits.
+    # ``time.monotonic_ns()`` is strictly increasing within the process, so
+    # rapid successive backups get unique names AND sort correctly
+    # (newest = largest) — which ``_undo_write`` relies on via
+    # ``sorted(..., reverse=True)`` + ``candidates[0]``.
+    ts = str(time.monotonic_ns())
+    h = hashlib.md5(str(p).encode()).hexdigest()[:8]
+    backup_name = f"{h}_{ts}_{p.name}"
+    backup_path = backup_dir / backup_name
+    backup_path.write_bytes(p.read_bytes())
+    # v1.0.6: prune old backups if over the cap (M-RT-4). v2.3.8-fix: the
+    # prune ran BEFORE writing the new backup, so the directory settled at
+    # ``max_backups + 1`` files (write pushes the count over the cap, the
+    # NEXT call prunes one, write pushes it over again). Prune AFTER
+    # writing so the steady state is exactly ``max_backups``.
     try:
         existing = sorted(backup_dir.iterdir(),
                            key=lambda f: f.stat().st_mtime)
@@ -205,9 +223,4 @@ def _backup_file(backup_dir: Path, max_backups: int, p: Path) -> Path:
                 pass
     except OSError:
         pass
-    ts = str(int(time.time()))
-    h = hashlib.md5(str(p).encode()).hexdigest()[:8]
-    backup_name = f"{h}_{ts}_{p.name}"
-    backup_path = backup_dir / backup_name
-    backup_path.write_bytes(p.read_bytes())
     return backup_path

@@ -212,12 +212,18 @@ class ACPServer:
 async def _run_and_stream(runtime: Any, prompt: str):
     """Run a turn on the runtime and yield events as dicts.
 
-    This expects the runtime to expose an async generator method `run_stream(prompt)`.
-    The legacy `AgentRuntime` doesn't have this; v2 `AgentRuntimeV2` does.
+    ``AgentRuntime.run_stream`` is a SYNC generator of text chunks —
+    iterating it with ``async for`` raises ``TypeError: 'async for'
+    requires an object with __aiter__`` (generators are not async
+    iterables), which crashed every ACP ``prompt/send`` on the real
+    runtime. We iterate it directly and wrap each chunk in a
+    ``session/update`` event. If the runtime has no ``run_stream``
+    (e.g. legacy runtimes), fall back to a single blocking ``run``
+    and yield one result event.
     """
     if hasattr(runtime, "run_stream"):
-        async for event in runtime.run_stream(prompt):
-            yield event
+        for chunk in runtime.run_stream(prompt):
+            yield {"type": "chunk", "text": chunk}
     else:
         # Fallback: run synchronously and yield a single result.
         result = runtime.run(prompt)
@@ -250,12 +256,13 @@ def cli_main(argv=None) -> int:
         return mcp_main()
     # v2.3.4-security (P0.4): --no-confirm opts into headless auto-
     # approve; without it side-effecting agent actions are blocked.
+    import os
+
     if "--no-confirm" in args:
         os.environ["TERA_PILOT_ACP_NO_CONFIRM"] = "1"
         args.remove("--no-confirm")
 
     import asyncio
-    import os
     import sys
 
     logging.basicConfig(
