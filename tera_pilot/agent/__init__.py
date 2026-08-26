@@ -21,7 +21,7 @@ Submodules:
 Public API:
     from tera_pilot.agent import AgentRuntimeV2, CancelToken, InterjectionBuffer
 
-Version: 2.3.7
+Version: 2.3.8
 """
 
 from .native import (
@@ -58,7 +58,7 @@ from .subagent_v2 import (
 from .encrypted_prompt import EncryptedPromptStore, EncryptedPromptError
 from .acp_server import ACPServer
 
-__version__ = "2.3.7"
+__version__ = "2.3.8"
 
 def get_circuit_breaker_registry():
     """Return a new CircuitBreakerRegistry instance."""

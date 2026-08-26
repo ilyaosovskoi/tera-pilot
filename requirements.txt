@@ -1,4 +1,4 @@
-# Core runtime dependencies for Tera Pilot v2.3.7
+# Core runtime dependencies for Tera Pilot v2.3.8
 # Install: pip install -r requirements.txt
 # For native acceleration (optional but recommended):
 #   cd tera-pilot-native && maturin develop --release

@@ -1,6 +1,6 @@
 {
   "name": "tera-pilot",
-  "version": "2.3.7",
+  "version": "2.3.8",
   "description": "Tera Pilot — TUI-first, local-first coding agent with multi-provider support, Web UI, and a controlled backend",
   "keywords": ["ai", "ide", "agent", "llm", "tera-pilot", "terminal", "tui"],
   "author": "Tera Pilot Contributors",

@@ -15,7 +15,7 @@ class InfoBox(Static):
         self._model: str = "unknown"
         self._provider: str = "unknown"
         self._directory: str = "~"
-        self._version: str = "2.3.7"
+        self._version: str = "2.3.8"
         # v2.3.6: animated status line ("thinking…") shown while a turn
         # runs. Cleared when idle.
         self._status: str = ""
