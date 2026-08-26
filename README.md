@@ -145,6 +145,16 @@ result. Task: `fix-missing-return` from the eval suite. Model:
 `lfm2.5-2.6b-heretic-abliterated` — a fully local 2.6B model served by
 LM Studio.*
 
+![Tera Pilot TUI — add-clamp-function with a free cloud model via OpenRouter](demo/add-clamp-function-openrouter.gif)
+
+*Same style of task, different provider: the agent reads `mathutils.py`,
+implements `clamp()` with edge-case handling (`if/elif/else`), runs
+`pytest` (red → green, `4 passed`) and reports the result. Task:
+`add-clamp-function` from the eval suite. Model:
+`nvidia/nemotron-3-super-120b-a12b:free` via OpenRouter — a free-tier
+model that was slightly overloaded during the run (each step took a long
+time, as if it was thinking), so this GIF is sped up.*
+
 </div>
 
 Measured on real repository tasks (methodology: `eval/README.md`):
