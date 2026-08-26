@@ -6,7 +6,7 @@ it** — not just contribute a one-off fix. If you are looking for the process
 [`CONTRIBUTING.md`](CONTRIBUTING.md) first; this document assumes you have read
 it.
 
-Everything below is verified against the current tree (v2.3.8). The project is
+Everything below is verified against the current tree (v2.3.9). The project is
 in **testing phase** — see the banner in the README — so this guide, like the
 code, is a living document: if a section drifts out of date, a PR fixing it is
 a welcome first contribution.

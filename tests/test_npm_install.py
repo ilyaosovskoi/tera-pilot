@@ -123,7 +123,7 @@ def test_postinstall_bootstraps_venv_and_writes_marker(tmp_path, npm_env):
     assert marker_path.exists()
     marker = json.loads(marker_path.read_text(encoding="utf-8"))
     assert marker["package"] == "tera-pilot"
-    assert marker["version"] == "2.3.8"
+    assert marker["version"] == "2.3.9"
     assert "installed_at" in marker
 
 
