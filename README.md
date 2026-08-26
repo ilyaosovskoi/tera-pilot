@@ -1,25 +1,33 @@
 <div align="center">
 
-<img src="./tera_pilot.png" alt="Tera Pilot Logo" width="180"/>
+<img src="./tera_pilot.png" alt="Tera Pilot" width="520"/>
 
-<br/>
+# Tera Pilot
 
-# Tera Pilot — Private, Vendor-Neutral Coding Agents
-
-### A self-hosted coding agent for private repositories, local models, CI, and verifiable automation.
+### Private, vendor-neutral coding agents — self-hosted, verifiable, and CI-ready.
 
 **Textual TUI first · Web UI · HTTP daemon · MCP/ACP · 17 providers · Ollama/LM Studio · Guardian safety**
-
-<br/>
 
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)]()
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
 [![Privacy](https://img.shields.io/badge/Privacy-Local--First-orange)]()
+[![Tests](https://img.shields.io/badge/tests-774%20%C2%B7%20754%20passing-blue)]()
+[![Status](https://img.shields.io/badge/status-testing%20phase-yellow)]()
 
 </div>
 
-<br/>
+## Contents
+
+- [Why Tera Pilot?](#why-tera-pilot)
+- [Quick Start](#quick-start)
+- [Demo](#demo)
+- [Security Posture & Verification](#security-posture--verification)
+- [Technical Reference](#technical-reference) — [runtime](#core-agent-runtime) · [trust & control](#trust-and-control) · [interfaces](#interfaces) · [MCP/ACP](#mcp-and-acp) · [architecture](#architecture) · [audit](#audit-export--verification) · [evaluation](#reproducible-evaluation)
+- [Current Limitations](#current-limitations)
+- [License](#license)
+
+**Repository docs:** [CHANGELOG](CHANGELOG.md) · [THREAT_MODEL](THREAT_MODEL.md) · [SECURITY](SECURITY.md) · [LICENSING](LICENSING.md) · [DEVELOPING](DEVELOPING.md) · [CONTRIBUTING](CONTRIBUTING.md) · [eval/README](eval/README.md)
 
 > **Development status: testing phase.** Tera Pilot is being tested with a small
 > group of early users before the public release. Everything here is MIT-licensed
@@ -27,6 +35,15 @@
 > via npm (see [Quick Start](#quick-start) for a reliable fallback). Paid/Pro
 > features are not available yet and will be enabled later; until then the
 > open-source core is the whole product.
+
+**At a glance:**
+
+| | |
+|---|---|
+| 🔒 **Private & local-first** | keep code on your machine with Ollama / LM Studio — or bring your own keys |
+| 🧩 **Vendor-neutral** | one runtime, 17 providers, no lock-in to a single model vendor |
+| 🖥️ **Runs anywhere** | terminal TUI, browser, REST/SSE daemon, ACP server, CI job |
+| ✅ **Verifiable** | every change tested, audited, and exportable as signed evidence |
 
 ## Why Tera Pilot?
 
@@ -133,7 +150,11 @@ Type a normal request into the composer — "fix the failing test in `src/`" —
 and the agent plans, edits files, runs commands, and verifies its own work
 before reporting back. Approvals appear inline, the activity stream shows
 every tool call, and `/audit-signed` exports tamper-evident evidence of the
-run.
+run. Every run follows the same loop:
+
+**Plan → Explore → Act → Verify → Report**
+
+Two live runs, end-to-end — one agent, two providers:
 
 <div align="center">
 
