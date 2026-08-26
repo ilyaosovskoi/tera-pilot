@@ -22,9 +22,7 @@ project's conventions.
 ## Code of conduct
 
 Be respectful, constructive and evidence-based. This project explicitly avoids
-unverified claims (see "Claims discipline" in
-[`TERA_PILOT_PRODUCT_STRATEGY.md`](TERA_PILOT_PRODUCT_STRATEGY.md)) — that applies
-to PR descriptions and reviews too.
+unverified claims — that applies to PR descriptions and reviews too.
 
 ## Reporting issues
 
@@ -107,10 +105,9 @@ The full test suite must pass before a PR is merged. The CI gate is:
   changes consistent with the surrounding module.
 - Type hints are used throughout — add them to new code.
 - Docs and code comments are in **English**. Product docs live at the repo root
-  (`TERA_PILOT_PRODUCT_STRATEGY.md`, `TERA_PILOT_PRODUCT_READINESS.md`,
-  `THREAT_MODEL.md`, `P0_IMPLEMENTATION.md`, `eval/README.md`) and must keep
-  "claims discipline": never state measured capabilities that are not backed by
-  the evaluation harness.
+  (`README.md`, `THREAT_MODEL.md`, `LICENSING.md`, `SECURITY.md`,
+  `eval/README.md`) and must keep "claims discipline": never state measured
+  capabilities that are not backed by the evaluation harness.
 - Slash commands, CLI flags, env vars and JSON schemas are identifiers — do not
   translate or rename them casually.
 

@@ -207,9 +207,9 @@ be backed by a task.
 
 ## 5. Where to help — how to improve the project
 
-The roadmap lives in `TERA_PILOT_PRODUCT_READINESS.md` (P0/P1 checklist) and
-`TERA_PILOT_PRODUCT_STRATEGY.md` (goals, ICP, competitive framing). The
-highest-leverage contributions right now:
+The roadmap is maintained as internal planning notes (P0/P1 checklist, goals,
+ICP, competitive framing); the public `README.md` tracks shipped capabilities
+and measured results. The highest-leverage contributions right now:
 
 1. **CI/CD (P1.1).** There is no automated pipeline yet — every release is
    gated by a human running the suite. Adding a GitHub Actions workflow that

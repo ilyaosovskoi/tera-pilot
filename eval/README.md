@@ -1,12 +1,9 @@
 # Evaluation Harness — reproducible evaluation contour (P0.1)
 
-> From `TERA_PILOT_PRODUCT_READINESS.md`, P0.1: "Reproducible evaluation
-> harness". Status: **implemented** — runner with a baseline mode,
-> machine-readable result schema, 58 tasks in 7 categories,
-> a smoke set for CI and quality-gate tests. Baseline runs (metrics on
-> real providers) are shipped: see `REPORT_2026-08-19.md`,
-> `REPORT_2026-08-21.md` and the OpenRouter `stealth/ox-alpha` batch in
-> `../AGENT_EVAL_AND_SECURITY_REPORT_2026-08-22.md`.
+Status: **implemented** — runner with a baseline mode, machine-readable
+result schema, 58 tasks in 7 categories, a smoke set for CI and
+quality-gate tests. Baseline runs (metrics on real providers) are
+maintained in the README's [Reproducible Evaluation section](../README.md#reproducible-evaluation).
 
 ## Why
 
@@ -42,7 +39,6 @@ eval/
   results/
     schema.json        JSON Schema v1 (machine-readable artifact)
     *.json             raw run results (NOT versioned — see git policy below)
-  REPORT_*.md          human-readable run summaries (versioned)
 ```
 
 ## Git policy for results
@@ -50,8 +46,9 @@ eval/
 Raw per-run JSON in `results/` is a development artifact: it can contain
 potentially sensitive model output (`final_output`) and is regenerated on
 every batch, so it is **gitignored** (`eval/results/*.json`; `schema.json`
-stays tracked). The versioned, human-readable summary is `REPORT_<date>.md`
-(e.g. `REPORT_2026-08-19.md`), which also records known harness caveats:
+stays tracked). Human-readable batch summaries are **not versioned** — the
+maintained summary of measured results lives in the README's
+[Reproducible Evaluation section](../README.md#reproducible-evaluation). Known harness caveats:
 
 - parallel launches against a single agent collide with
   `Another agent request is already running` — the driver now retries such
@@ -264,11 +261,13 @@ solution from `gold/`.
 
 Real provider batches are now shipped, not "next step":
 
-1. **2026-08-19** — first analyzed batch (30 runs / 9 tasks) → `REPORT_2026-08-19.md`.
-2. **2026-08-21** — local LM Studio model (2.6B), 4/5 tasks solved → `REPORT_2026-08-21.md`.
+1. **2026-08-19** — first analyzed batch (30 runs / 9 tasks); early harness/debugging artifacts, corrected in later batches.
+2. **2026-08-21** — local LM Studio model (2.6B), 4/5 tasks solved.
 3. **2026-08-22** — OpenRouter `stealth/ox-alpha`, 5 new tasks solved 5/5 plus an
-   adversarial security task correctly refused (SSRF blocked) →
-   `../AGENT_EVAL_AND_SECURITY_REPORT_2026-08-22.md`.
+   adversarial security task correctly refused (SSRF blocked).
+
+Summaries and metrics for all batches live in the
+[README's Reproducible Evaluation section](../README.md#reproducible-evaluation).
 
 Method for a new batch:
 

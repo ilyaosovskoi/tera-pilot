@@ -29,8 +29,8 @@ Commands:
     python3 -m eval.runner smoke                      # fake-driver smoke set (CI)
     python3 -m eval.runner report --dir eval/results  # summary (+ --json)
 
-Claims discipline (see TERA_PILOT_PRODUCT_READINESS.md): a result never
-conflates "agent finished" with "tests passed". `status` describes the run,
+Claims discipline (see README.md "Evaluation"): a result never conflates
+"agent finished" with "tests passed". `status` describes the run,
 `metrics.test_passed` the test execution, `metrics.verification_status` the
 verification step, `workspace.baseline` the pristine repo state.
 """

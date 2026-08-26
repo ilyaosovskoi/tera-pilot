@@ -2,7 +2,7 @@
 
 > Working security document. Assessment status: August 2026.
 > Public version — no internal details that would help an attacker.
-> Related documents: [`TERA_PILOT_PRODUCT_STRATEGY.md`](TERA_PILOT_PRODUCT_STRATEGY.md) (§3.2 "Trust-first execution", §11 "Claims discipline"), [`TERA_PILOT_PRODUCT_READINESS.md`](TERA_PILOT_PRODUCT_READINESS.md).
+> Related documents: [`README.md`](README.md) (Security Posture & Verification), [`SECURITY.md`](SECURITY.md).
 
 ## 1. Purpose
 
