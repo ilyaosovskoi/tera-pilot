@@ -1803,6 +1803,75 @@ class TeraPilotBridge:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    # ── Pro: office batch export (office_export_pro) ─────────────
+
+    def export_office_bundle(
+        self,
+        title: str,
+        sections: Any,
+        out_dir: str,
+        formats: Optional[Dict[str, Any]] = None,
+        brand: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Render a structured result into .docx/.xlsx/.pptx files.
+
+        Pro-gated ``office_export_pro``; returns ``{error: "pro_required"}``
+        when unlicensed. Each section is ``{"title", "body", "headers",
+        "rows"}``.
+        """
+        try:
+            from tera_pilot.office_export_pro import (
+                OfficeExportPro, ReportSection,
+            )
+            parsed = []
+            for s in (sections or []):
+                parsed.append(ReportSection(
+                    title=s.get("title", ""),
+                    body=s.get("body", ""),
+                    headers=s.get("headers"),
+                    rows=s.get("rows"),
+                ))
+            exporter = OfficeExportPro()
+            return exporter.export_bundle(
+                title=title, sections=parsed, out_dir=out_dir,
+                formats=formats, brand=brand,
+            )
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # ── Pro: smart project memory (smart_project_memory) ─────────
+
+    def smart_memory_index(
+        self, memory_file: Optional[str] = None,
+        notes_dir: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Index the project's memory (TERA_PILOT.md + notes) with dedup."""
+        try:
+            from tera_pilot.smart_project_memory import SmartProjectMemory
+            mem = SmartProjectMemory(
+                workspace=self.workspace,
+            )
+            return mem.index(memory_file=memory_file, notes_dir=notes_dir)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def smart_memory_search(
+        self, query: str, limit: int = 5,
+        memory_file: Optional[str] = None,
+        notes_dir: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Ranked full-text search over the project's memory."""
+        try:
+            from tera_pilot.smart_project_memory import SmartProjectMemory
+            mem = SmartProjectMemory(
+                workspace=self.workspace,
+            )
+            if not mem._entries:
+                mem.index(memory_file=memory_file, notes_dir=notes_dir)
+            return mem.search(query, limit=limit)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     # ── v2.0.2 (M3) — Team spend dashboard ────────────────────────
 
     def get_user_identity(self) -> Dict[str, Any]:
