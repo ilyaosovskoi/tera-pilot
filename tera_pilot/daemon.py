@@ -9,6 +9,10 @@ Usage:
     # Start the daemon server (long-running):
     tera-pilot-daemon --port 8765 --notify telegram
 
+    # Remote task mode — "set a task, walk away": accept tasks via Telegram
+    # (message -> task -> runs -> result is sent back to the same chat).
+    tera-pilot-daemon serve --inbound telegram --notify telegram
+
     # Run a single task with notification when done:
     tera-pilot-daemon task "Refactor the auth module" --workspace /projects/myapp --notify telegram
 
@@ -26,8 +30,10 @@ Architecture:
     │   └── GET  /health            — health check
     ├── TaskQueue (threading)
     │   └── Worker threads run AgentRuntime headless
-    └── Notifier (optional)
-        └── Sends reports to Telegram/Discord/Slack on task completion
+    ├── Notifier (optional)
+    │   └── Sends reports to Telegram/Discord/Slack on task completion
+    └── Inbound listener (optional, remote task mode)
+        └── Accepts tasks from Telegram; reply STOP cancels the run
 
 Zero external dependencies — uses only the Python standard library.
 Authentication via Bearer token stored in ~/.tera_pilot/daemon.json.
@@ -615,6 +621,46 @@ class DaemonHandler(BaseHTTPRequestHandler):
             pass
 
 
+# ── Remote task mode (inbound listener) config ─────────────────
+
+# Remote task mode: accept tasks from a messenger (Telegram first). Config
+# lives in ~/.tera_pilot/inbound.json, mirroring notifiers.json:
+#
+#   {
+#     "backend": "telegram",
+#     "telegram_token": "123456:ABC...",
+#     "allowed_chat_ids": ["123456789"],
+#     "workspace": "/path/to/projects"
+#   }
+#
+# ``allowed_chat_ids`` is MANDATORY — the listener refuses to start
+# without it (no wildcard "accept anyone" mode, ever). See
+# tera_pilot/inbound_listener.py for the full contract.
+def _inbound_config_path() -> str:
+    """Path to the remote-task-mode inbound config (resolved per call so
+    tests can override HOME)."""
+    return os.path.expanduser("~/.tera_pilot/inbound.json")
+
+
+def load_inbound_config() -> Dict[str, Any]:
+    """Load the remote-task-mode inbound listener config."""
+    try:
+        with open(_inbound_config_path(), "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_inbound_config(config: Dict[str, Any]) -> None:
+    """Persist the remote-task-mode inbound listener config."""
+    path = _inbound_config_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(config, f, indent=2)
+    os.replace(tmp, path)
+
+
 # ── Daemon config ──────────────────────────────────────────────
 
 _DAEMON_CONFIG_PATH = os.path.expanduser("~/.tera_pilot/daemon.json")
@@ -656,6 +702,7 @@ class TeraPilotDaemon:
         max_workers: int = 2,
         notify: Optional[str] = None,
         allow_headless_confirm: bool = False,
+        inbound: Optional[str] = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -664,6 +711,9 @@ class TeraPilotDaemon:
         # auto-approve; default stays fail-closed.
         self.task_queue = TaskQueue(max_workers=max_workers, allow_headless_confirm=allow_headless_confirm)
         self._notify = notify
+        # Remote task mode: accept tasks from a messenger backend (telegram).
+        self._inbound = inbound
+        self._inbound_listener: Any = None
         self._server: Optional[ThreadingHTTPServer] = None
 
     def start(self) -> None:
@@ -691,6 +741,10 @@ class TeraPilotDaemon:
             get_notifier().register_hooks()
         except Exception:
             pass
+
+        # Remote task mode: accept tasks from a messenger if requested
+        if self._inbound:
+            self._enable_inbound(self._inbound)
 
         # Configure handler
         DaemonHandler.task_queue = self.task_queue
@@ -727,6 +781,52 @@ class TeraPilotDaemon:
             print("\nShutting down...")
             self.task_queue.shutdown()
             self._server.shutdown()
+            if self._inbound_listener is not None:
+                try:
+                    self._inbound_listener.stop()
+                except Exception:
+                    pass
+
+    def _enable_inbound(self, backend_name: str) -> None:
+        """Start the remote-task-mode inbound listener (tasks via messenger).
+
+        Reads ~/.tera_pilot/inbound.json and wires the listener to the
+        task queue: an accepted message becomes a task, a reply of STOP
+        cancels the running task. The daemon keeps serving HTTP; the
+        listener runs in its own background thread.
+        """
+        try:
+            from .inbound_listener import (
+                InboundListenerConfig,
+                make_inbound_listener,
+                make_daemon_callback,
+                make_daemon_stop_callback,
+            )
+            cfg = load_inbound_config()
+            if not cfg:
+                print("[inbound] no config at ~/.tera_pilot/inbound.json — create one, e.g.:")
+                print("  {\"backend\": \"telegram\", \"telegram_token\": \"...\", \"allowed_chat_ids\": [\"123456\"]}")
+                print("[inbound] remote task mode disabled.")
+                return
+
+            config = InboundListenerConfig(
+                backend=cfg.get("backend", backend_name),
+                telegram_token=cfg.get("telegram_token", ""),
+                allowed_chat_ids=set(cfg.get("allowed_chat_ids", []) or []),
+                allowed_sender_ids=set(cfg.get("allowed_sender_ids", []) or []),
+                workspace=cfg.get("workspace", ""),
+                stop_keyword=cfg.get("stop_keyword", "STOP"),
+            )
+            listener = make_inbound_listener(
+                config,
+                make_daemon_callback(self.task_queue, workspace=config.workspace),
+                on_stop=make_daemon_stop_callback(self.task_queue),
+            )
+            listener.start()
+            self._inbound_listener = listener
+            print(f"[inbound] remote task mode enabled: {config.backend} (chats: {sorted(config.allowed_chat_ids)})")
+        except Exception as e:
+            print(f"[inbound] failed to enable remote task mode: {e}")
 
     def _enable_notifier(self, backend_name: str) -> None:
         """Enable a notification backend for the daemon."""
@@ -845,12 +945,18 @@ def main() -> None:
         "WITHOUT confirmation in headless mode. Default: fail-closed — "
         "these actions are blocked when no UI is present."
     )
+    _INBOUND_HELP = (
+        "Remote task mode: accept tasks from a messenger backend (telegram). "
+        "Config: ~/.tera_pilot/inbound.json (telegram_token + allowed_chat_ids). "
+        "Reply STOP to cancel the running task."
+    )
     daemon_parser = sub.add_parser("serve", help="Start the daemon server")
     daemon_parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     daemon_parser.add_argument("--port", type=int, default=8765, help="Bind port (default: 8765)")
     daemon_parser.add_argument("--token", default=None, help="API auth token (auto-generated if not set)")
     daemon_parser.add_argument("--workers", type=int, default=2, help="Max concurrent workers (default: 2)")
     daemon_parser.add_argument("--notify", default=None, help="Enable notifications (telegram/discord/slack)")
+    daemon_parser.add_argument("--inbound", default=None, help=_INBOUND_HELP)
     daemon_parser.add_argument("--no-confirm", action="store_true", dest="no_confirm", help=_NO_CONFIRM_HELP)
 
     # Single task mode
@@ -873,10 +979,12 @@ def main() -> None:
     parser.add_argument("--token", default=None)
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--notify", default=None)
+    parser.add_argument("--inbound", default=None, help=_INBOUND_HELP)
     parser.add_argument("--no-confirm", action="store_true", dest="no_confirm", help=_NO_CONFIRM_HELP)
 
     args = parser.parse_args()
     no_confirm = bool(getattr(args, "no_confirm", False))
+    inbound = getattr(args, "inbound", None)
 
     if args.command == "task":
         run_single_task(args.prompt, workspace=args.workspace, notify=args.notify,
@@ -894,6 +1002,7 @@ def main() -> None:
             max_workers=args.workers,
             notify=args.notify,
             allow_headless_confirm=no_confirm,
+            inbound=inbound,
         )
         daemon.start()
     else:
@@ -905,6 +1014,7 @@ def main() -> None:
             max_workers=args.workers,
             notify=args.notify,
             allow_headless_confirm=no_confirm,
+            inbound=inbound,
         )
         daemon.start()
 

@@ -27,7 +27,7 @@ Design constraints (from the G21 prompt):
 
 This module is the inbound counterpart to ``tera_pilot/notifier.py`` (which
 handles OUTBOUND notifications). Together they close the loop for G21's
-Hermes mode: an inbound message becomes a task, the task runs, the
+remote task mode: an inbound message becomes a task, the task runs, the
 outbound notifier sends progress/completion back to the same chat.
 """
 
@@ -451,7 +451,7 @@ class DiscordInboundListener(InboundListener):
     Discord's bot event mechanism requires a persistent websocket
     gateway connection (the ``discord.py`` library) OR a publicly-
     routable webhook URL. Neither fits the "just paste a token, zero
-    infrastructure" philosophy of G21's Hermes mode the way Telegram's
+    infrastructure" philosophy of G21's remote task mode the way Telegram's
     ``getUpdates`` long-poll does.
 
     This stub raises :class:`NotImplementedError` on construction so
@@ -467,7 +467,7 @@ class DiscordInboundListener(InboundListener):
             "Discord inbound listener is not yet implemented. Discord "
             "requires either a websocket gateway connection (discord.py) "
             "or a publicly-routable webhook URL — neither fits the "
-            "zero-infrastructure design of G21's Hermes mode. Use "
+            "zero-infrastructure design of G21's remote task mode. Use "
             "backend='telegram' instead, or track Discord support as a "
             "separate follow-up task."
         )

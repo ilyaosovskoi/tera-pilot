@@ -17,14 +17,13 @@ Subsystems moved to Rust (mirroring the pure-Python fallbacks from
 
 ## Build
 
-In a virtual environment:
+One command from the repository root:
 
 ```bash
-cd tera-pilot-native/pyo3
-maturin develop --release
+make native
 ```
 
-Without a venv (as in this repository):
+which builds the release wheel and installs it. Equivalent manual steps:
 
 ```bash
 cd tera-pilot-native

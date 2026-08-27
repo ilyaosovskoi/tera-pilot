@@ -35,12 +35,13 @@ class ApprovalModal(ModalScreen[Optional[bool]]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="approval-box"):
-            yield Label("Approve this action?", id="approval-title")
-            yield Static(f"[b]{self._action}[/b]", id="approval-action")
-            yield Static(self._summary, id="approval-summary")
+            yield Label("⚠ Action requires approval", id="approval-title")
+            yield Static(f"{self._action}", id="approval-action")
+            if self._summary:
+                yield Static(self._summary, id="approval-summary")
             with Vertical(id="approval-buttons"):
-                yield Button("Approve (y)", variant="success", id="approve")
-                yield Button("Deny (n)", variant="error", id="deny")
+                yield Button("✓ Approve (y)", variant="success", id="approve")
+                yield Button("✕ Deny (n)", variant="error", id="deny")
 
     def on_mount(self) -> None:
         """v2.3.1: entrance animation — fade + slight rise."""
@@ -80,20 +81,21 @@ class GuardianModal(ModalScreen[str]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="guardian-box"):
-            yield Label("⚠ Guardian Safety Review", id="guardian-title")
-            yield Static(f"[b]{self._action}[/b]", id="guardian-action")
-            yield Static(self._summary, id="guardian-summary")
+            yield Label("🛡 Guardian Safety Review", id="guardian-title")
+            yield Static(f"{self._action}", id="guardian-action")
+            if self._summary:
+                yield Static(self._summary, id="guardian-summary")
             if self._rationale:
-                yield Static(f"[yellow]Rationale:[/yellow] {self._rationale}", id="guardian-rationale")
+                yield Static(f"[b]Rationale:[/b] {self._rationale}", id="guardian-rationale")
             if self._suggested_args:
                 import json
                 suggested_text = json.dumps(self._suggested_args, indent=2, ensure_ascii=False)
-                yield Static(f"[green]Proposed fix:[/green]", id="guardian-fix-label")
+                yield Static("[b]Proposed fix:[/b]", id="guardian-fix-label")
                 yield TextArea(suggested_text, read_only=True, id="guardian-fix-text", show_line_numbers=False)
             with Vertical(id="guardian-buttons"):
-                yield Button("Approve (a)", variant="success", id="approve")
-                yield Button("Use Fix (u)", variant="primary", id="use_fix")
-                yield Button("Reject (r)", variant="error", id="reject")
+                yield Button("✓ Approve (a)", variant="success", id="approve")
+                yield Button("⟳ Use Fix (u)", variant="primary", id="use_fix")
+                yield Button("✕ Reject (r)", variant="error", id="reject")
 
     def on_mount(self) -> None:
         """v2.3.1: entrance animation — fade + slight rise."""

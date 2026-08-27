@@ -6,6 +6,31 @@ summary); this file keeps the per-version history. Every release keeps the
 version in sync everywhere: npm, pip, the Web UI, the TUI, the auto-updater
 and the tests.
 
+## [Unreleased] — Remote task mode, Rust acceleration & TUI approval polish
+
+This batch makes three things work better out of the box:
+
+1. **Remote task mode is now reachable from the CLI** — `tera-pilot-daemon serve
+   --inbound telegram` reads `~/.tera_pilot/inbound.json` (Telegram bot token
+   + mandatory allow-list of chat IDs) and wires the inbound messenger
+   listener to the task queue: any allowed message becomes a task, the task
+   runs on the daemon, and the result is reported back to the same chat
+   (pair with `--notify telegram` for completion notifications). Replying
+   `STOP` cancels the running task. Previously the listener existed only as
+   a library module with no way to start it — “set a task and walk away”
+   was not actually possible.
+2. **Rust acceleration is one command** — `make native` builds and installs
+   `tera_pilot_native` (sandbox checks, circuit breaker, compaction,
+   interjection buffer, cancel tokens) and verifies it loaded. The wheel
+   build was already reproducible and the extension is picked up
+   automatically by `tera_pilot.agent.native`; this just removes the manual
+   two-step dance from the docs.
+3. **TUI approval modals got a visual refresh** — the Approve/Deny and
+   Guardian (Approve/Use Fix/Reject) dialogs now have clearer titles with
+   icons, the proposed action sits in its own bordered mono block, buttons
+   carry explicit borders and focus states, and both dark and light themes
+   were updated in lockstep.
+
 ## [2.3.9] — Repository hygiene & docs
 
 The v2.3.9 release is a repository-hygiene and documentation release: dated

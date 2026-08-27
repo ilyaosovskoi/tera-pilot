@@ -96,7 +96,7 @@ ApprovalModal {
     max-width: 100;
     height: auto;
     padding: 1 2;
-    border: solid #d9a21b;
+    border: round #d9a21b;
     background: #ffffff;
 }
 
@@ -108,6 +108,11 @@ ApprovalModal {
 
 #approval-action {
     color: #1a1a1e;
+    background: #f6f6f7;
+    border: solid #d4d4d8;
+    padding: 0 1;
+    margin-bottom: 1;
+    text-style: bold;
 }
 
 #approval-summary {
@@ -123,7 +128,7 @@ ApprovalModal {
 }
 
 #approval-buttons Button {
-    width: 22;
+    width: 24;
     margin: 0 1;
     padding: 0 2;
 }
@@ -132,9 +137,15 @@ ApprovalModal {
     background: #1e7a34;
     color: #ffffff;
     text-style: bold;
+    border: solid #2c9c46;
 }
 
 #approval-buttons #approve:hover {
+    background: #2c9c46;
+    text-style: bold;
+}
+
+#approval-buttons #approve:focus {
     background: #2c9c46;
     text-style: bold;
 }
@@ -143,9 +154,15 @@ ApprovalModal {
     background: #8f2d24;
     color: #ffffff;
     text-style: bold;
+    border: solid #b03a2f;
 }
 
 #approval-buttons #deny:hover {
+    background: #b03a2f;
+    text-style: bold;
+}
+
+#approval-buttons #deny:focus {
     background: #b03a2f;
     text-style: bold;
 }
@@ -160,7 +177,7 @@ GuardianModal {
     max-width: 110;
     height: auto;
     padding: 1 2;
-    border: solid #7c3aed;
+    border: round #7c3aed;
     background: #ffffff;
 }
 
@@ -172,6 +189,11 @@ GuardianModal {
 
 #guardian-action {
     color: #1a1a1e;
+    background: #f6f6f7;
+    border: solid #d4d4d8;
+    padding: 0 1;
+    margin-bottom: 1;
+    text-style: bold;
 }
 
 #guardian-summary {
@@ -205,7 +227,7 @@ GuardianModal {
 }
 
 #guardian-buttons Button {
-    width: 22;
+    width: 24;
     margin: 0 1;
     padding: 0 2;
 }
@@ -214,9 +236,15 @@ GuardianModal {
     background: #1e7a34;
     color: #ffffff;
     text-style: bold;
+    border: solid #2c9c46;
 }
 
 #guardian-buttons #approve:hover {
+    background: #2c9c46;
+    text-style: bold;
+}
+
+#guardian-buttons #approve:focus {
     background: #2c9c46;
     text-style: bold;
 }
@@ -225,9 +253,15 @@ GuardianModal {
     background: #3d5a99;
     color: #ffffff;
     text-style: bold;
+    border: solid #4f6fb8;
 }
 
 #guardian-buttons #use_fix:hover {
+    background: #4f6fb8;
+    text-style: bold;
+}
+
+#guardian-buttons #use_fix:focus {
     background: #4f6fb8;
     text-style: bold;
 }
@@ -236,9 +270,15 @@ GuardianModal {
     background: #8f2d24;
     color: #ffffff;
     text-style: bold;
+    border: solid #b03a2f;
 }
 
 #guardian-buttons #reject:hover {
+    background: #b03a2f;
+    text-style: bold;
+}
+
+#guardian-buttons #reject:focus {
     background: #b03a2f;
     text-style: bold;
 }

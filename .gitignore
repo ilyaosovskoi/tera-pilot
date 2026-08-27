@@ -22,3 +22,22 @@ eval/results/*.json
 # development artifacts too — keep the whole agentic results dir out.
 eval/results/agentic/
 !eval/results/agentic/.gitkeep
+
+# Working documents and local-only material — deliberately NOT pushed.
+# (These were left out of past pushes on purpose; keep them out.)
+AGENT_EVAL_AND_SECURITY_REPORT_*.md
+GROQ_EVAL_REPORT.md
+P0_IMPLEMENTATION.md
+SECURITY_TEST_REPORT.md
+TERA_PILOT_PRODUCT_READINESS.md
+TERA_PILOT_PRODUCT_STRATEGY.md
+
+docs/
+loops/
+payment.html
+
+# Local bugfix/working notes inside the package.
+tera_pilot/BUGFIXES_*.md
+
+# Local eval report drafts (published summaries stay in README).
+eval/REPORT_*.md

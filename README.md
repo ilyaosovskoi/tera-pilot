@@ -117,6 +117,16 @@ The Python package provides the same commands: `tera-pilot`, `tera-pilot-tui`,
 `tera-pilot-daemon`, `tera-pilot-acp`, plus `tera-pilot doctor` and
 `tera-pilot audit` subcommands.
 
+Optional Rust acceleration (sandbox checks, circuit breaker, compaction,
+interjection buffer — a one-command build if you have a Rust toolchain):
+
+```bash
+make native        # maturin build + install tera_pilot_native, then verify
+```
+
+Without it, Tera Pilot automatically uses the pure-Python fallbacks (slower
+but fully functional). `tera-pilot doctor` reports which path is active.
+
 ### Environment Doctor
 
 Not sure your machine is ready? One command checks Python version, dependencies, config directory, provider keys, local model servers (Ollama / LM Studio), optional Rust acceleration, web-search backend, and the workspace:
@@ -271,14 +281,21 @@ These mechanisms provide control and evidence; they are not a claim of formal SO
 |---|---|
 | Textual TUI (`tera-pilot-tui`) | Primary interactive app: full-screen chat, activity, approvals, task canvas and provider controls |
 | `tera-pilot` | Web UI: browser chat, project browsing, provider settings and activity |
-| `tera-pilot-daemon` | Backend service for REST/SSE task execution, queues and notifications |
+| `tera-pilot-daemon` | Backend service for REST/SSE task execution, queues and notifications; add `--inbound telegram` for remote task mode (accept tasks via Telegram) |
 | `tera-pilot-acp` | Backend integration for MCP/ACP-compatible editors and agents |
 | `tera-pilot doctor` | Environment doctor: one-command onboarding and readiness check |
 | `tera-pilot audit` | Export and verify the signed audit trail (Ed25519 + hash chain) |
 | `eval/runner.py` | Reproducible evaluation harness: clean-copy repo tasks → schema-valid results |
 
-The TUI is the primary interactive product; it uses `TeraPilotBridge` as its
-backend, which the daemon and GitHub automation also embed. Backend reports
+**Remote task mode — set a task, walk away:** start the daemon with
+`tera-pilot-daemon serve --inbound telegram`, configure
+`~/.tera_pilot/inbound.json` (Telegram bot token + allowed chat IDs), and
+any message you send to the bot becomes a task: it runs on the daemon and
+the result is reported back to the same chat (pair with `--notify telegram`
+for completion notifications). Replying `STOP` cancels the running task.
+The allow-list is mandatory — the listener refuses to start without it.
+
+Backend reports
 intentionally omit tool arguments by default, while final output may still
 contain repository code and must be treated as sensitive. For CI and GitHub
 workflows, configure `TERA_PILOT_PROVIDER`, `TERA_PILOT_MODEL`, and the
