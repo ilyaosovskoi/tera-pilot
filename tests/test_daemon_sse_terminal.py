@@ -125,3 +125,83 @@ def test_running_task_stream_stays_open(daemon_http):
     # subclass), not always as urllib.error.URLError.
     with pytest.raises((urllib.error.URLError, OSError)):
         _open_stream(_stream_url(httpd, task_id), timeout=1.5).read()
+
+
+def test_sse_race_task_completes_between_check_and_subscribe(daemon_http):
+    """v2.3.9-fix: a task that reaches a terminal state between the
+    handler's initial state check and its subscribe call emits its
+    terminal event to nobody (the subscriber list is still empty). The
+    stream must still close — otherwise the SSE connection keepalive-
+    loops forever and the client blocks in read() until its own timeout.
+
+    Before the fix this test hung for 5s and failed with a timeout:
+    the "completed" event was emitted before the callback registered,
+    so the loop never saw it.
+    """
+    import time
+    httpd, daemon = daemon_http
+    task_id = _seed_task(daemon, TaskState.PENDING)
+
+    real_subscribe = daemon.task_queue.subscribe
+
+    def racing_subscribe(tid, callback):
+        # The task finishes in the window BEFORE the callback registers:
+        # the terminal event goes to an empty subscriber list and is lost.
+        task = daemon.task_queue._tasks[tid]
+        task.state = TaskState.COMPLETED
+        task.completed_at = time.time()
+        daemon.task_queue._emit(tid, "completed", task.to_dict())
+        return real_subscribe(tid, callback)
+
+    daemon.task_queue.subscribe = racing_subscribe
+
+    with _open_stream(_stream_url(httpd, task_id), timeout=5) as r:
+        body = r.read().decode()
+
+    assert r.status == 200
+    assert "event: state" in body
+
+
+def test_sse_keepalive_rechecks_terminal_task(daemon_http, monkeypatch):
+    """v2.3.9-fix: even when the terminal event never reaches the SSE
+    event queue (e.g. the bounded queue dropped it under load), the
+    keepalive branch re-checks the task state and closes the stream on a
+    finished task instead of looping forever."""
+    import queue as _queue
+    import time
+    httpd, daemon = daemon_http
+    task_id = _seed_task(daemon, TaskState.RUNNING)
+
+    real_subscribe = daemon.task_queue.subscribe
+
+    def subscribe_then_complete_later(tid, callback):
+        result = real_subscribe(tid, callback)
+        # The task finishes shortly AFTER the handler's post-subscribe
+        # re-check (so that check sees RUNNING and lets the loop start),
+        # but WITHOUT emitting any event (simulates a dropped terminal
+        # event). The keepalive re-check must be what notices it.
+        def _finish():
+            time.sleep(0.4)
+            task = daemon.task_queue._tasks[tid]
+            task.state = TaskState.COMPLETED
+            task.completed_at = time.time()
+
+        threading.Thread(target=_finish, daemon=True).start()
+        return result
+
+    daemon.task_queue.subscribe = subscribe_then_complete_later
+
+    # Force the event wait to time out immediately so the keepalive branch
+    # (which re-checks the task state) runs right away. No workers are
+    # running in this fixture, so no other queue.Queue.get() is affected.
+    def _always_empty(self, timeout=None):
+        raise _queue.Empty
+
+    monkeypatch.setattr(_queue.Queue, "get", _always_empty)
+
+    with _open_stream(_stream_url(httpd, task_id), timeout=5) as r:
+        body = r.read().decode()
+
+    assert r.status == 200
+    assert "event: state" in body
+    assert "event: keepalive" in body

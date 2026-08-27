@@ -468,6 +468,132 @@ async def test_run_ending_error_rendered_once():
         assert sum("second failure" in r for r in rendered) == 1, rendered
 
 
+# ── Guardian modal answers route to the guardian wait (v2.3.9-fix) ──────
+
+
+@pytest.mark.asyncio
+async def test_guardian_modal_approve_routes_to_guardian_verdict():
+    """Answering a Guardian MODIFY modal with Approve must call
+    bridge.answer_guardian_verdict("approve"), NOT answer_confirmation(True).
+
+    Regression: only "use_fix" went through answer_guardian_verdict();
+    "approve"/"reject" called answer_confirmation(), which pokes the tool
+    engine's *_confirm* wait — but during a guardian review the engine is
+    blocked on its *_guardian* wait (_guardian_event/_guardian_decision),
+    so the verdict never arrived and the agent hung until the 300s wait
+    timed out (then the default "reject" applied anyway).
+    """
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.bridge import TeraPilotBridge
+
+    class RecordingBridge(TeraPilotBridge):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.guardian_verdicts = []
+            self.confirmations = []
+
+        def answer_guardian_verdict(self, verdict):
+            self.guardian_verdicts.append(verdict)
+
+        def answer_confirmation(self, accepted):
+            self.confirmations.append(accepted)
+
+    bridge = RecordingBridge(workspace=".")
+    app = TeraPilotTUIApp(bridge=bridge)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._show_confirm({
+            "action": "execute_command",
+            "summary": "Run: rm -rf /tmp/important",
+            "guardian_verdict": "MODIFY",
+            "suggested_args": {"command": "rm /tmp/important"},
+            "rationale": "Recursive delete is risky",
+            "risk_level": "high",
+            "reasons": ["recursive delete"],
+        })
+        await pilot.pause(0.3)
+        assert app._approval_modal is not None
+        await pilot.click("#approve")
+        await pilot.pause(0.3)
+
+    assert bridge.guardian_verdicts == ["approve"], bridge.guardian_verdicts
+    assert bridge.confirmations == [], bridge.confirmations
+
+
+@pytest.mark.asyncio
+async def test_guardian_modal_reject_routes_to_guardian_verdict():
+    """Same routing fix for the Reject button (and Escape)."""
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.bridge import TeraPilotBridge
+
+    class RecordingBridge(TeraPilotBridge):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.guardian_verdicts = []
+            self.confirmations = []
+
+        def answer_guardian_verdict(self, verdict):
+            self.guardian_verdicts.append(verdict)
+
+        def answer_confirmation(self, accepted):
+            self.confirmations.append(accepted)
+
+    bridge = RecordingBridge(workspace=".")
+    app = TeraPilotTUIApp(bridge=bridge)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._show_confirm({
+            "action": "execute_command",
+            "summary": "Run: rm -rf /tmp/important",
+            "guardian_verdict": "MODIFY",
+            "suggested_args": {"command": "rm /tmp/important"},
+            "rationale": "Recursive delete is risky",
+            "risk_level": "high",
+            "reasons": ["recursive delete"],
+        })
+        await pilot.pause(0.3)
+        assert app._approval_modal is not None
+        await pilot.click("#reject")
+        await pilot.pause(0.3)
+
+    assert bridge.guardian_verdicts == ["reject"], bridge.guardian_verdicts
+    assert bridge.confirmations == [], bridge.confirmations
+
+
+@pytest.mark.asyncio
+async def test_legacy_approval_modal_still_uses_answer_confirmation():
+    """The legacy (non-Guardian) approval modal returns True/False and must
+    keep going through answer_confirmation — the fix must not change that."""
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.bridge import TeraPilotBridge
+
+    class RecordingBridge(TeraPilotBridge):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.guardian_verdicts = []
+            self.confirmations = []
+
+        def answer_guardian_verdict(self, verdict):
+            self.guardian_verdicts.append(verdict)
+
+        def answer_confirmation(self, accepted):
+            self.confirmations.append(accepted)
+
+    bridge = RecordingBridge(workspace=".")
+    app = TeraPilotTUIApp(bridge=bridge)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        # Legacy (non-Guardian) confirm: no guardian verdict fields.
+        app._show_confirm({"action": "execute_command", "summary": "Run: echo hi"})
+        await pilot.pause(0.3)
+        assert app._approval_modal is not None
+        await pilot.click("#approve")
+        await pilot.pause(0.3)
+
+    assert bridge.guardian_verdicts == [], bridge.guardian_verdicts
+    assert bridge.confirmations == [True], bridge.confirmations
+
+
 @pytest.mark.asyncio
 async def test_distinct_error_after_previous_renders():
     """A NEW turn's error must render even when it matches a previous

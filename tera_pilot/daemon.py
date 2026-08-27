@@ -556,6 +556,21 @@ class DaemonHandler(BaseHTTPRequestHandler):
 
         self.task_queue.subscribe(task_id, on_event)
 
+        # v2.3.9-fix (SSE race): the task may have reached a terminal
+        # state between the initial check above and the subscribe call.
+        # In that window the terminal "completed"/"failed"/"cancelled"
+        # event was already emitted to a subscriber list that did not
+        # include us yet — so it is lost, and without this re-check the
+        # stream would keepalive-loop forever (leaked connection, client
+        # blocked in read() until its own timeout). Re-check after
+        # subscribing and close if the task is already terminal.
+        task = self.task_queue.get_task(task_id)
+        if task is not None and task.state in (
+            TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED,
+        ):
+            self.close_connection = True
+            return
+
         try:
             # Stream events until the task is done
             while True:
@@ -573,6 +588,17 @@ class DaemonHandler(BaseHTTPRequestHandler):
                 except queue.Empty:
                     # Send keepalive
                     self._sse_send("keepalive", {"ts": time.time()})
+                    # v2.3.9-fix: also exit when the task reached a
+                    # terminal state without us ever seeing the terminal
+                    # event (e.g. the bounded event queue dropped it under
+                    # load). Re-checking here closes the stream instead of
+                    # keepalive-looping on a finished task.
+                    task = self.task_queue.get_task(task_id)
+                    if task is not None and task.state in (
+                        TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED,
+                    ):
+                        self.close_connection = True
+                        break
         except Exception:
             pass
         finally:

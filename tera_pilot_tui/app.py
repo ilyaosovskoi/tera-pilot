@@ -2479,14 +2479,17 @@ class TeraPilotTUIApp(App):
             # Guardian modal returns "approve" | "reject" | "use_fix"
             # Legacy modal returns True/False
             if isinstance(result, str):
-                if result == "use_fix":
-                    self.bridge.answer_guardian_verdict("use_fix")
-                elif result == "approve":
-                    self.bridge.answer_confirmation(True)
-                elif result == "reject":
-                    self.bridge.answer_confirmation(False)
-                else:
-                    self.bridge.answer_confirmation(False)
+                # v2.3.9-fix: route EVERY GuardianModal verdict through
+                # answer_guardian_verdict(). Previously only "use_fix"
+                # did; "approve"/"reject" went to answer_confirmation(),
+                # which pokes the tool engine's *_confirm* wait — but
+                # during a Guardian MODIFY review the engine is blocked
+                # on its *_guardian* wait (_guardian_event /
+                # _guardian_decision). The verdict never arrived, so the
+                # agent hung until the 300s wait timed out and the
+                # default "reject" applied — Approve on a Guardian modal
+                # silently did nothing, and Reject looked like a stall.
+                self.bridge.answer_guardian_verdict(result)
             elif isinstance(result, bool):
                 self.bridge.answer_confirmation(result)
             else:

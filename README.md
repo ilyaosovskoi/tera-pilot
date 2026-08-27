@@ -12,7 +12,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)]()
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
 [![Privacy](https://img.shields.io/badge/Privacy-Local--First-orange)]()
-[![Tests](https://img.shields.io/badge/tests-774%20%C2%B7%20754%20passing-blue)]()
+[![Tests](https://img.shields.io/badge/tests-820%20%C2%B7%20800%20passing-blue)]()
 [![Status](https://img.shields.io/badge/status-testing%20phase-yellow)]()
 
 </div>
@@ -190,8 +190,8 @@ Measured on real repository tasks (methodology: `eval/README.md`):
 ## Security Posture & Verification
 
 Security is treated as a continuously tested property, not a one-time claim.
-The suite is **774 tests (754 passing, 20 environment-dependent skips)**, of
-which **269** are security/sandbox/command-policy/licensing tests, mapped to
+The suite is **820 tests (800 passing, 20 environment-dependent skips)**, of
+which **293** are security/sandbox/command-policy/licensing tests, mapped to
 the public threat model (`THREAT_MODEL.md`, T1–T8). Five real vulnerabilities
 found by offensive testing were fixed and regression-tested (git `!`-aliases
 and exec-capable config keys, CORS prefix matching that exposed `api_token`,
