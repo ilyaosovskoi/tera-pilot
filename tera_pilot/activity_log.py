@@ -210,10 +210,40 @@ _STATUS_PREFIXES: List[tuple] = [
     ("[read error]", STATUS_ERROR),
     ("[write error]", STATUS_ERROR),
     ("[verify failed", STATUS_ERROR),
+    ("[verify error]", STATUS_ERROR),
+    # v2.3.10-fix: the tool engine emits many more error-status tags
+    # than this list originally covered (e.g. "[TOOL ERROR]", "[GIT ERROR]",
+    # "[MCP ERROR]", "[BLOCKED]", "[REFUSED]"). Because parse_status
+    # defaults unknown prefixes to STATUS_OK, every one of those FAILED
+    # tool calls was recorded in the activity/audit log as "ok" — so the
+    # signed audit trail showed green checks for errors. Add the concrete
+    # error/rejected tags the engine actually returns so the status is
+    # truthful (see agent_runtime/tool_engine/_engine.py, which documents
+    # "[TOOL ERROR]" as an error status).
+    ("[tool error]", STATUS_ERROR),
+    ("[git error]", STATUS_ERROR),
+    ("[mcp error]", STATUS_ERROR),
+    ("[web_fetch error]", STATUS_ERROR),
+    ("[web_search error]", STATUS_ERROR),
+    ("[subagent error]", STATUS_ERROR),
+    ("[multi-agents error]", STATUS_ERROR),
+    ("[skill error]", STATUS_ERROR),
+    ("[grep error]", STATUS_ERROR),
+    ("[glob error]", STATUS_ERROR),
+    ("[search error]", STATUS_ERROR),
+    ("[reviewer error]", STATUS_ERROR),
+    ("[search_tools error]", STATUS_ERROR),
+    ("[select_tools error]", STATUS_ERROR),
+    ("[self-verify error]", STATUS_ERROR),
+    ("[self-verify failed]", STATUS_ERROR),
+    ("[wave timeout]", STATUS_TIMEOUT),
+    ("[runtime not found]", STATUS_ERROR),
 
     ("[rejected by user]", STATUS_REJECTED),
     ("[tool rejected]", STATUS_REJECTED),
     ("[tool denied]", STATUS_REJECTED),
+    ("[blocked]", STATUS_REJECTED),
+    ("[refused]", STATUS_REJECTED),
     ("[rejected]", STATUS_REJECTED),
 
     ("[cancelled", STATUS_CANCELLED),
@@ -286,9 +316,18 @@ def _sanitise_arg(key: str, value: Any) -> Any:
         return [_sanitise_arg(key, v) for v in capped] + (
             [{"_truncated": True, "hidden": len(value) - 20}] if len(value) > 20 else []
         )
-    # Dicts: recurse
+    # Dicts: recurse.
+    #
+    # v2.3.10-fix: pass the ORIGINAL top-level ``key`` down, not the
+    # nested dict's own key (``k``). Only top-level args named
+    # ``content``/``diff``/``code``/... are the tool's large payload, and
+    # only those should be collapsed to a summary. Previously a *nested*
+    # field that happened to be named ``content`` (or ``diff``) — e.g.
+    # ``{"meta": {"diff": ...}}`` or ``{"response_format": {"content": ...}}``
+    # — was silently summarized even though it is ordinary metadata, so
+    # the activity log dropped data that should have been kept.
     if isinstance(value, dict):
-        return {k: _sanitise_arg(k, v) for k, v in value.items()}
+        return {k: _sanitise_arg(key, v) for k, v in value.items()}
     # Scalars (int, bool, float): pass through
     return value
 

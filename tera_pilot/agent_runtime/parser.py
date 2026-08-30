@@ -321,6 +321,14 @@ class OutputParser:
     @classmethod
     def _tool_call_from_parts(cls, name: str, args: dict) -> Optional[ToolCall]:
         """Build a ToolCall from a parsed LFM (name, args) pair."""
+        # v2.3.10-fix: ``final_answer`` is the terminal marker, not a real
+        # tool. It's handled by ``is_final`` / ``parse_final_answer`` (it
+        # may be the response's only LFM block and then finalizes the run).
+        # Returning None here — without the confusing "Tool name lookup
+        # failed" warning — lets a response that mixes a real call with a
+        # trailing final_answer still execute the call and drop the marker.
+        if name == "final_answer":
+            return None
         try:
             if name.startswith("mcp__") or name == "list_mcp_tools":
                 return ToolCall(name=name, args=args or {})
@@ -464,7 +472,12 @@ class OutputParser:
             name = ToolName(tool_name_str)
             return ToolCall(name=name, args=args)
         except (ValueError, KeyError) as e:
-            logger.warning(f"[parser] Tool name lookup failed: {e}")
+            # v2.3.10-fix: ``final_answer`` (JSON: no ``tool`` key) and the
+            # empty tool-name case are terminal markers the runtime handles
+            # via is_final / parse_final_answer — they aren't a real tool
+            # and don't warrant an error log line for every final answer.
+            if tool_name_str not in ("", "final_answer"):
+                logger.warning(f"[parser] Tool name lookup failed: {e}")
             return None
 
     @classmethod
@@ -805,6 +818,36 @@ class OutputParser:
         return ''.join(out)
 
     @classmethod
+    def _lfm_final_answer(cls, text: str) -> Optional[str]:
+        """Extract the terminal answer when ``text`` is an LFM-native
+        ``final_answer(...)`` block (v2.3.10-fix).
+
+        The LFM 2.5 chat template (LM Studio) emits the terminal in the
+        same ``<|tool_call_start|>[name(args)]<|tool_call_end|>`` text
+        format as its tool calls, so ``parse_final_answer`` (which looks
+        for ``{"final_answer": ...}``) misses it: the runtime then saw the
+        model answer with no tool call AND no recognized final answer and
+        reported ``final_output`` empty ("no content returned").
+
+        To stay consistent with the JSON path (where a response carrying a
+        tool call AND a final_answer finalizes immediately), we only treat
+        the LFM block as terminal when it is the response's SOLE block. If
+        real tool calls precede it, the runtime executes them first and
+        waits for a dedicated terminal turn instead of dropping the work.
+        """
+        blocks = list(cls._iter_lfm_calls(text or ""))
+        if len(blocks) != 1:
+            return None
+        name, args = blocks[0]
+        if name != "final_answer":
+            return None
+        parts = [v for v in args.values() if isinstance(v, str)]
+        if not parts:
+            return None
+        joined = "\n".join(parts).strip()
+        return joined or None
+
+    @classmethod
     def parse_final_answer(cls, text: str) -> Optional[str]:
         """Extract the ``final_answer`` field from a model response.
 
@@ -842,11 +885,18 @@ class OutputParser:
                 return json.loads(f'"{raw_val}"')
             except json.JSONDecodeError:
                 return raw_val.strip()
+        # v2.3.10-fix: the LFM-native text form `final_answer('...')`.
+        lfm_text = cls._lfm_final_answer(text)
+        if lfm_text is not None:
+            return lfm_text
         return None
 
     @classmethod
     def is_final(cls, text: str) -> bool:
-        return '"final_answer"' in text
+        if '"final_answer"' in text:
+            return True
+        # v2.3.10-fix: LFM-native text terminal.
+        return cls._lfm_final_answer(text) is not None
 
     @classmethod
     def extract_thought(cls, text: str) -> str:

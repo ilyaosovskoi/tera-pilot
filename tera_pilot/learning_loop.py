@@ -107,6 +107,24 @@ def _project_learnings_dir(project_path: str) -> Path:
         return fallback
 
 
+def _entry_path_inside(entry_path: Any, proot: Path) -> bool:
+    """True iff *entry_path* resolves within *proot* (workspace root).
+
+    v2.3.10-fix: used by ``detect_missing_verification`` to scope the
+    activity-log window to the actual project, guarding against path
+    lookalikes (``/ws/proj2`` vs ``/ws/proj``). Non-path values are
+    treated as ``False`` (they don't belong to the project).
+    """
+    if not entry_path:
+        return False
+    try:
+        candidate = Path(str(entry_path)).resolve()
+        candidate.relative_to(proot)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 # ── Slug + filename helpers ────────────────────────────────────────────
 
 
@@ -772,9 +790,17 @@ def detect_missing_verification(project_path: str) -> Optional[MissingVerificati
         from tera_pilot.activity_log import get_activity_log
         log = get_activity_log()
         all_entries = log.recent(n=200)
+        # v2.3.10-fix: the previous scoping matched by string PREFIX
+        # (``str(path).startswith(str(project_path))``) with no path
+        # separator boundary, so the path of a lookalike sibling
+        # project (``/ws/proj2/x`` when project_path is ``/ws/proj``)
+        # was wrongly counted as part of this project's window. Resolve
+        # both sides and require a real containment, matching the same
+        # guard the workspace sandbox uses everywhere else.
+        proot = Path(project_path).resolve()
         entries = [
             e for e in all_entries
-            if not e.get("path") or str(e.get("path", "")).startswith(str(project_path))
+            if not e.get("path") or _entry_path_inside(e.get("path"), proot)
         ][-50:]
     except Exception:
         return None

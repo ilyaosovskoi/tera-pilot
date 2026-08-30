@@ -186,6 +186,55 @@ def test_parse_tool_calls_final_answer_only():
     assert OutputParser.parse_tool_calls('{"final_answer": "done"}') == []
 
 
+# ── 4b. LFM-native final_answer (v2.3.10-fix) ─────────────────────────
+# The LFM 2.5 chat template (LM Studio) emits the terminal in the same
+# <|tool_call_start|>[name(args)]<|tool_call_end|> text format as its
+# tool calls. is_final / parse_final_answer used to recognize only the
+# JSON form, so a model answering with ``final_answer('...')`` produced
+# no tool call AND no recognized final answer — the run ended with an
+# empty final_output ("no content returned").
+
+
+def test_is_final_detects_lfm_text_final_answer():
+    text = "Let me summarize. <|tool_call_start|>[final_answer('added clamp function')]<|tool_call_end|>"
+    assert OutputParser.is_final(text) is True
+
+
+def test_parse_final_answer_extracts_lfm_text():
+    text = "<|tool_call_start|>[final_answer('built the clamp with edge cases')]<|tool_call_end|>"
+    assert OutputParser.parse_final_answer(text) == "built the clamp with edge cases"
+
+
+def test_parse_final_answer_lfm_double_quote_multi_arg():
+    text = '<|tool_call_start|>[final_answer("line one", "line two")]<|tool_call_end|>'
+    assert OutputParser.parse_final_answer(text) == "line one\nline two"
+
+
+def test_parse_tool_calls_skips_standalone_lfm_final_answer():
+    # A response whose ONLY LFM block is final_answer is terminal — it
+    # must not become a (nonexistent) tool call.
+    text = "<|tool_call_start|>[final_answer('done')]<|tool_call_end|>"
+    assert OutputParser.parse_tool_calls(text) == []
+
+
+def test_parse_tool_calls_drops_trailing_lfm_final_answer():
+    # A plan + trailing final_answer in one LFM response: the real calls
+    # are kept (so the runtime executes them), the terminal marker is
+    # dropped — and _lfm_final_answer must NOT treat it as terminal.
+    text = (
+        "<|tool_call_start|>[read_file(path='db.py')]<|tool_call_end|>\n"
+        "<|tool_call_start|>[final_answer('all done')]<|tool_call_end|>"
+    )
+    calls = OutputParser.parse_tool_calls(text)
+    assert [c.name.value for c in calls] == ["read_file"]
+    assert OutputParser._lfm_final_answer(text) is None
+
+
+def test_json_final_answer_still_works():
+    assert OutputParser.is_final('{"final_answer": "done"}') is True
+    assert OutputParser.parse_final_answer('{"final_answer": "done"}') == "done"
+
+
 def test_tool_calls_from_native():
     calls = OutputParser.tool_calls_from_native([
         {"id": "c1", "function": {"name": "read_file", "arguments": '{"path": "a.py"}'}},
