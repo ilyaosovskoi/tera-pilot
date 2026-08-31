@@ -71,6 +71,10 @@ class TeraPilotTUIApp(App):
         # v2.3.6: animated "thinking…" status line while a turn runs.
         self._status_state: str = "idle"
         self._status_frame: int = 0
+        # v2.4.0: pending API-key capture — when /key <provider> arms the
+        # input placeholder, the next non-slash submission is treated as
+        # the key instead of a normal prompt.
+        self._pending_key_provider: Optional[str] = None
 
     # ---------------------------------------------------------------- compose
     def compose(self) -> ComposeResult:
@@ -87,7 +91,7 @@ class TeraPilotTUIApp(App):
         try:
             from tera_pilot import __version__ as _tera_pilot_version
         except Exception:
-            _tera_pilot_version = "2.3.9"
+            _tera_pilot_version = "2.4.0"
 
         # Initialize InfoBox with current state
         info = self.query_one(InfoBox)
@@ -162,7 +166,7 @@ class TeraPilotTUIApp(App):
             self._open_sub_palette_for_cmd(item.id)
         else:
             # Show command hint for commands that need parameters
-            if item.id in ["/model", "/provider", "/chat", "/cd", "/section", "/guardian", "/capabilities", "/consensus"]:
+            if item.id in ["/model", "/provider", "/chat", "/cd", "/section", "/guardian", "/capabilities", "/consensus", "/agent", "/key"]:
                 box.set_placeholder_for_command(item.id)
             else:
                 box.reset_placeholder()
@@ -176,6 +180,29 @@ class TeraPilotTUIApp(App):
             return
         if self._turn_running:
             self.bell()
+            return
+
+        # v2.4.0: pending API-key capture (armed by /key <provider>).
+        # A slash command cancels the capture instead.
+        if self._pending_key_provider:
+            provider = self._pending_key_provider
+            self._pending_key_provider = None
+            if prompt.startswith("/"):
+                self.query_one(InputBox).reset_placeholder()
+                self._handle_slash_input(prompt)
+                return
+            box = self.query_one(InputBox)
+            box.reset_placeholder()
+            chat = self.query_one(ChatLog)
+            r = self.bridge.set_api_key(provider, prompt)
+            if r.get("ok"):
+                chat.add_system(
+                    f"[green]API key saved[/green] for [b]{provider}[/b] "
+                    f"({r.get('masked', '')}) → ~/.tera_pilot/config.json"
+                )
+            else:
+                chat.add_error(f"Failed to save key: {r.get('error', 'unknown')}")
+            box.focus()
             return
 
         # If it's a slash command (even without suggestions), handle it directly
@@ -391,6 +418,12 @@ class TeraPilotTUIApp(App):
         # G20c: router mode
         elif cmd == "/router-mode":
             self._exec_router_mode(arg)
+        # v2.4.0: agent profiles
+        elif cmd == "/agent":
+            self._exec_agent(arg)
+        # v2.4.0: API key management
+        elif cmd == "/key":
+            self._exec_key(arg)
         else:
             self.query_one(ChatLog).add_system(
                 f"Unknown command: {cmd}. Type /help for available commands."
@@ -463,6 +496,12 @@ class TeraPilotTUIApp(App):
             # handoff browser. If there are no handoffs, _exec_handoff
             # already prints a helpful message.
             self._exec_handoff("list")
+        elif cmd_id == "agent":
+            # v2.4.0: /agent from the Ctrl+P palette opens the profile picker.
+            self._exec_agent("")
+        elif cmd_id == "key":
+            # v2.4.0: /key from the palette opens the provider picker.
+            self._exec_key("")
         else:
             self.query_one(ChatLog).add_system(
                 f"Command /{cmd_id} needs a parameter. Type /{cmd_id} <value> directly."
@@ -846,6 +885,8 @@ class TeraPilotTUIApp(App):
             "  [cyan]/audit-signed[/cyan] Verify a signed/chained audit export (G16)",
             "  [cyan]/learnings[/cyan] List / scan / dismiss auto-learning entries (G17)",
             "  [cyan]/websearch[/cyan] Web search backend status (G18)",
+            "  [cyan]/agent[/cyan]     Pick today's agent profile (code/video/reviewer/fable5/custom)",
+            "  [cyan]/key[/cyan]       Save an API key for a provider (/key <provider> <key>)",
             "  [cyan]/gui[/cyan]       Launch the Tera Pilot GUI window",
             "  [cyan]/help[/cyan]      Show this help",
             "",
@@ -3568,3 +3609,357 @@ class TeraPilotTUIApp(App):
         else:
             chat.add_error(f"Failed: {r.get('error', 'unknown')}")
         self.query_one(InputBox).focus()
+
+    # ── v2.4.0 — Agent profiles (/agent) ───────────────────────────
+
+    _SECURITY_HELP = {
+        "controlled": "strict control — every side-effecting action needs approval",
+        "balanced": "balanced — new files auto-approved, dangerous actions gated",
+        "free": "maximum freedom — no approvals (Guardian off)",
+    }
+
+    def _exec_agent(self, arg: str) -> None:
+        """Pick / manage agent profiles.
+
+        Usage:
+            /agent                 — palette of all profiles (pick today's agent)
+            /agent list            — list profiles + the active one
+            /agent <id>            — activate a profile (e.g. /agent video)
+            /agent off             — deactivate (stock behavior)
+            /agent new <id> [name] — create a new user profile
+            /agent edit <id> <field> <value> — update security|name|prompt
+            /agent show <id>       — show a profile's details incl. its system prompt
+            /agent delete <id>     — delete a user profile
+        """
+        chat = self.query_one(ChatLog)
+        arg = (arg or "").strip()
+
+        # No arg — palette of profiles.
+        if not arg:
+            self._open_agent_palette()
+            return
+
+        parts = arg.split(None, 1)
+        cmd = parts[0].lower()
+        rest = (parts[1] if len(parts) > 1 else "").strip()
+
+        if cmd == "list":
+            self._agent_list()
+            return
+        if cmd == "off":
+            r = self.bridge.clear_agent_profile()
+            if r.get("ok"):
+                chat.add_system("[green]Agent profile deactivated[/green] — stock behavior restored.")
+            else:
+                chat.add_error(f"Failed: {r.get('error', 'unknown')}")
+            self.query_one(InputBox).focus()
+            return
+        if cmd == "new":
+            pid, name = (rest.split(None, 1) + [None])[:2] if rest else (None, None)
+            if not pid:
+                chat.add_system(
+                    "Usage: /agent new <profile_id> [display name]\n"
+                    "Then set the prompt & security with:\n"
+                    "  /agent edit <id> prompt <your system prompt>\n"
+                    "  /agent edit <id> security <controlled|balanced|free>"
+                )
+                self.query_one(InputBox).focus()
+                return
+            r = self.bridge.create_agent_profile(pid, name=name or pid)
+            if r.get("ok"):
+                chat.add_system(
+                    f"[green]Profile created:[/green] [b]{pid}[/b] "
+                    f"(security: [cyan]balanced[/cyan] by default).\n"
+                    f"Next: /agent edit {pid} prompt …  →  /agent {pid}"
+                )
+            else:
+                chat.add_error(f"Create failed: {r.get('error', 'unknown')}")
+            self.query_one(InputBox).focus()
+            return
+        if cmd == "edit":
+            pid, field_rest = (rest.split(None, 1) + [None, None])[:2] if rest else (None, None)
+            if not pid or not field_rest:
+                chat.add_system(
+                    "Usage: /agent edit <id> <field> <value>\n"
+                    "  Fields: security (controlled|balanced|free), name, prompt"
+                )
+                self.query_one(InputBox).focus()
+                return
+            field, _, value = field_rest.partition(" ")
+            value = value.strip()
+            field = field.lower()
+            kwargs: Dict[str, Any] = {}
+            if field == "security":
+                if value not in self._SECURITY_HELP:
+                    chat.add_error(
+                        f"Unknown security level: {value}. Valid: controlled | balanced | free"
+                    )
+                    self.query_one(InputBox).focus()
+                    return
+                kwargs["security"] = value
+            elif field == "name":
+                kwargs["name"] = value or None
+            elif field == "prompt":
+                if not value:
+                    chat.add_system(
+                        f"Usage: /agent edit {pid} prompt <system prompt text>"
+                    )
+                    self.query_one(InputBox).focus()
+                    return
+                kwargs["system_prompt"] = value
+            elif field == "description":
+                kwargs["description"] = value or None
+            else:
+                chat.add_error(f"Unknown field: {field}. Valid: security | name | prompt | description")
+                self.query_one(InputBox).focus()
+                return
+            r = self.bridge.edit_agent_profile(pid, **kwargs)
+            if r.get("ok"):
+                chat.add_system(
+                    f"[green]Profile [b]{pid}[/b] updated[/green] "
+                    f"({field}: [cyan]{r.get('profile', {}).get(field, value)}[/cyan])."
+                )
+            else:
+                chat.add_error(f"Edit failed: {r.get('error', 'unknown')}")
+            self.query_one(InputBox).focus()
+            return
+        if cmd == "show":
+            self._agent_show(rest)
+            return
+        if cmd == "delete":
+            pid = rest.split(None, 1)[0] if rest else ""
+            if not pid:
+                chat.add_system("Usage: /agent delete <profile_id>")
+                self.query_one(InputBox).focus()
+                return
+            r = self.bridge.delete_agent_profile(pid)
+            if r.get("ok"):
+                chat.add_system(f"[green]Profile deleted:[/green] [b]{pid}[/b]")
+            else:
+                chat.add_error(f"Delete failed: {r.get('error', 'unknown')}")
+            self.query_one(InputBox).focus()
+            return
+
+        # Otherwise — treat as activation: /agent <id>
+        r = self.bridge.apply_agent_profile(cmd)
+        if r.get("ok"):
+            sec = r.get("security", "?")
+            chat.add_system(
+                f"[green]Agent profile active:[/green] [b]{cmd}[/b] "
+                f"(security: [cyan]{sec}[/cyan] — {self._SECURITY_HELP.get(sec, '')})"
+            )
+            self._refresh_status("idle")
+        else:
+            chat.add_error(f"Failed: {r.get('error', 'unknown')}. Type /agent list to see profiles.")
+        self.query_one(InputBox).focus()
+
+    def _open_agent_palette(self) -> None:
+        """Palette of all profiles; selecting one activates it."""
+        r = self.bridge.list_agent_profiles()
+        if not r.get("ok"):
+            self.query_one(ChatLog).add_error(f"Failed: {r.get('error', 'unknown')}")
+            self.query_one(InputBox).focus()
+            return
+        profiles = r.get("profiles", [])
+        active = r.get("active", "")
+        options = []
+        for p in profiles:
+            pid = p.get("id", "")
+            builtin = " [dim](builtin)[/dim]" if p.get("builtin") else ""
+            tag = "  [green]● active[/green]" if pid == active else ""
+            sec = p.get("security", "controlled")
+            options.append({
+                "id": pid,
+                "label": f"{p.get('name', pid)}{builtin}{tag}",
+                "desc": f"security: {sec} — {(p.get('description') or '')[:90]}",
+            })
+        if not options:
+            self.query_one(ChatLog).add_system("No agent profiles found.")
+            self.query_one(InputBox).focus()
+            return
+        palette = CommandPalette(
+            sub_options=options,
+            sub_prompt="Select today's agent…",
+        )
+
+        def on_result(result: Optional[Tuple[str, bool]]) -> None:
+            if result is None:
+                self.query_one(InputBox).focus()
+                return
+            self._exec_agent(result[0])
+
+        self.push_screen(palette, on_result)
+
+    def _agent_list(self) -> None:
+        r = self.bridge.list_agent_profiles()
+        chat = self.query_one(ChatLog)
+        if not r.get("ok"):
+            chat.add_error(f"Failed: {r.get('error', 'unknown')}")
+            self.query_one(InputBox).focus()
+            return
+        profiles = r.get("profiles", [])
+        active = r.get("active", "")
+        lines = [
+            "[b]Agent Profiles[/b]" + (f"  — active: [green]{active}[/green]" if active else "  — [dim]no active profile (stock)[/dim]"),
+            "",
+        ]
+        for p in profiles:
+            pid = p.get("id", "")
+            marker = "● " if pid == active else "  "
+            color = "green" if pid == active else "white"
+            builtin = " (builtin)" if p.get("builtin") else ""
+            lines.append(
+                f"  {marker}[{color}]{pid}[/{color}]{builtin}  "
+                f"[dim]{p.get('name', '')}[/dim]  "
+                f"security: [cyan]{p.get('security', '?')}[/cyan]"
+            )
+        lines.append("")
+        lines.append(
+            "Pick: [cyan]/agent <id>[/cyan]  |  create: [cyan]/agent new <id> [name][/cyan]  "
+            "|  off: [cyan]/agent off[/cyan]"
+        )
+        chat.add_system("\n".join(lines))
+        self.query_one(InputBox).focus()
+
+    def _agent_show(self, pid: str) -> None:
+        chat = self.query_one(ChatLog)
+        pid = (pid or "").split(None, 1)[0]
+        if not pid:
+            chat.add_system("Usage: /agent show <profile_id>")
+            self.query_one(InputBox).focus()
+            return
+        r = self.bridge.list_agent_profiles()
+        if not r.get("ok"):
+            chat.add_error(f"Failed: {r.get('error', 'unknown')}")
+            self.query_one(InputBox).focus()
+            return
+        profile = next((p for p in r.get("profiles", []) if p.get("id") == pid), None)
+        if profile is None:
+            chat.add_error(f"No such profile: {pid}")
+            self.query_one(InputBox).focus()
+            return
+        sp = profile.get("system_prompt", "") or ""
+        lines = [
+            f"[b]Profile: {profile.get('name', pid)}[/b]  [dim]({pid})[/dim]",
+            f"  Description: {profile.get('description', '')}",
+            f"  Security:    [cyan]{profile.get('security', '?')}[/cyan]",
+            f"  Section:     {profile.get('section', 'general')}",
+            f"  Builtin:     {bool(profile.get('builtin'))}",
+            f"  Prompt:      {len(sp)} chars",
+            "",
+            "[b]System prompt:[/b]",
+        ]
+        lines.append(sp[:2000] if sp else "[dim](none — stock section prompt applies)[/dim]")
+        if len(sp) > 2000:
+            lines.append(f"[dim]… ({len(sp) - 2000} more chars)[/dim]")
+        chat.add_system("\n".join(lines))
+        self.query_one(InputBox).focus()
+
+    # ── v2.4.0 — API key management (/key) ─────────────────────────
+
+    def _exec_key(self, arg: str) -> None:
+        """Save an API key for a provider.
+
+        Usage:
+            /key                  — palette of providers, then paste the key
+            /key list             — show which providers have keys (masked)
+            /key <provider>       — prompt to paste a key for <provider>
+            /key <provider> <key> — save directly
+        """
+        chat = self.query_one(ChatLog)
+        arg = (arg or "").strip()
+
+        if not arg:
+            self._open_key_palette()
+            return
+
+        parts = arg.split(None, 1)
+        first = parts[0].lower()
+        rest = (parts[1] if len(parts) > 1 else "").strip()
+
+        if first == "list":
+            r = self.bridge.get_api_key_status()
+            if not r.get("ok"):
+                chat.add_error(f"Failed: {r.get('error', 'unknown')}")
+                self.query_one(InputBox).focus()
+                return
+            providers = r.get("providers", [])
+            active = r.get("active", "")
+            if not providers:
+                chat.add_system("No API keys saved yet. Use [cyan]/key <provider> <key>[/cyan].")
+            else:
+                lines = ["[b]Saved API keys[/b]", ""]
+                for p in providers:
+                    mark = "● " if p.get("provider") == active else "  "
+                    if p.get("set"):
+                        lines.append(f"  {mark}[cyan]{p['provider']}[/cyan]  [green]set[/green]  {p.get('masked', '')}")
+                    else:
+                        lines.append(f"  {mark}[cyan]{p['provider']}[/cyan]  [dim]not set[/dim]")
+                lines.append("")
+                lines.append("Set: [cyan]/key <provider> <key>[/cyan]")
+                chat.add_system("\n".join(lines))
+            self.query_one(InputBox).focus()
+            return
+
+        if first in self._provider_ids():
+            if rest:
+                # Direct: /key <provider> <key>
+                r = self.bridge.set_api_key(first, rest)
+                if r.get("ok"):
+                    chat.add_system(
+                        f"[green]API key saved[/green] for [b]{first}[/b] "
+                        f"({r.get('masked', '')}) → ~/.tera_pilot/config.json"
+                    )
+                else:
+                    chat.add_error(f"Failed: {r.get('error', 'unknown')}")
+                self.query_one(InputBox).focus()
+            else:
+                # Prompt: set the pending-capture flag + placeholder
+                self._pending_key_provider = first
+                box = self.query_one(InputBox)
+                box.placeholder = (
+                    f" > paste API key for {first} (saved to ~/.tera_pilot/config.json) — "
+                    f"Enter to save, / to cancel _ "
+                )
+                box.focus()
+            return
+
+        chat.add_error(
+            f"Unknown provider: {first}. Known: {', '.join(sorted(self._provider_ids())) or 'none'}"
+        )
+        self.query_one(InputBox).focus()
+
+    def _provider_ids(self) -> set:
+        try:
+            return {p.get("id") for p in self.bridge.list_providers()}
+        except Exception:
+            return set()
+
+    def _open_key_palette(self) -> None:
+        """Palette of providers; selecting one arms the paste-key prompt."""
+        r = self.bridge.get_api_key_status()
+        providers = r.get("providers") or [] if r.get("ok") else []
+        status = {p.get("provider"): p for p in providers}
+        options = []
+        for pid in sorted(self._provider_ids()):
+            st = status.get(pid, {})
+            desc = f"{st.get('masked', '')} [dim](set)[/dim]" if st.get("set") else "[dim]no key yet[/dim]"
+            options.append({"id": pid, "label": pid, "desc": desc})
+        if not options:
+            self.query_one(ChatLog).add_system(
+                "No providers available. Use [cyan]/key <provider> <key>[/cyan] directly."
+            )
+            self.query_one(InputBox).focus()
+            return
+        palette = CommandPalette(
+            sub_options=options,
+            sub_prompt="Select provider to set an API key…",
+        )
+
+        def on_result(result: Optional[Tuple[str, bool]]) -> None:
+            if result is None:
+                self.query_one(InputBox).focus()
+                return
+            self._exec_key(result[0])
+
+        self.push_screen(palette, on_result)

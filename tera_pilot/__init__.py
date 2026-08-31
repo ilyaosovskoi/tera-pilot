@@ -61,5 +61,5 @@ Tera Pilot-unique features preserved in v2.0:
 - Memory service (human-readable tera_pilot_memory.md with JSON metadata)
 """
 
-__version__ = "2.3.9"
+__version__ = "2.4.0"
 __all__ = ["__version__"]

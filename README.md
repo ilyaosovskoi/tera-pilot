@@ -6,7 +6,7 @@
 
 ### Private, vendor-neutral coding agents — self-hosted, verifiable, and CI-ready.
 
-**Textual TUI first · Web UI · HTTP daemon · MCP/ACP · 17 providers · Ollama/LM Studio · Guardian safety**
+**Textual TUI first · Web UI · HTTP daemon · MCP/ACP · 17 providers · Ollama/LM Studio · Guardian safety · Agent profiles · Fleets**
 
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)]()
@@ -21,6 +21,9 @@
 
 - [Why Tera Pilot?](#why-tera-pilot)
 - [Quick Start](#quick-start)
+- [Agent Profiles](#agent-profiles--pick-todays-agent) — pick today's agent (code / video / reviewer / fable5)
+- [Fleet](#fleet--several-agents-at-once-one-main-terminal) — run several profiles at once, one watch terminal
+- [API keys](#api-keys-made-convenient) — `tera-pilot key` / `/key`
 - [Demo](#demo)
 - [Security Posture & Verification](#security-posture--verification)
 - [Technical Reference](#technical-reference) — [runtime](#core-agent-runtime) · [trust & control](#trust-and-control) · [interfaces](#interfaces) · [MCP/ACP](#mcp-and-acp) · [architecture](#architecture) · [audit](#audit-export--verification) · [evaluation](#reproducible-evaluation)
@@ -42,6 +45,7 @@
 |---|---|
 | 🔒 **Private & local-first** | keep code on your machine with Ollama / LM Studio — or bring your own keys |
 | 🧩 **Vendor-neutral** | one runtime, 17 providers, no lock-in to a single model vendor |
+| 🎭 **Agent profiles & fleets** | pick today's agent (`/agent`), run several at once with one watch terminal (`tera-pilot fleet`) |
 | 🖥️ **Runs anywhere** | terminal TUI, browser, REST/SSE daemon, ACP server, CI job |
 | ✅ **Verifiable** | every change tested, audited, and exportable as signed evidence |
 
@@ -146,6 +150,70 @@ Tera Pilot is provider-neutral. Configure a cloud provider with your own key, or
 - **Local:** Ollama and LM Studio for local inference, plus a keyless `local` OpenAI-compatible endpoint for any self-hosted server that speaks the OpenAI API (default: Ollama at `http://localhost:11434/v1`; override `api_base` for LM Studio, vLLM, llama.cpp, …).
 
 The TUI exposes provider selection, model overrides, workspace selection and autonomy settings through its visual controls and command palette. For a local-first workflow, choose Ollama or LM Studio in the provider selector and keep the workspace inside the intended project root.
+
+### Agent Profiles — pick today's agent
+
+Every agent has its own profile: a name, a system prompt (persona) and a
+security level. Built-in profiles are `code` (default), `video` (video
+production), `reviewer` (read-only) and `fable5` (Claude Fable 5 persona,
+Anthropic's most capable model — distilled from `claude-fable-5.md`). You
+never edit a system prompt to switch roles — you just pick the agent for
+today:
+
+```
+/agent                  # palette of all profiles → pick one
+/agent video            # activate the video agent (persists across restarts)
+/agent off              # back to stock behavior
+/agent new my-editor    # create a custom profile
+/agent edit my-editor prompt "You are a strict editor…"
+/agent edit my-editor security free   # controlled | balanced | free
+/agent list             # all profiles + the active one
+```
+
+Security levels map onto autonomy + Guardian: `controlled` (every side
+effect needs approval), `balanced` (new files auto-approved, dangerous
+actions gated) and `free` (maximum freedom). Profiles live in
+`~/.tera_pilot/agent-profiles/` as plain JSON — hand-editable and shared
+by the TUI, Web UI and daemon.
+
+### Fleet — several agents at once, one main terminal
+
+Launch several profiles in parallel, each with its own workspace, and
+watch a live summary of all of them from a single terminal — no need to
+open a window per agent:
+
+```bash
+# terminal 1 — the fleet (foreground; Ctrl+C stops it)
+tera-pilot fleet start --agent code:~/code --agent video:~/videos \
+                       --agent fable5:~/docs
+
+# any terminal — queue work to a specific agent
+tera-pilot fleet task video "make a 30s teaser from clips/"
+
+# the "main" terminal — live summary of every agent
+tera-pilot fleet watch
+
+# stop all workers after their current task
+tera-pilot fleet stop
+```
+
+Each fleet agent is a headless Tera Pilot with its profile's persona and
+security level. `controlled` agents fail closed on side-effecting tools
+(effectively read-only until run interactively); `free` agents run
+un-gated.
+
+### API keys, made convenient
+
+```bash
+tera-pilot key              # interactive: pick provider, paste key (hidden)
+tera-pilot key list         # masked key status per provider
+tera-pilot key set gemini    # prompts for the key
+tera-pilot key set groq gsk_… # or pass it directly
+```
+
+Or from inside the TUI: `/key` opens the provider picker, then just paste
+the key on the input line. Keys are stored in `~/.tera_pilot/config.json`
+(masked in every listing, never echoed).
 
 ## Demo
 

@@ -156,6 +156,9 @@ class AgentRuntime:
         # auto-detect from the active model's size (<= ~8B → compact);
         # True/False forces it. Config knob: agent_compact_prompt.
         self._compact_override = compact_prompt
+        # Agent Profile (v2.4.0): optional system-prompt override (see
+        # set_system_prompt_fragment). None = stock section prompt only.
+        self._profile_prompt_fragment: Optional[str] = None
         # v1.1.0: quota tracker — lazily wired via set_quota_tracker().
         # When set, _generate_with_retry calls quota.record() and
         # _run_agent_loop checks quota.exhausted() before each LLM call.
@@ -392,6 +395,17 @@ class AgentRuntime:
         if level not in ("always_ask", "new_files_only", "never_ask"):
             level = "always_ask"
         self.tools.autonomy = level
+
+    def set_system_prompt_fragment(self, fragment: Optional[str]) -> None:
+        """Agent Profile (v2.4.0): optional persona/system-prompt override.
+
+        When set, this fragment is injected at the TOP of the system
+        prompt on every run — it lets an Agent Profile (e.g. "Video
+        Agent", "Review Agent") re-scope the agent's role without
+        forking the PromptBuilder. Pass None/empty to clear (stock
+        behavior). Applied on next run() — prompt assembly is per-run.
+        """
+        self._profile_prompt_fragment = (fragment or "").strip() or None
 
     def set_confirm_callback(self, fn: Optional[Callable]) -> None:
         """Wire the UI callback used for non-diff-review confirmations
@@ -1551,6 +1565,11 @@ class AgentRuntime:
         # v1.0.9: append CLAUDE.md project instructions to the system
         # prompt so they're treated as authoritative project rules.
         system_prompt = self._system_prompt(self.section)
+        # Agent Profile (v2.4.0): inject the profile's prompt fragment at
+        # the TOP so the role re-scoping (e.g. "Video Agent") frames the
+        # whole prompt, including the stock identity block below it.
+        if getattr(self, "_profile_prompt_fragment", None):
+            system_prompt = self._profile_prompt_fragment + "\n\n" + system_prompt
         # v1.0.9: inject CLAUDE.md project instructions
         proj_instructions = self._project_context.instructions()
         if proj_instructions:

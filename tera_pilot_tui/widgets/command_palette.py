@@ -81,6 +81,17 @@ BUILTIN_COMMANDS: List[CommandEntry] = [
     CommandEntry("cost", "/cost", "Cost-aware provider routing (M2)", "toggle", False),
     # v2.0.2 (M3) — Team spend dashboard
     CommandEntry("spend", "/spend", "Team spend dashboard (M3)", "info", False),
+    # v2.4.0 — Agent profiles
+    CommandEntry("agent", "/agent", "Pick today's agent profile (code/video/reviewer/fable5/custom)", "navigation", False),
+    # v2.4.0 — API key management
+    CommandEntry("key", "/key", "Save an API key for a provider", "settings", False),
+]
+
+# v2.4.0 — agent security levels (shared labels used by /agent)
+AGENT_SECURITY_LEVELS = [
+    {"id": "controlled", "label": "Controlled", "desc": "Strict — every side effect needs approval"},
+    {"id": "balanced", "label": "Balanced", "desc": "New files auto-approved, dangerous actions gated"},
+    {"id": "free", "label": "Free", "desc": "Maximum freedom — no approvals"},
 ]
 
 

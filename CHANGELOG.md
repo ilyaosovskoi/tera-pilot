@@ -6,11 +6,33 @@ summary); this file keeps the per-version history. Every release keeps the
 version in sync everywhere: npm, pip, the Web UI, the TUI, the auto-updater
 and the tests.
 
-## [Unreleased] — Remote task mode, Rust acceleration & TUI approval polish
+## [2.4.0] — Agent profiles, fleets, Fable 5 persona & convenient keys
 
-This batch makes three things work better out of the box:
+The v2.4.0 release is the “pick your agent for today” release:
 
-1. **Remote task mode is now reachable from the CLI** — `tera-pilot-daemon serve
+1. **Agent profiles** — every agent has a named profile with its own system
+   prompt (persona) and security level. `/agent` opens a picker, `/agent
+   <id>` activates a profile (persisted across restarts), and you create or
+   tune profiles with `/agent new`, `/agent edit` and `/agent delete`.
+   Built-in presets: `code` (default), `video`, `reviewer` (read-only) and
+   `fable5` — the Claude Fable 5 persona, Anthropic's most capable model,
+   distilled from the full system prompt in `claude-fable-5.md`. Security
+   levels (`controlled` / `balanced` / `free`) map onto autonomy + Guardian
+   and are applied to the live runtime, including the system-prompt
+   fragment, which previously was stored but never injected.
+2. **Fleet mode** — `tera-pilot fleet start --agent code:~/code --agent
+   video:~/videos` runs several profiles at once as headless workers, each
+   in its own workspace; `tera-pilot fleet task <agent> "<prompt>"` queues
+   work, and `tera-pilot fleet watch` is the “main terminal” that shows a
+   live summary of every agent. `fleet stop` (or Ctrl+C) shuts the workers
+   down after their current task. In a fleet, `controlled` agents fail
+   closed on side-effecting tools (effectively read-only), `balanced`
+   auto-approves headless, and `free` runs un-gated.
+3. **Convenient API-key setup** — `tera-pilot key` (interactive picker +
+   hidden input, `list` / `set` / `remove`, masked output) and `/key` in the
+   TUI (pick a provider, paste the key on the input line). Keys are stored
+   atomically in `~/.tera_pilot/config.json` and never echoed.
+4. **Remote task mode is now reachable from the CLI** — `tera-pilot-daemon serve
    --inbound telegram` reads `~/.tera_pilot/inbound.json` (Telegram bot token
    + mandatory allow-list of chat IDs) and wires the inbound messenger
    listener to the task queue: any allowed message becomes a task, the task
@@ -19,13 +41,13 @@ This batch makes three things work better out of the box:
    `STOP` cancels the running task. Previously the listener existed only as
    a library module with no way to start it — “set a task and walk away”
    was not actually possible.
-2. **Rust acceleration is one command** — `make native` builds and installs
+5. **Rust acceleration is one command** — `make native` builds and installs
    `tera_pilot_native` (sandbox checks, circuit breaker, compaction,
    interjection buffer, cancel tokens) and verifies it loaded. The wheel
    build was already reproducible and the extension is picked up
    automatically by `tera_pilot.agent.native`; this just removes the manual
    two-step dance from the docs.
-3. **TUI approval modals got a visual refresh** — the Approve/Deny and
+6. **TUI approval modals got a visual refresh** — the Approve/Deny and
    Guardian (Approve/Use Fix/Reject) dialogs now have clearer titles with
    icons, the proposed action sits in its own bordered mono block, buttons
    carry explicit borders and focus states, and both dark and light themes

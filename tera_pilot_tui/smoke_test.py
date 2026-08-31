@@ -425,7 +425,7 @@ def _t(r):
 
 def main() -> int:
     print("=" * 70)
-    print("tera_pilot TUI v2.3.9 — SMOKE TESTS")
+    print("tera_pilot TUI v2.4.0 — SMOKE TESTS")
     print("=" * 70)
 
     # Import the test module so all @test decorators have run.

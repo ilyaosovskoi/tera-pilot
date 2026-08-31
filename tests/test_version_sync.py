@@ -64,8 +64,9 @@ def test_all_version_strings_match_package_json():
 
 
 def test_no_stale_major_labels():
-    """v2.4.x / v2.4.0 / v2.4.1 were speculative labels for changes that
-    shipped as 2.3.4 — none may remain in the tree."""
+    """v2.5.x / v2.5.0 were speculative labels for changes that shipped
+    as 2.4.0 (agent profiles, fleets, /key) — none may remain in the
+    tree. v2.4.0 itself is now the real in-progress major."""
     for rel in (
         "tera_pilot",
         "tera_pilot_tui",
@@ -75,7 +76,7 @@ def test_no_stale_major_labels():
             if p.name == "test_version_sync.py":
                 continue  # this file's own docstring describes the labels
             text = p.read_text(encoding="utf-8", errors="replace")
-            assert "v2.4" not in text, f"{p}: stale v2.4 label"
+            assert "v2.5" not in text, f"{p}: stale v2.5 label"
     # The web assets too (a few labels referenced v2.4)
     for rel in ("index.html", "app.js", "style.css", "design-polish.css"):
-        assert "v2.4" not in (ROOT / "tera_pilot" / "web" / rel).read_text(encoding="utf-8")
+        assert "v2.5" not in (ROOT / "tera_pilot" / "web" / rel).read_text(encoding="utf-8")

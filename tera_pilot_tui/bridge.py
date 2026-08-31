@@ -2439,6 +2439,171 @@ class TeraPilotBridge:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    # ── v2.4.0 — Agent Profiles ────────────────────────────────────
+
+    def list_agent_profiles(self) -> Dict[str, Any]:
+        """List all agent profiles + the active one."""
+        try:
+            from tera_pilot.agent_profiles import (
+                get_agent_profile_manager,
+                get_active_profile,
+                get_active_profile_id,
+            )
+            profiles = get_agent_profile_manager().list_profiles()
+            active = get_active_profile_id()
+            return {"ok": True, "profiles": profiles, "active": active}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def apply_agent_profile(self, profile_id: str) -> Dict[str, Any]:
+        """Activate an agent profile: persists the active id and applies
+        security mapping (autonomy + Guardian) to the live agent."""
+        try:
+            from tera_pilot.agent_profiles import (
+                get_agent_profile_manager,
+                set_active_profile_id,
+                apply_profile_to_runtime,
+            )
+            profile = get_agent_profile_manager().get_profile(profile_id)
+            if profile is None:
+                return {"ok": False, "error": f"no such profile: {profile_id}"}
+            r = set_active_profile_id(profile_id)
+            if not r.get("ok"):
+                return r
+            agent = self.ensure_agent()
+            apply_profile_to_runtime(agent, profile)
+            return {"ok": True, "profile": profile_id, "security": profile.get("security")}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def clear_agent_profile(self) -> Dict[str, Any]:
+        """Deactivate the profile and restore stock security defaults."""
+        try:
+            from tera_pilot.agent_profiles import set_active_profile_id
+            r = set_active_profile_id("")
+            if not r.get("ok"):
+                return r
+            agent = self.ensure_agent()
+            agent.set_autonomy("always_ask")
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def create_agent_profile(
+        self,
+        profile_id: str,
+        name: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        security: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create/update a user agent profile."""
+        try:
+            from tera_pilot.agent_profiles import get_agent_profile_manager
+            return get_agent_profile_manager().upsert_profile(
+                profile_id,
+                name=name,
+                system_prompt=system_prompt,
+                security=security,
+            )
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def edit_agent_profile(
+        self,
+        profile_id: str,
+        *,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        security: Optional[str] = None,
+        section: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Update fields of an existing agent profile (only non-None
+        fields change; the rest are preserved). Returns {ok, profile}."""
+        try:
+            from tera_pilot.agent_profiles import get_agent_profile_manager
+            r = get_agent_profile_manager().upsert_profile(
+                profile_id,
+                name=name,
+                description=description,
+                system_prompt=system_prompt,
+                security=security,
+                section=section,
+            )
+            if r.get("ok"):
+                # Re-apply to the live agent if this profile is active.
+                from tera_pilot.agent_profiles import (
+                    get_active_profile_id,
+                    apply_profile_to_runtime,
+                )
+                if get_active_profile_id() == profile_id:
+                    agent = self.ensure_agent()
+                    apply_profile_to_runtime(agent, r["profile"])
+            return r
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def delete_agent_profile(self, profile_id: str) -> Dict[str, Any]:
+        """Delete a user agent profile. Built-ins cannot be deleted."""
+        try:
+            from tera_pilot.agent_profiles import (
+                get_agent_profile_manager,
+                set_active_profile_id,
+                get_active_profile_id,
+            )
+            if get_active_profile_id() == profile_id:
+                set_active_profile_id("")
+            return get_agent_profile_manager().delete_profile(profile_id)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # ── v2.4.0 — API key management (/key) ─────────────────────────
+
+    def set_api_key(self, provider_id: str, api_key: str) -> Dict[str, Any]:
+        """Save an API key for a provider (masked in output).
+
+        Persists to ~/.tera_pilot/config.json and reconfigures the live
+        registry so the next run uses it. Returns {ok, provider, masked}.
+        """
+        api_key = (api_key or "").strip()
+        if not api_key:
+            return {"ok": False, "error": "empty API key"}
+        try:
+            from tera_pilot.agent_profiles import _validate_id as _v
+            # Reuse provider-id validation (lowercase, no spaces).
+            if not _v(provider_id):
+                return {"ok": False, "error": f"invalid provider id: {provider_id!r}"}
+            known = {str(p.get("id")) for p in self.list_providers() if p.get("id")}
+            if known and provider_id not in known:
+                return {"ok": False, "error": (
+                    f"unknown provider {provider_id!r}. Known: {', '.join(sorted(known))}"
+                )}
+            r = self.configure_provider(provider_id, api_key=api_key)
+            if not r.get("ok"):
+                return r
+            masked = (api_key[:4] + "…" + api_key[-4:]) if len(api_key) > 8 else "••••"
+            return {"ok": True, "provider": provider_id, "masked": masked}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def get_api_key_status(self) -> Dict[str, Any]:
+        """Return per-provider key presence (masked, never the raw key)."""
+        try:
+            from tera_pilot.utils import load_config
+            cfg = load_config() or {}
+            providers = cfg.get("providers") or {}
+            out = []
+            for pid, pcfg in providers.items():
+                key = pcfg.get("api_key") or ""
+                if key:
+                    masked = (key[:4] + "…" + key[-4:]) if len(key) > 8 else "••••"
+                    out.append({"provider": pid, "set": True, "masked": masked})
+                else:
+                    out.append({"provider": pid, "set": False, "masked": ""})
+            return {"ok": True, "providers": out, "active": cfg.get("active_provider")}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     # ── G19b — Persona memory ───────────────────────────────────────
 
     def get_persona(self) -> Dict[str, Any]:
