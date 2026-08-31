@@ -38,53 +38,78 @@ SECTIONS = [
     {"id": "office", "label": "Office Worker", "desc": "Create and edit .docx/.xlsx/.pptx files"},
 ]
 
+# Ordered command groups. The palette and /help render commands under
+# these headers; keep the order — “Security & Control” first so the
+# safety controls are the first thing a new user sees.
+COMMAND_GROUPS: List[Dict[str, str]] = [
+    {"id": "security", "label": "Security & Control"},
+    {"id": "agent", "label": "Agent & Persona"},
+    {"id": "provider", "label": "Provider & Model"},
+    {"id": "session", "label": "Session & Workspace"},
+    {"id": "info", "label": "Info & Stats"},
+    {"id": "actions", "label": "Actions & UI"},
+    {"id": "custom", "label": "Custom Commands"},
+]
+
+COMMAND_GROUP_LABELS: Dict[str, str] = {
+    g["id"]: g["label"] for g in COMMAND_GROUPS
+}
+
+# Full builtin catalog (v2.4.0: every / command the TUI handles, grouped;
+# previously ~15 commands were missing from the palette and /help).
 BUILTIN_COMMANDS: List[CommandEntry] = [
-    CommandEntry("section", "/section", "Switch runtime section (General / Heavy Code / Office)", "navigation", True),
-    CommandEntry("model", "/model", "Switch provider / set model (e.g. /model ox-alpha)", "navigation", True),
-    CommandEntry("settings", "/settings", "Quick settings (provider, model, API key, theme)", "navigation", False),
-    CommandEntry("chat", "/chat", "List and switch to saved chats", "navigation", True),
-    CommandEntry("cd", "/cd", "Change workspace directory", "navigation", True),
+    # ── Security & Control ────────────────────────────────────────
+    CommandEntry("section", "/section", "Switch runtime section (General / Heavy Code / Office)", "security", True),
+    CommandEntry("guardian", "/guardian", "Set Guardian safety level (off/dangerous_only/all)", "security", True),
+    CommandEntry("mode", "/mode", "Show / switch section ({office} inline or /mode)", "security", False),
+    CommandEntry("planning", "/planning", "Toggle planning mode on/off", "security", False),
+    CommandEntry("audit", "/audit", "Export audit trail JSON / CSV / verify", "security", False),
+    CommandEntry("audit-signed", "/audit-signed", "Verify a signed/chained audit export", "security", False),
+    # ── Agent & Persona ───────────────────────────────────────────
+    CommandEntry("agent", "/agent", "Pick today's agent profile (code/video/reviewer/fable5)", "agent", False),
+    CommandEntry("collab", "/collab", "Run a collaboration-mode task (Reviewer/Codegen/Pair/Observer)", "agent", True),
+    CommandEntry("handoff", "/handoff", "Create / edit / list handoff docs", "agent", True),
+    CommandEntry("persona", "/persona", "Show / edit / update persona memory", "agent", False),
+    CommandEntry("canvas", "/canvas", "Show / reset the task canvas", "agent", False),
+    # ── Provider & Model ──────────────────────────────────────────
+    CommandEntry("model", "/model", "Switch provider / set model (e.g. /model ox-alpha)", "provider", True),
+    CommandEntry("provider", "/provider", "Switch provider (alias of /model)", "provider", True),
+    CommandEntry("settings", "/settings", "Quick settings (provider, model, API key)", "provider", False),
+    CommandEntry("key", "/key", "Save an API key for a provider", "provider", False),
+    CommandEntry("cost", "/cost", "Cost-aware provider routing", "provider", False),
+    CommandEntry("budget", "/budget", "Token budget & efficiency policy", "provider", False),
+    CommandEntry("spend", "/spend", "Team spend dashboard", "provider", False),
+    CommandEntry("second_opinion", "/second_opinion", "Cross-model Second Opinion (Pro)", "provider", False),
+    CommandEntry("verify", "/verify", "Cross-model verification of the last response", "provider", False),
+    CommandEntry("websearch", "/websearch", "Web search backend status", "provider", False),
+    CommandEntry("router-mode", "/router-mode", "AutoRouter mode (single / decompose)", "provider", False),
+    CommandEntry("consensus", "/consensus", "Run a prompt on 2–3 providers in parallel", "provider", False),
+    CommandEntry("mcp-server", "/mcp-server", "Manage MCP server connections", "provider", False),
+    # ── Session & Workspace ───────────────────────────────────────
+    CommandEntry("chat", "/chat", "List and switch to saved chats", "session", True),
+    CommandEntry("cd", "/cd", "Change workspace directory", "session", True),
+    CommandEntry("files", "/files", "List files in the current workspace", "session", False),
+    CommandEntry("clear", "/clear", "Clear the chat log", "session", False),
+    CommandEntry("storage", "/storage", "Choose chat storage backend (JSON/SQLite)", "session", True),
+    CommandEntry("sessions", "/sessions", "List SQLite-stored chat sessions", "session", False),
+    CommandEntry("context", "/context", "View context fragments & compaction stats", "session", False),
+    CommandEntry("checkpoint", "/checkpoint", "Create / manage checkpoints", "session", False),
+    CommandEntry("rewind", "/rewind", "Rewind the workspace to a checkpoint", "session", False),
+    CommandEntry("github", "/github", "GitHub automation (auth, PRs, issues)", "session", False),
+    CommandEntry("daemon", "/daemon", "Remote daemon task management", "session", False),
+    CommandEntry("notify", "/notify", "Notification backends (Telegram/Discord/Slack)", "session", False),
+    CommandEntry("hooks", "/hooks", "Manage the hook system", "session", False),
+    # ── Info & Stats ──────────────────────────────────────────────
     CommandEntry("usage", "/usage", "Show token usage and cost for this session", "info", False),
-    CommandEntry("files", "/files", "List files in the current workspace", "info", False),
-    CommandEntry("clear", "/clear", "Clear the chat log", "action", False),
-    CommandEntry("help", "/help", "Show available slash commands", "info", False),
-    CommandEntry("planning", "/planning", "Toggle planning mode on/off", "toggle", False),
-    CommandEntry("gui", "/gui", "Launch the Tera Pilot GUI window (Ctrl+G)", "action", False),
-    # v2.0.0 — Guardian level control
-    CommandEntry("guardian", "/guardian", "Set Guardian safety level (off/dangerous_only/all)", "toggle", True),
-    # v2.0.0 — Collaboration modes
-    CommandEntry("collab", "/collab", "Run a collaboration-mode task (Reviewer/Codegen/Pair/Observer)", "action", True),
-    # v2.0.0 — Request queue monitoring
-    CommandEntry("queue", "/queue", "Show request queue stats (cooldown, retries, in-flight)", "info", False),
-    # v2.0.0 — Persistence backend selector
-    CommandEntry("storage", "/storage", "Choose chat storage backend (JSON/SQLite)", "toggle", True),
-    # v2.0.0 — SQLite sessions browser
-    CommandEntry("sessions", "/sessions", "List SQLite-stored chat sessions", "info", False),
-    # v2.0.0 — Context fragments / compaction view
-    CommandEntry("context", "/context", "View context fragments & compaction stats", "info", False),
-    # v2.0.0 — Progressive tools catalog
+    CommandEntry("queue", "/queue", "Request queue stats (cooldown, retries)", "info", False),
     CommandEntry("tools", "/tools", "Browse loaded & available progressive tools", "info", False),
-    # v2.0.1 (G7) — Capability catalog
-    CommandEntry("capabilities", "/capabilities", "Browse & run pre-built capability templates", "action", True),
-    # v2.0.1 (M1) — Second Opinion
-    CommandEntry("second_opinion", "/second_opinion", "Configure cross-model Second Opinion (Pro)", "toggle", False),
-    # v2.0.1 (G3) — Token budget
-    CommandEntry("budget", "/budget", "Configure token budget & efficiency policy", "toggle", False),
-    # v2.0.1 (G4) — Cross-model verification
-    CommandEntry("verify", "/verify", "Cross-model verification of the last response", "action", False),
-    # v2.0.2 (G5) — Agent identity + tool-call audit
-    CommandEntry("agents", "/agents", "List agents + their audit stats (G5)", "info", False),
-    CommandEntry("audit", "/audit", "Export audit trail JSON / CSV (G5)", "info", False),
-    # v2.0.2 (G6) — Post-task handoff
-    CommandEntry("handoff", "/handoff", "Create / edit / list handoff docs (G6)", "action", True),
-    # v2.0.2 (M2) — Cost-aware provider routing
-    CommandEntry("cost", "/cost", "Cost-aware provider routing (M2)", "toggle", False),
-    # v2.0.2 (M3) — Team spend dashboard
-    CommandEntry("spend", "/spend", "Team spend dashboard (M3)", "info", False),
-    # v2.4.0 — Agent profiles
-    CommandEntry("agent", "/agent", "Pick today's agent profile (code/video/reviewer/fable5/custom)", "navigation", False),
-    # v2.4.0 — API key management
-    CommandEntry("key", "/key", "Save an API key for a provider", "settings", False),
+    CommandEntry("capabilities", "/capabilities", "Browse & run pre-built capability templates", "info", True),
+    CommandEntry("learnings", "/learnings", "List / scan / dismiss auto-learning entries", "info", False),
+    CommandEntry("agents", "/agents", "List agents + their audit stats", "info", False),
+    # ── Actions & UI ──────────────────────────────────────────────
+    CommandEntry("gui", "/gui", "Launch the Tera Pilot GUI window (Ctrl+G)", "actions", False),
+    CommandEntry("theme", "/theme", "Switch theme (dark / light)", "actions", False),
+    CommandEntry("help", "/help", "Show available slash commands", "actions", False),
 ]
 
 # v2.4.0 — agent security levels (shared labels used by /agent)
@@ -225,19 +250,11 @@ class CommandPalette(ModalScreen):
                 categories[cat] = []
             categories[cat].append(cmd)
 
-        cat_labels = {
-            "navigation": "Navigation & Selection",
-            "info": "Information",
-            "action": "Actions",
-            "toggle": "Toggles",
-            "custom": "Custom Commands",
-        }
-
         first_real_index = 0
         for cat, cmds in categories.items():
-            label = cat_labels.get(cat, cat.title())
+            label = COMMAND_GROUP_LABELS.get(cat, cat.title())
             self._option_ids.append("")  # category header - no id
-            list_widget.add_option(f"-- {label} --")
+            list_widget.add_option(f"-- {label} ({len(cmds)}) --")
             for cmd in cmds:
                 if first_real_index == 0:
                     first_real_index = list_widget.option_count
@@ -295,19 +312,11 @@ class CommandPalette(ModalScreen):
                 categories[cat] = []
             categories[cat].append(cmd)
 
-        cat_labels = {
-            "navigation": "Navigation & Selection",
-            "info": "Information",
-            "action": "Actions",
-            "toggle": "Toggles",
-            "custom": "Custom Commands",
-        }
-
         first_real_index = 0
         for cat, cmds in categories.items():
-            label = cat_labels.get(cat, cat.title())
+            label = COMMAND_GROUP_LABELS.get(cat, cat.title())
             self._option_ids.append("")  # header
-            list_widget.add_option(f"-- {label} --")
+            list_widget.add_option(f"-- {label} ({len(cmds)}) --")
             for cmd in cmds:
                 if first_real_index == 0:
                     first_real_index = list_widget.option_count

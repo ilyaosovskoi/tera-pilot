@@ -496,6 +496,9 @@ class TeraPilotTUIApp(App):
             # handoff browser. If there are no handoffs, _exec_handoff
             # already prints a helpful message.
             self._exec_handoff("list")
+        elif cmd_id == "provider":
+            # v2.4.0: /provider is an alias of /model — open the model picker.
+            self._open_model_palette()
         elif cmd_id == "agent":
             # v2.4.0: /agent from the Ctrl+P palette opens the profile picker.
             self._exec_agent("")
@@ -625,6 +628,10 @@ class TeraPilotTUIApp(App):
     # ── Command execution ─────────────────────────────────────────
 
     def _execute_builtin_cmd(self, cmd_id: str) -> None:
+        """Run a command picked from the Ctrl+P palette. Commands with a
+        sub-selection palette (section/model/chat/…) open it; every other
+        command runs its no-arg form (most show status or usage) so a
+        palette pick always does something useful."""
         dispatch = {
             "usage": self._exec_usage,
             "files": self._exec_files,
@@ -632,6 +639,37 @@ class TeraPilotTUIApp(App):
             "help": self._exec_help,
             "planning": self._exec_planning,
             "gui": lambda: self.action_launch_gui(),
+            # v2.4.0: everything else runs its no-arg form from the palette.
+            "settings": self._open_quick_settings,
+            "mode": lambda: self._exec_mode(""),
+            "theme": lambda: self._exec_theme(""),
+            "persona": lambda: self._exec_persona(""),
+            "router-mode": lambda: self._exec_router_mode(""),
+            "canvas": lambda: self._exec_canvas(""),
+            "websearch": lambda: self._exec_websearch(""),
+            "learnings": lambda: self._exec_learnings(""),
+            "agents": lambda: self._exec_agents(""),
+            "audit": lambda: self._exec_audit(""),
+            "audit-signed": lambda: self._exec_audit_signed(""),
+            "queue": self._exec_queue,
+            "context": self._exec_context,
+            "tools": self._exec_tools,
+            "sessions": self._exec_sessions,
+            "hooks": lambda: self._exec_hooks(""),
+            "checkpoint": lambda: self._exec_checkpoint(""),
+            "rewind": lambda: self._exec_rewind(""),
+            "github": lambda: self._exec_github(""),
+            "mcp-server": lambda: self._exec_mcp_server(""),
+            "notify": lambda: self._exec_notify(""),
+            "daemon": lambda: self._exec_daemon(""),
+            "consensus": lambda: self._exec_consensus(""),
+            "cost": lambda: self._exec_cost(""),
+            "spend": lambda: self._exec_spend(""),
+            "budget": lambda: self._exec_budget(""),
+            "second_opinion": lambda: self._exec_second_opinion(""),
+            "verify": lambda: self._exec_verify(""),
+            "agent": lambda: self._exec_agent(""),
+            "key": lambda: self._exec_key(""),
         }
         handler = dispatch.get(cmd_id)
         if handler:
@@ -851,56 +889,76 @@ class TeraPilotTUIApp(App):
         chat.add_system("Chat log cleared.")
         self.query_one(InputBox).focus()
 
-    def _exec_help(self) -> None:
+    def _exec_help(self, arg: str = "") -> None:
+        """Show slash commands grouped by category (v2.4.0).
+
+        Usage:
+            /help            — all groups
+            /help <group>    — one group (security | agent | provider |
+                               session | info | actions)
+        """
+        from tera_pilot_tui.widgets.command_palette import (
+            BUILTIN_COMMANDS,
+            COMMAND_GROUPS,
+            COMMAND_GROUP_LABELS,
+        )
         chat = self.query_one(ChatLog)
-        lines = [
-            "[b]Slash Commands[/b]",
-            "",
-            "  [cyan]/section[/cyan]   Switch section (General / Heavy Code / Office)",
-            "  [cyan]/model[/cyan]     Switch provider or set model (e.g. /model ox-alpha)",
-            "  [cyan]/provider[/cyan]  Switch provider (alias for /model)",
-            "  [cyan]/chat[/cyan]      List and browse saved chats",
-            "  [cyan]/cd[/cyan]        Change workspace directory",
-            "  [cyan]/usage[/cyan]     Show session token usage & cost",
-            "  [cyan]/files[/cyan]     List files in workspace",
-            "  [cyan]/clear[/cyan]     Clear the chat log",
-            "  [cyan]/planning[/cyan]  Toggle planning mode",
-            "  [cyan]/guardian[/cyan]  Set Guardian safety level (off/dangerous_only/all)",
-            "  [cyan]/collab[/cyan]    Run a collaboration mode (reviewer/codegen/pair/observer)",
-            "  [cyan]/queue[/cyan]     Show request queue stats (cooldown, retries)",
-            "  [cyan]/storage[/cyan]   Choose chat storage backend (JSON/SQLite)",
-            "  [cyan]/sessions[/cyan]  List SQLite-stored chat sessions",
-            "  [cyan]/context[/cyan]   View context fragments & compaction stats",
-            "  [cyan]/tools[/cyan]     Browse loaded & available progressive tools",
-            "  [cyan]/capabilities[/cyan]  Browse & run pre-built capability templates",
-            "  [cyan]/second_opinion[/cyan] Toggle cross-model review before risky actions (Pro)",
-            "  [cyan]/verify[/cyan]    Cross-model verification of the last response",
-            "  [cyan]/budget[/cyan]    Configure token budget & efficiency policy",
-            "  [cyan]/agents[/cyan]    List agents + their audit stats (G5)",
-            "  [cyan]/audit[/cyan]     Export audit trail JSON / CSV (G5)",
-            "  [cyan]/handoff[/cyan]   Create / edit / list handoff docs (G6)",
-            "  [cyan]/cost[/cyan]      Cost-aware provider routing (M2)",
-            "  [cyan]/spend[/cyan]     Team spend dashboard (M3)",
-            "  [cyan]/consensus[/cyan] Run a prompt on 2–3 providers in parallel (G15)",
-            "  [cyan]/audit-signed[/cyan] Verify a signed/chained audit export (G16)",
-            "  [cyan]/learnings[/cyan] List / scan / dismiss auto-learning entries (G17)",
-            "  [cyan]/websearch[/cyan] Web search backend status (G18)",
-            "  [cyan]/agent[/cyan]     Pick today's agent profile (code/video/reviewer/fable5/custom)",
-            "  [cyan]/key[/cyan]       Save an API key for a provider (/key <provider> <key>)",
-            "  [cyan]/gui[/cyan]       Launch the Tera Pilot GUI window",
-            "  [cyan]/help[/cyan]      Show this help",
-            "",
-            "Type / to see inline suggestions, Ctrl+P for full command palette.",
-            "Ctrl+C=interrupt | Ctrl+D=quit | Ctrl+G=GUI | Ctrl+P=commands | Ctrl+T=theme",
-            "",
-            "[dim]Custom .md commands from .claude/commands/ also appear.[/dim]",
-        ]
-        custom = self.bridge.list_slash_commands()
-        if custom:
+        arg = (arg or "").strip().lower()
+
+        # Resolve the optional group filter: match the group id or a
+        # keyword in the group label (e.g. "/help providers").
+        group_filter: Optional[str] = None
+        if arg:
+            for g in COMMAND_GROUPS:
+                if arg == g["id"] or arg in g["label"].lower():
+                    group_filter = g["id"]
+                    break
+            if group_filter is None:
+                chat.add_error(
+                    f"Unknown help group: {arg}. Groups: "
+                    + ", ".join(g["id"] for g in COMMAND_GROUPS if g["id"] != "custom")
+                )
+                self.query_one(InputBox).focus()
+                return
+
+        by_group: Dict[str, List[Any]] = {}
+        for c in BUILTIN_COMMANDS:
+            by_group.setdefault(c.category, []).append(c)
+
+        lines = ["[b]Slash Commands[/b]  — grouped by category"]
+        if not group_filter:
+            lines.append(
+                "[dim]Filter: /help <group> — "
+                + " | ".join(g["id"] for g in COMMAND_GROUPS if g["id"] != "custom")
+                + "[/dim]"
+            )
+        lines.append("")
+
+        for g in COMMAND_GROUPS:
+            gid = g["id"]
+            if gid == "custom":
+                continue
+            cmds = by_group.get(gid, [])
+            if not cmds or (group_filter and gid != group_filter):
+                continue
+            lines.append(f"[b]{g['label']}[/b]")
+            for c in cmds:
+                lines.append(f"  [cyan]/{c.id:<14}[/cyan] {c.description}")
             lines.append("")
+
+        custom = self.bridge.list_slash_commands()
+        if custom and (not group_filter or group_filter == "custom"):
             lines.append("[b]Custom Commands[/b]")
             for c in custom:
-                lines.append(f"  [cyan]/{c['id']}[/cyan]  {c.get('description', c.get('name', ''))}")
+                lines.append(
+                    f"  [cyan]/{c['id']:<14}[/cyan] {c.get('description', c.get('name', ''))}"
+                )
+            lines.append("")
+
+        lines.append(
+            "Ctrl+C=interrupt | Ctrl+D=quit | Ctrl+G=GUI | Ctrl+P=commands | Ctrl+T=theme"
+        )
+        lines.append("Type / for inline suggestions, Ctrl+P for the full palette.")
         chat.add_system("\n".join(lines))
         self.query_one(InputBox).focus()
 

@@ -195,6 +195,30 @@ def _t(r):
     check(not missing, f"missing builtin commands: {missing}")
 
 
+@register_test("Every builtin command has a slash handler (v2.4.0)")
+def _t(r):
+    """The palette is built from BUILTIN_COMMANDS, but the app dispatches
+    by command id — a command listed in the palette but missing from
+    _handle_slash_input would be a dead entry. Scan app.py for the
+    dispatch and compare ids (guards the v2.4.0 command re-grouping)."""
+    import re
+    from tera_pilot_tui.widgets.command_palette import BUILTIN_COMMANDS, COMMAND_GROUPS
+
+    app_src = (PROJECT_ROOT / "tera_pilot_tui" / "app.py").read_text(encoding="utf-8")
+    handled = set(re.findall(r'(?:elif|if) cmd == "/([a-z0-9_-]+)"', app_src))
+    ids = {c.id for c in BUILTIN_COMMANDS}
+    missing = ids - handled
+    check(not missing, f"palette commands missing a slash handler: {missing}")
+
+    known = {g["id"] for g in COMMAND_GROUPS}
+    bad = {c.id: c.category for c in BUILTIN_COMMANDS if c.category not in known}
+    check(not bad, f"commands with unknown groups: {bad}")
+
+    # The palette click test relies on the first real row being /section.
+    check(ids and BUILTIN_COMMANDS[0].id == "section",
+          "first builtin command must be /section (palette layout depends on it)")
+
+
 @register_test("CommandPalette is a ModalScreen with expected bindings")
 def _t(r):
     from tera_pilot_tui.widgets.command_palette import CommandPalette
