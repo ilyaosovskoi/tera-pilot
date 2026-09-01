@@ -14,7 +14,8 @@ The v2.4.0 release is the “pick your agent for today” release:
    prompt (persona) and security level. `/agent` opens a picker, `/agent
    <id>` activates a profile (persisted across restarts), and you create or
    tune profiles with `/agent new`, `/agent edit` and `/agent delete`.
-   Built-in presets: `code` (default), `video` and `reviewer` (read-only).
+   Built-in presets: `code` (default), `video` (video production),
+   `reviewer` (read-only) and `apex` (top-tier general assistant persona).
    Security levels (`controlled` / `balanced` / `free`) map onto autonomy +
    Guardian and are applied to the live runtime, including the
    system-prompt fragment, which previously was stored but never injected.

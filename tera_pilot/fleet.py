@@ -1,7 +1,7 @@
 """fleet.py — run several Tera Pilot agent profiles at once (a "fleet").
 
 Each fleet agent is a headless AgentRuntime running its own profile (e.g.
-``code``, ``video``, ``reviewer``, or a custom one) against
+``code``, ``video``, ``reviewer``, ``apex``, or a custom one) against
 its own workspace. A single supervisor process spawns one worker thread
 per agent; every agent continuously writes a compact status file and an
 activity log, so ONE "main" terminal can watch a live summary of what
@@ -231,7 +231,7 @@ def list_fleets() -> List[Dict[str, Any]]:
 @dataclass
 class FleetAgentSpec:
     """One agent in a fleet."""
-    profile: str                # agent profile id (code/video/reviewer/custom)
+    profile: str                # agent profile id (code/video/reviewer/apex/custom)
     workspace: str              # absolute workspace path
     agent_id: str = ""          # defaults to the profile id
     section: str = "general"

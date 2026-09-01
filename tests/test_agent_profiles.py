@@ -46,8 +46,19 @@ class AgentProfilesTest(unittest.TestCase):
         self.assertIn("code", ids)
         self.assertIn("video", ids)
         self.assertIn("reviewer", ids)
+        self.assertIn("apex", ids)
         for p in profiles:
             self.assertTrue(p.get("builtin"))
+
+    def test_apex_preset_persona(self):
+        apex = next((p for p in PRESET_PROFILES if p["id"] == "apex"), None)
+        self.assertIsNotNone(apex)
+        sp = apex["system_prompt"]
+        self.assertIn("Apex", sp)
+        self.assertIn("top-tier", sp)
+        self.assertIn("malicious code", sp)
+        self.assertLess(len(sp), 8000)
+        self.assertEqual(apex["security"], "controlled")
 
     def test_apply_profile_sets_fragment_and_security(self):
         from tera_pilot.agent_profiles import apply_profile_to_runtime

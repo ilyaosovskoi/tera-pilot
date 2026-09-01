@@ -12,7 +12,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)]()
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue)](https://www.python.org/)
 [![Privacy](https://img.shields.io/badge/Privacy-Local--First-orange)]()
-[![Tests](https://img.shields.io/badge/tests-894%20%C2%B7%20874%20passing-blue)]()
+[![Tests](https://img.shields.io/badge/tests-895%20%C2%B7%20875%20passing-blue)]()
 [![Status](https://img.shields.io/badge/status-testing%20phase-yellow)]()
 
 </div>
@@ -21,7 +21,7 @@
 
 - [Why Tera Pilot?](#why-tera-pilot)
 - [Quick Start](#quick-start)
-- [Agent Profiles](#agent-profiles--pick-todays-agent) — pick today's agent (code / video / reviewer)
+- [Agent Profiles](#agent-profiles--pick-todays-agent) — pick today's agent (code / video / reviewer / apex)
 - [Fleet](#fleet--several-agents-at-once-one-main-terminal) — run several profiles at once, one watch terminal
 - [API keys](#api-keys-made-convenient) — `tera-pilot key` / `/key`
 - [Demo](#demo)
@@ -155,8 +155,9 @@ The TUI exposes provider selection, model overrides, workspace selection and aut
 
 Every agent has its own profile: a name, a system prompt (persona) and a
 security level. Built-in profiles are `code` (default), `video` (video
-production) and `reviewer` (read-only). You never edit a system prompt to
-switch roles — you just pick the agent for today:
+production), `reviewer` (read-only) and `apex` (a top-tier general
+assistant persona). You never edit a system prompt to switch roles — you
+just pick the agent for today:
 
 ```
 /agent                  # palette of all profiles → pick one
@@ -183,7 +184,7 @@ open a window per agent:
 ```bash
 # terminal 1 — the fleet (foreground; Ctrl+C stops it)
 tera-pilot fleet start --agent code:~/code --agent video:~/videos \
-                       --agent reviewer:~/docs
+                       --agent apex:~/docs
 
 # any terminal — queue work to a specific agent
 tera-pilot fleet task video "make a 30s teaser from clips/"
@@ -266,7 +267,7 @@ Measured on real repository tasks (methodology: `eval/README.md`):
 ## Security Posture & Verification
 
 Security is treated as a continuously tested property, not a one-time claim.
-The suite is **894 tests (874 passing, 20 environment-dependent skips)**, of
+The suite is **895 tests (875 passing, 20 environment-dependent skips)**, of
 which **311** are security/sandbox/command-policy/licensing tests, mapped to
 the public threat model (`THREAT_MODEL.md`, T1–T8). Five real vulnerabilities
 found by offensive testing were fixed and regression-tested (git `!`-aliases

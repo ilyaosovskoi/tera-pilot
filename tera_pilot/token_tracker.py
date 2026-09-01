@@ -24,11 +24,12 @@ logger = logging.getLogger(__name__)
 # OpenRouter's public models endpoint when the user asks for it.
 
 MODEL_PRICING: Dict[str, Dict[str, float]] = {
-    # Anthropic
-    "claude-sonnet-5":              {"in": 0.003, "out": 0.015},
+    # Anthropic (per official model overview: $10/$50, $5/$25, $2/$10, $1/$5 per 1M)
+    "claude-sonnet-5":              {"in": 0.002, "out": 0.010},
     "claude-opus-4-8":              {"in": 0.005, "out": 0.025},
     "claude-haiku-4-5-20251001":    {"in": 0.001, "out": 0.005},
-    "claude-opus-5":                {"in": 0.015, "out": 0.075},
+    "claude-fable-5":               {"in": 0.010, "out": 0.050},
+    "claude-opus-5":                {"in": 0.005, "out": 0.025},
     # OpenAI
     "gpt-5.5":                      {"in": 0.005, "out": 0.030},
     "gpt-5.4":                      {"in": 0.0025, "out": 0.015},
