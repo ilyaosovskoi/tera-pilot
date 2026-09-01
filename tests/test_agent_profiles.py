@@ -46,19 +46,8 @@ class AgentProfilesTest(unittest.TestCase):
         self.assertIn("code", ids)
         self.assertIn("video", ids)
         self.assertIn("reviewer", ids)
-        self.assertIn("fable5", ids)
         for p in profiles:
             self.assertTrue(p.get("builtin"))
-
-    def test_fable5_preset_persona(self):
-        fable5 = next((p for p in PRESET_PROFILES if p["id"] == "fable5"), None)
-        self.assertIsNotNone(fable5)
-        sp = fable5["system_prompt"]
-        self.assertIn("Claude Fable 5", sp)
-        self.assertIn("most intelligent", sp)
-        self.assertIn("malicious code", sp)
-        self.assertLess(len(sp), 8000)
-        self.assertEqual(fable5["security"], "controlled")
 
     def test_apply_profile_sets_fragment_and_security(self):
         from tera_pilot.agent_profiles import apply_profile_to_runtime

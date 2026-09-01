@@ -6,7 +6,7 @@ summary); this file keeps the per-version history. Every release keeps the
 version in sync everywhere: npm, pip, the Web UI, the TUI, the auto-updater
 and the tests.
 
-## [2.4.0] — Agent profiles, fleets, Fable 5 persona & convenient keys
+## [2.4.0] — Agent profiles, fleets & convenient keys
 
 The v2.4.0 release is the “pick your agent for today” release:
 
@@ -14,12 +14,10 @@ The v2.4.0 release is the “pick your agent for today” release:
    prompt (persona) and security level. `/agent` opens a picker, `/agent
    <id>` activates a profile (persisted across restarts), and you create or
    tune profiles with `/agent new`, `/agent edit` and `/agent delete`.
-   Built-in presets: `code` (default), `video`, `reviewer` (read-only) and
-   `fable5` — the Claude Fable 5 persona, Anthropic's most capable model,
-   distilled from the full system prompt in `claude-fable-5.md`. Security
-   levels (`controlled` / `balanced` / `free`) map onto autonomy + Guardian
-   and are applied to the live runtime, including the system-prompt
-   fragment, which previously was stored but never injected.
+   Built-in presets: `code` (default), `video` and `reviewer` (read-only).
+   Security levels (`controlled` / `balanced` / `free`) map onto autonomy +
+   Guardian and are applied to the live runtime, including the
+   system-prompt fragment, which previously was stored but never injected.
 2. **Fleet mode** — `tera-pilot fleet start --agent code:~/code --agent
    video:~/videos` runs several profiles at once as headless workers, each
    in its own workspace; `tera-pilot fleet task <agent> "<prompt>"` queues
@@ -52,6 +50,12 @@ The v2.4.0 release is the “pick your agent for today” release:
    icons, the proposed action sits in its own bordered mono block, buttons
    carry explicit borders and focus states, and both dark and light themes
    were updated in lockstep.
+7. **TUI slash commands, grouped** — the command palette and `/help` now
+   organize every slash command into six categories (Security & Control,
+   Agent & Persona, Provider & Model, Session & Workspace, Info & Stats,
+   Actions & UI) with group headers and counts, `/help <group>` filters a
+   category, and picking a palette command runs its no-arg form instead of
+   erroring with "needs a parameter".
 
 ## [2.3.9] — Repository hygiene & docs
 

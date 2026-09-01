@@ -28,7 +28,6 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     "claude-sonnet-5":              {"in": 0.003, "out": 0.015},
     "claude-opus-4-8":              {"in": 0.005, "out": 0.025},
     "claude-haiku-4-5-20251001":    {"in": 0.001, "out": 0.005},
-    "claude-fable-5":               {"in": 0.003, "out": 0.015},
     "claude-opus-5":                {"in": 0.015, "out": 0.075},
     # OpenAI
     "gpt-5.5":                      {"in": 0.005, "out": 0.030},

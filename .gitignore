@@ -27,6 +27,8 @@ eval/results/agentic/
 # (These were left out of past pushes on purpose; keep them out.)
 AGENT_EVAL_AND_SECURITY_REPORT_*.md
 GROQ_EVAL_REPORT.md
+SESSION_REPORT_*.txt
+V240_VERIFICATION_REPORT.txt
 P0_IMPLEMENTATION.md
 SECURITY_TEST_REPORT.md
 TERA_PILOT_PRODUCT_READINESS.md

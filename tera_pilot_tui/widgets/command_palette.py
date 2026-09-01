@@ -66,7 +66,7 @@ BUILTIN_COMMANDS: List[CommandEntry] = [
     CommandEntry("audit", "/audit", "Export audit trail JSON / CSV / verify", "security", False),
     CommandEntry("audit-signed", "/audit-signed", "Verify a signed/chained audit export", "security", False),
     # ── Agent & Persona ───────────────────────────────────────────
-    CommandEntry("agent", "/agent", "Pick today's agent profile (code/video/reviewer/fable5)", "agent", False),
+    CommandEntry("agent", "/agent", "Pick today's agent profile (code/video/reviewer)", "agent", False),
     CommandEntry("collab", "/collab", "Run a collaboration-mode task (Reviewer/Codegen/Pair/Observer)", "agent", True),
     CommandEntry("handoff", "/handoff", "Create / edit / list handoff docs", "agent", True),
     CommandEntry("persona", "/persona", "Show / edit / update persona memory", "agent", False),
