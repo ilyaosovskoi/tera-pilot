@@ -57,6 +57,15 @@ The v2.4.0 release is the “pick your agent for today” release:
    Actions & UI) with group headers and counts, `/help <group>` filters a
    category, and picking a palette command runs its no-arg form instead of
    erroring with "needs a parameter".
+8. **TUI header refresh & fleet polish** — the top header is now
+   theme-aware (brand, version, active provider/model and workspace render
+   as chips that switch palettes with the theme instead of hard-coded dark
+   colors), the status line animates a braille spinner while a turn runs,
+   the composer border breathes with a working/pulse state, and the
+   welcome screen was refreshed with the key shortcuts. `fleet start`
+   accepts `--provider` / `--model` / `--api-base` overrides applied to
+   every worker (the stored API key is preserved), and `fleet watch` marks
+   stale/dead workers and exits on its own once every agent has finished.
 
 ## [2.3.9] — Repository hygiene & docs
 
