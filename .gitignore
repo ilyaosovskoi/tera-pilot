@@ -14,6 +14,10 @@ venv/
 learnings/
 tera_pilot_tui/learnings/
 
+# Agent-authored demo/test material (fixture projects, recording prompts and
+# prepared workspaces incl. throwaway nested git repos) — not shipped.
+demos/
+
 # Raw eval run logs are development artifacts, not versioned.
 # The human-readable summary is eval/REPORT_*.md; the schema stays tracked.
 eval/results/*.json
@@ -22,6 +26,9 @@ eval/results/*.json
 # development artifacts too — keep the whole agentic results dir out.
 eval/results/agentic/
 !eval/results/agentic/.gitkeep
+
+# Stray LLM system-prompt dump (dropped "Fable 5" persona content) — not product.
+claude-fable-5.md
 
 # Working documents and local-only material — deliberately NOT pushed.
 # (These were left out of past pushes on purpose; keep them out.)

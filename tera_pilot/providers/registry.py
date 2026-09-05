@@ -164,7 +164,10 @@ class ProviderRegistry:
 # ── Module-level singleton ─────────────────────────────────────────
 
 _registry: Optional[ProviderRegistry] = None
-_registry_lock = threading.Lock()
+# v2.4.1-fix: RLock, not Lock — reload_registry() holds this lock and calls
+# get_registry(), which re-acquires it (double-checked locking). With a plain
+# Lock that deadlocked forever; found by the fleet provider-override tests.
+_registry_lock = threading.RLock()
 
 
 def get_registry() -> ProviderRegistry:

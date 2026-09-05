@@ -186,11 +186,18 @@ open a window per agent:
 tera-pilot fleet start --agent code:~/code --agent video:~/videos \
                        --agent apex:~/docs
 
+# point the whole fleet at a specific provider/model (e.g. a local server)
+tera-pilot fleet start --agent code:~/code \
+                       --provider lmstudio --model qwen3-coder-30b \
+                       --api-base http://localhost:1234/v1
+
 # any terminal — queue work to a specific agent
 tera-pilot fleet task video "make a 30s teaser from clips/"
 
-# the "main" terminal — live summary of every agent
+# the "main" terminal — live summary of every agent; exits on its own
+# once every agent has finished or died (default grace: 15 s)
 tera-pilot fleet watch
+tera-pilot fleet watch --stale-after 30    # tune the grace period
 
 # stop all workers after their current task
 tera-pilot fleet stop
@@ -199,7 +206,12 @@ tera-pilot fleet stop
 Each fleet agent is a headless Tera Pilot with its profile's persona and
 security level. `controlled` agents fail closed on side-effecting tools
 (effectively read-only until run interactively); `free` agents run
-un-gated.
+un-gated. `fleet start --provider/--model/--api-base` overrides the
+provider config for every worker in the fleet (handy for pointing all
+agents at one local model); the stored API key is preserved. `fleet
+watch` treats a worker as stale when it stops heartbeating — dead or
+finished workers no longer leave the watch screen hanging forever — and
+shows them as `stale` in the live table.
 
 ### API keys, made convenient
 
@@ -346,13 +358,22 @@ These mechanisms provide control and evidence; they are not a claim of formal SO
 
 | Interface | Best for |
 |---|---|
-| Textual TUI (`tera-pilot-tui`) | Primary interactive app: full-screen chat, activity, approvals, task canvas and provider controls |
+| Textual TUI (`tera-pilot-tui`) | Primary interactive app: full-screen chat, activity, approvals, task canvas, provider controls — theme-aware header with live status animation |
 | `tera-pilot` | Web UI: browser chat, project browsing, provider settings and activity |
 | `tera-pilot-daemon` | Backend service for REST/SSE task execution, queues and notifications; add `--inbound telegram` for remote task mode (accept tasks via Telegram) |
 | `tera-pilot-acp` | Backend integration for MCP/ACP-compatible editors and agents |
 | `tera-pilot doctor` | Environment doctor: one-command onboarding and readiness check |
 | `tera-pilot audit` | Export and verify the signed audit trail (Ed25519 + hash chain) |
 | `eval/runner.py` | Reproducible evaluation harness: clean-copy repo tasks → schema-valid results |
+
+**TUI look & feel:** the v2.4 refresh gives the TUI a modern, theme-aware
+header — brand, version, active provider/model and workspace as chips
+with an animated status — plus a braille spinner and a pulsing composer
+border while the agent is thinking, and a refreshed welcome screen with
+the key shortcuts. `Ctrl+T` (or `/theme dark|light`) switches palettes;
+the dark and light themes share one visual language (surfaces, focus
+glow, status colors, entrance animations), so nothing looks bolted-on
+after a switch.
 
 **Remote task mode — set a task, walk away:** start the daemon with
 `tera-pilot-daemon serve --inbound telegram`, configure
@@ -406,9 +427,9 @@ tera_pilot_tui/
 ├── app.py               Textual application
 ├── bridge.py            TUI bridge to the runtime
 ├── backend_runner.py    TUI-backed automation adapter
-├── styles_dark.tcss     Minimal dark theme (Noir)
-├── styles_light.tcss    Minimal light theme
-└── widgets/             Chat, tool, approval and activity widgets
+├── styles_dark.tcss     Dark theme: near-black surfaces, one warm accent, focus glow + pulse states
+├── styles_light.tcss    Light theme: clean white surfaces — same visual language as dark
+└── widgets/             Chat, tool, approval, activity, header and composer widgets
 ```
 
 A deeper codebase map, the agent-loop walkthrough and recipes for adding a

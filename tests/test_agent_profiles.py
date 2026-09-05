@@ -156,6 +156,65 @@ class AgentProfilesTest(unittest.TestCase):
         profiles = mgr.list_profiles()
         self.assertNotIn("broken", [p["id"] for p in profiles])
 
+    def test_list_profiles_no_warning_for_missing_builtin_files(self):
+        """V240 §4.5: builtin profiles (code/video/reviewer/apex) have no
+        per-user file on disk — list_profiles() used to log a "failed to
+        read" warning for each of them on every call. Missing files are the
+        normal case and must be silent."""
+        import logging
+        from tera_pilot import agent_profiles as ap
+
+        records: list = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+
+        handler = _Capture()
+        logger = logging.getLogger("tera_pilot.agent_profiles")
+        old_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            mgr = AgentProfileManager()
+            profiles = mgr.list_profiles()
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+
+        self.assertEqual(len(profiles), len(PRESET_PROFILES))
+        self.assertEqual(
+            [r for r in records if "failed to read" in r],
+            [],
+            f"missing builtin profile files must not warn: {records}",
+        )
+
+    def test_upsert_new_profile_no_warning(self):
+        """Creating a brand-new profile reads a non-existent file first —
+        that must be silent too (same V240 §4.5 fix)."""
+        import logging
+
+        records: list = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+
+        handler = _Capture()
+        logger = logging.getLogger("tera_pilot.agent_profiles")
+        old_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            mgr = AgentProfileManager()
+            r = mgr.upsert_profile("fresh-new", name="fresh")
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+
+        self.assertTrue(r["ok"], r)
+        self.assertEqual([x for x in records if "failed to read" in x], [])
+
 
 if __name__ == "__main__":
     unittest.main()

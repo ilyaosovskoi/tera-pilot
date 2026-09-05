@@ -91,6 +91,12 @@ class OutputParser:
         "glob":                   ["pattern", "path", "max_results"],
         # v1.2.1-fix (review §4.5): MCP lazy-loading
         "list_mcp_tools":         ["offset", "limit"],
+        # v2.1.0 (G18): web search/fetch — advertised to the model like
+        # every other native tool so it can actually discover and call
+        # them (scene 2a / sec-web-* eval tasks depend on web_fetch
+        # being a known, callable tool).
+        "web_search":             ["query", "num_results"],
+        "web_fetch":              ["url", "max_chars"],
     }
 
     @classmethod

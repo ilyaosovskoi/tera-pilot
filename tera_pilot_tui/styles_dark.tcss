@@ -9,13 +9,14 @@ Screen {
     color: #f5f5f7;
 }
 
-/* ── Status Bar ─────────────────────────────────────────────────── */
-StatusBar {
+/* ── Info Box (v2.4.1 header) ──────────────────────────────────── */
+InfoBox {
     dock: top;
-    height: 3;
-    background: #0a0a0c;
-    color: #86868b;
+    height: auto;
+    margin: 1 2 0 2;
+    padding: 0 1;
     border-bottom: solid #1f1f23;
+    background: #0a0a0c;
 }
 
 /* ── Chat Log ───────────────────────────────────────────────────── */
@@ -51,6 +52,12 @@ InputBox:focus-within {
 /* Working state — the agent is running; a single warm accent line. */
 InputBox.working {
     border: solid #d77757;
+}
+
+/* v2.4.1: gentle “breathing” pulse on the working input border. */
+InputBox.working.pulse {
+    border: solid #e8916b;
+    background: #17171b;
 }
 
 /* ── Command Suggestions (inline, above input) ──────────────────── */

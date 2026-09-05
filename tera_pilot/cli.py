@@ -44,15 +44,29 @@ def _run_fleet(argv: List[str]) -> int:
     p_start.add_argument("--section", default="general",
                          choices=["general", "heavy_code", "office"])
     p_start.add_argument("--max-iterations", type=int, default=None)
+    # v2.4.1 (V240 §4.2): point the whole fleet at a specific provider/model
+    # from the CLI instead of silently using config.json's active provider.
+    p_start.add_argument("--provider", default=None,
+                         help="Provider id for every agent (overrides config.json active_provider)")
+    p_start.add_argument("--model", default=None,
+                         help="Model for every agent (overrides config.json model)")
+    p_start.add_argument("--api-base", default=None,
+                         help="Provider API base URL (e.g. http://127.0.0.1:1234/v1)")
+
+    p_watch = sub.add_parser("watch", help="Main-terminal summary of all agents")
+    p_watch.add_argument("--fleet", default="default", help="Fleet id")
+    p_watch.add_argument("--interval", type=float, default=1.0, help="Refresh seconds")
+    p_watch.add_argument(
+        "--stale-after", type=float, default=None,
+        help="Seconds without a status heartbeat before an agent is treated as "
+             "dead (default: 15). Lets `fleet watch` exit when the fleet "
+             "process dies instead of hanging forever (V240 §4.1).",
+    )
 
     p_task = sub.add_parser("task", help="Queue a task for a fleet agent")
     p_task.add_argument("--fleet", default="default", help="Fleet id")
     p_task.add_argument("agent", help="Agent id (profile id by default)")
     p_task.add_argument("prompt", help="Task prompt (quote it)")
-
-    p_watch = sub.add_parser("watch", help="Main-terminal summary of all agents")
-    p_watch.add_argument("--fleet", default="default", help="Fleet id")
-    p_watch.add_argument("--interval", type=float, default=1.0, help="Refresh seconds")
 
     p_stop = sub.add_parser("stop", help="Signal all fleet workers to stop")
     p_stop.add_argument("--fleet", default="default", help="Fleet id")
@@ -86,7 +100,13 @@ def _run_fleet(argv: List[str]) -> int:
             print("✗ no agents given. Example:")
             print("  tera-pilot fleet start --agent code:~/code --agent video:~/videos")
             return 1
-        return start_fleet_cli(agents, fleet_id=args.fleet)
+        return start_fleet_cli(
+            agents,
+            fleet_id=args.fleet,
+            provider=args.provider,
+            model=args.model,
+            api_base=args.api_base,
+        )
 
     if args.sub == "task":
         from tera_pilot.fleet import submit_task
@@ -101,7 +121,7 @@ def _run_fleet(argv: List[str]) -> int:
     if args.sub == "watch":
         from tera_pilot.fleet import (
             collect_fleet_status, render_fleet_table,
-            stop_path, fleet_dir,
+            fleet_finished, fleet_dir,
         )
         from rich.console import Console
         from rich.live import Live
@@ -109,6 +129,7 @@ def _run_fleet(argv: List[str]) -> int:
         if not fleet_dir(args.fleet).is_dir():
             print(f"✗ no such fleet: {args.fleet} (run: tera-pilot fleet start)")
             return 1
+        stale_after = args.stale_after
         console = Console()
         with Live(console=console, refresh_per_second=1.0 / max(0.2, args.interval)) as live:
             try:
@@ -116,7 +137,13 @@ def _run_fleet(argv: List[str]) -> int:
                     statuses = collect_fleet_status(args.fleet)
                     table = render_fleet_table(statuses, fleet_id=args.fleet)
                     live.update(table)
-                    if all(s.get("state") == "stopped" for s in statuses) and statuses:
+                    # Exit when every agent is stopped OR stale (no heartbeat
+                    # for --stale-after seconds) — v2.4.1 fix for the watch
+                    # hanging forever after the fleet process dies (V240 §4.1).
+                    if fleet_finished(
+                        statuses,
+                        stale_after=stale_after if stale_after is not None else 15.0,
+                    ):
                         break
                     import time
                     time.sleep(max(0.2, args.interval))

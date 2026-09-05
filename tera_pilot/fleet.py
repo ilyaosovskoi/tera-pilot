@@ -66,6 +66,11 @@ HEADLESS_MAP = {
 
 RECENT_ACTIVITY_LIMIT = 25
 
+# v2.4.1-fix (V240 §4.1): if an agent's status hasn't been refreshed for this
+# many seconds, `fleet watch` treats the worker as dead and closes instead of
+# hanging forever after the fleet process exits.
+STALE_AFTER_SECONDS = 15.0
+
 
 # ── paths ───────────────────────────────────────────────────────────────
 
@@ -103,6 +108,35 @@ def valid_agent_id(agent_id: str) -> bool:
     return bool(_ID_RE.match(agent_id or ""))
 
 
+def status_is_stale(status: Dict[str, Any], stale_after: float = STALE_AFTER_SECONDS) -> bool:
+    """True when an agent's status file hasn't been refreshed for
+    ``stale_after`` seconds — the worker that owned it is gone.
+
+    Statuses written before the epoch field was added (or lacking one)
+    are never considered stale, so old files don't get misread as dead.
+    """
+    updated = status.get("updated_epoch")
+    if not isinstance(updated, (int, float)):
+        return False
+    return time.time() - float(updated) > stale_after
+
+
+def fleet_finished(
+    statuses: List[Dict[str, Any]],
+    stale_after: float = STALE_AFTER_SECONDS,
+) -> bool:
+    """True when every agent is ``stopped`` or stale (dead). Once the fleet
+    can no longer process anything, ``fleet watch`` should close — this is
+    the fix for V240 §4.1 (watch hanging forever after the fleet process
+    exits without writing a stop file)."""
+    if not statuses:
+        return False
+    return all(
+        s.get("state") == STATE_STOPPED or status_is_stale(s, stale_after)
+        for s in statuses
+    )
+
+
 # ── status file helpers ─────────────────────────────────────────────────
 
 _status_lock = threading.Lock()
@@ -111,6 +145,9 @@ _status_lock = threading.Lock()
 def _write_status(path: Path, status: Dict[str, Any]) -> None:
     with _status_lock:
         path.parent.mkdir(parents=True, exist_ok=True)
+        # Epoch timestamp so `fleet watch` / `fleet list` can detect a dead
+        # worker (status never refreshed) instead of trusting a stale file.
+        status["updated_epoch"] = time.time()
         tmp = path.with_suffix(".json.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(status, f, indent=2, ensure_ascii=False)
@@ -236,6 +273,9 @@ class FleetAgentSpec:
     agent_id: str = ""          # defaults to the profile id
     section: str = "general"
     max_iterations: Optional[int] = None
+    provider: Optional[str] = None   # v2.4.1: override active provider (V240 §4.2)
+    model: Optional[str] = None      # v2.4.1: override model
+    api_base: Optional[str] = None   # v2.4.1: override API base URL
 
     def __post_init__(self) -> None:
         if not self.agent_id:
@@ -243,9 +283,18 @@ class FleetAgentSpec:
         self.workspace = str(Path(self.workspace).expanduser())
 
 
-def _build_registry():
+def _build_registry(
+    provider_override: Optional[str] = None,
+    model_override: Optional[str] = None,
+    api_base_override: Optional[str] = None,
+):
     """Provider registry configured from ~/.tera_pilot/config.json —
-    mirror of the daemon's _build_registry (keys/models/api_base)."""
+    mirror of the daemon's _build_registry (keys/models/api_base).
+
+    v2.4.1 (V240 §4.2): ``*_override`` lets CLI flags
+    (``fleet start --provider/--model/--api-base``) point the fleet at a
+    specific provider/model instead of silently using config.json's
+    active_provider + model."""
     from tera_pilot.providers import get_registry, ProviderConfig
     from tera_pilot.utils import load_config
 
@@ -275,7 +324,43 @@ def _build_registry():
             )
         except Exception:
             continue
+
+    # ── CLI overrides: apply on top of config.json, then activate ──
+    # (V240 §4.2: fleet start --provider/--model/--api-base). Overrides are
+    # merged onto the config.json values so a stored API key is preserved.
+    configured = (cfg.get("providers") or {})
+
+    def _merge(pid: str) -> None:
+        pcfg = configured.get(pid) or {}
+        registry.configure(
+            pid,
+            ProviderConfig(
+                provider_id=pid,
+                model=model_override or pcfg.get("model", "") or "",
+                api_key=pcfg.get("api_key") or None,
+                api_base=api_base_override or pcfg.get("api_base") or None,
+                temperature=float(pcfg.get("temperature", 0.2)),
+                max_tokens=int(pcfg.get("max_tokens", 4096)),
+            ),
+        )
+
     active = cfg.get("active_provider") or registry.active_id or "ollama"
+    if provider_override:
+        if registry.has_provider(provider_override):
+            active = provider_override
+            try:
+                _merge(provider_override)
+            except Exception:
+                pass
+        else:
+            logger.warning("[fleet] unknown provider override: %s (ignored)", provider_override)
+    elif model_override or api_base_override:
+        # No provider override, but a model/api_base was requested: apply to
+        # whatever provider is active.
+        try:
+            _merge(active)
+        except Exception:
+            pass
     try:
         registry.set_active(active)
     except Exception:
@@ -352,6 +437,10 @@ class FleetWorker:
             if task is None:
                 if self.status["state"] == STATE_RUNNING:
                     self.status["state"] = STATE_IDLE
+                # Heartbeat while idle: keep refreshing the status file so
+                # `fleet watch` can tell a live-but-idle worker from a dead
+                # one (V240 §4.1). Throttle to ~once per second.
+                if time.time() - self.status.get("updated_epoch", 0) > 1.0:
                     _write_status(status_path(self.fleet_id, self.spec.agent_id), self.status)
                 self._stop_event.wait(self._poll_interval)
                 continue
@@ -418,7 +507,11 @@ class FleetWorker:
             pass
 
         agent = AgentRuntime(
-            registry=_build_registry(),
+            registry=_build_registry(
+                provider_override=self.spec.provider,
+                model_override=self.spec.model,
+                api_base_override=self.spec.api_base,
+            ),
             workspace=self.spec.workspace,
             max_iterations=max(1, int(self.spec.max_iterations or 8)),
             section=self.spec.section,
@@ -542,10 +635,19 @@ class Fleet:
             time.sleep(0.2)
 
 
-def start_fleet_cli(agents: List[Dict[str, Any]], fleet_id: str = DEFAULT_FLEET_ID) -> int:
+def start_fleet_cli(
+    agents: List[Dict[str, Any]],
+    fleet_id: str = DEFAULT_FLEET_ID,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    api_base: Optional[str] = None,
+) -> int:
     """Start a fleet in the foreground. ``agents`` is a list of
     {profile, workspace, agent_id?, section?, max_iterations?} dicts.
-    Returns the process exit code. Ctrl+C stops the fleet."""
+    Returns the process exit code. Ctrl+C stops the fleet.
+
+    v2.4.1 (V240 §4.2): ``provider``/``model``/``api_base`` override the
+    active provider for every agent (``fleet start --provider ...``)."""
     fleet = Fleet(fleet_id)
     for a in agents:
         r = fleet.add_agent(
@@ -555,6 +657,9 @@ def start_fleet_cli(agents: List[Dict[str, Any]], fleet_id: str = DEFAULT_FLEET_
                 agent_id=a.get("agent_id", ""),
                 section=a.get("section", "general"),
                 max_iterations=a.get("max_iterations"),
+                provider=provider,
+                model=model,
+                api_base=api_base,
             )
         )
         if not r.get("ok"):
@@ -613,11 +718,16 @@ def render_fleet_table(statuses: List[Dict[str, Any]], fleet_id: str = DEFAULT_F
     table.add_column("Last activity", overflow="ellipsis")
     for s in statuses:
         state = s.get("state", "?")
+        # v2.4.1: surface stale workers (no heartbeat) as "stale" instead
+        # of showing a phantom "running" forever (V240 §4.1).
+        if state != STATE_STOPPED and status_is_stale(s):
+            state = "stale"
         state_color = {
             "running": "yellow",
             "done": "green",
             "error": "red",
             "stopped": "dim",
+            "stale": "dim red",
         }.get(state, "white")
         done = s.get("tasks_done", 0)
         failed = s.get("tasks_failed", 0)

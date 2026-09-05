@@ -72,6 +72,9 @@ TOOL_CATALOG: Dict[str, str] = {
     "self_verify": "Verification pass at task close (re-read files, run tests, or spawn reviewer)",
     # Knowledge
     "get_skill": "Load the full text of a skill by ID",
+    # Web (G18)
+    "web_search": "Search the web via the configured search backend",
+    "web_fetch": "Fetch a URL as plain text (SSRF-safe: internal targets rejected)",
     # Office (only in office section)
     "office_create": "Create a new Office document (.docx/.xlsx/.pptx)",
     "office_view": "View the structure of an Office document",

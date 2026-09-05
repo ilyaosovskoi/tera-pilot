@@ -188,6 +188,12 @@ class AgentProfileManager:
         return _profiles_dir() / f"{profile_id}.json"
 
     def _read_profile_file(self, path: Path) -> Optional[Dict[str, Any]]:
+        # v2.4.1 (V240 §4.5): missing files are the NORMAL case for builtin
+        # profiles (code/video/reviewer/apex have no per-user file on disk),
+        # so check existence first instead of logging a warning per open()
+        # failure — list_profiles() used to emit 4 warnings on every call.
+        if not path.exists():
+            return None
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)

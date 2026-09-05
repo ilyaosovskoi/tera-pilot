@@ -75,6 +75,8 @@ class TeraPilotTUIApp(App):
         # input placeholder, the next non-slash submission is treated as
         # the key instead of a normal prompt.
         self._pending_key_provider: Optional[str] = None
+        # v2.4.1: braille spinner frames for the status header.
+        self._spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
     # ---------------------------------------------------------------- compose
     def compose(self) -> ComposeResult:
@@ -93,8 +95,9 @@ class TeraPilotTUIApp(App):
         except Exception:
             _tera_pilot_version = "2.4.0"
 
-        # Initialize InfoBox with current state
+        # Initialize InfoBox with current state + the active theme palette.
         info = self.query_one(InfoBox)
+        info.set_theme(self._dark_theme)
         status = self.bridge.status()
         info.update_info(
             model=status.get("model", "unknown"),
@@ -103,12 +106,15 @@ class TeraPilotTUIApp(App):
             version=_tera_pilot_version,
         )
 
-        # Initialize chat
+        # Initialize chat — v2.4.1: styled welcome with brand + key hints.
         chat = self.query_one(ChatLog)
         chat.add_system(
-            f"Type a request and press Enter.\n"
-            f"Type / for slash commands (/model, /provider, /capabilities, etc.).\n"
-            f"Ctrl+C to interrupt, Ctrl+D to quit, Ctrl+G to launch GUI."
+            "[bold #d77757]❯ Tera Pilot[/bold #d77757]  — ask a question or type a "
+            "request and press Enter.\n"
+            "[dim]Type / for slash commands · Ctrl+P for the command palette · "
+            "Ctrl+G for the web GUI[/dim]\n"
+            "[dim]Ctrl+C interrupts · Ctrl+D quits · Ctrl+T switches theme · "
+            "Up/Down recall history[/dim]"
         )
 
         # Set up suggestions
@@ -738,19 +744,11 @@ class TeraPilotTUIApp(App):
             return
         if arg == "dark":
             self._dark_theme = True
-            self.CSS_PATH = "styles_dark.tcss"
-            try:
-                self.reload_css()
-            except Exception:
-                pass
+            self._apply_theme()
             self.query_one(ChatLog).add_system("Theme switched to: [b]dark[/b]")
         elif arg == "light":
             self._dark_theme = False
-            self.CSS_PATH = "styles_light.tcss"
-            try:
-                self.reload_css()
-            except Exception:
-                pass
+            self._apply_theme()
             self.query_one(ChatLog).add_system("Theme switched to: [b]light[/b]")
         else:
             self.query_one(ChatLog).add_error(
@@ -2511,6 +2509,26 @@ class TeraPilotTUIApp(App):
     def _sink(self, kind: str, data: Dict[str, Any]) -> None:
         self.call_from_thread(self._handle_event, kind, data)
 
+    def _apply_theme(self) -> None:
+        """v2.4.1: reload the theme stylesheet and re-paint the InfoBox
+        with the palette that matches the new theme."""
+        self.CSS_PATH = "styles_dark.tcss" if self._dark_theme else "styles_light.tcss"
+        try:
+            self.reload_css()
+        except Exception:
+            pass
+        try:
+            info = self.query_one(InfoBox)
+            info.set_theme(self._dark_theme)
+            status = self.bridge.status()
+            info.update_info(
+                model=status.get("model", "unknown"),
+                provider=status.get("provider", "unknown"),
+                directory=self.bridge.workspace,
+            )
+        except Exception:
+            pass
+
     def action_toggle_theme(self) -> None:
         """Toggle between light and dark themes."""
         self._dark_theme = not self._dark_theme
@@ -2519,14 +2537,7 @@ class TeraPilotTUIApp(App):
         # Update CSS path to switch themes, then reload so the new
         # stylesheet actually applies. Without reload_css() Textual keeps
         # the previously-loaded stylesheet cached.
-        if self._dark_theme:
-            self.CSS_PATH = "styles_dark.tcss"
-        else:
-            self.CSS_PATH = "styles_light.tcss"
-        try:
-            self.reload_css()
-        except Exception:
-            pass
+        self._apply_theme()
 
     def _handle_event(self, kind: str, data: Dict[str, Any]) -> None:
         chat = self.query_one(ChatLog)
@@ -2743,19 +2754,25 @@ class TeraPilotTUIApp(App):
             pass
         # v2.3.1: mark the input box with the "working" class while the
         # agent is running so its border glows with the accent color.
+        # v2.4.1: drop the pulse class when the turn ends (the periodic
+        # tick only re-adds it while working).
         try:
             box = self.query_one(InputBox)
             working = state in ("thinking", "running")
             if working != box.has_class("working"):
                 box.set_class(working, "working")
+            if not working and box.has_class("pulse"):
+                box.remove_class("pulse")
         except Exception:
             pass
 
     def _tick_status_animation(self) -> None:
-        """v2.3.6: animate the status line ("thinking…") while a turn runs.
+        """v2.3.6/v2.4.1: animate the status header while a turn runs.
 
         Runs on a 0.15s timer; no-ops when idle. The word follows the
-        current phase (thinking / running), the dots cycle 0→3.
+        current phase (thinking / running) and a braille spinner cycles
+        in front of it (v2.4.1). While the agent is working the input
+        box also gets a gentle "breathing" pulse (``pulse`` class).
         """
         if not self._turn_running or self._status_state not in ("thinking", "running"):
             return
@@ -2765,8 +2782,16 @@ class TeraPilotTUIApp(App):
             return
         self._status_frame += 1
         word = "thinking" if self._status_state == "thinking" else "running"
-        dots = "." * (self._status_frame % 4)
-        info.update_status(f"{word}{dots:<3}")
+        spinner = self._spinner_frames[self._status_frame % len(self._spinner_frames)]
+        info.update_status(f"{spinner} {word}")
+        # v2.4.1: toggle the pulse class every other tick (~0.3s) so the
+        # working input border "breathes" between the two accent tones.
+        try:
+            box = self.query_one(InputBox)
+            if box.has_class("working"):
+                box.set_class(self._status_frame % 2 == 0, "pulse")
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ actions
     def action_interrupt(self) -> None:
