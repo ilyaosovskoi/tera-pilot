@@ -489,3 +489,21 @@ StatusBar {
     background: #0a0a0c;
     color: #f5f5f7;
 }
+
+/* ── Task canvas strip (v2.4.2) ───────────────────────────────── */
+/* Live task-graph (plan → subtasks). Hidden unless the .visible class
+   is set while the canvas holds nodes. Capped so a big graph never
+   eats the chat area. */
+#canvas {
+    height: auto;
+    max-height: 8;
+    margin: 0 2;
+    padding: 0 1;
+    display: none;
+    overflow-y: auto;
+    color: #d77757;
+}
+
+#canvas.visible {
+    display: block;
+}

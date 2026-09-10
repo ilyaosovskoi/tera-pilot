@@ -27,19 +27,23 @@ from typing import Any, Optional
 from textual.widgets import Static
 
 # Same palette as StatusBar / ThinkingIndicator — Loop 3 overhaul.
+# (Kept for reference; rendering uses the per-theme _PALETTES below.)
 _TERRACOTTA = "#d77757"
 _MUTED = "#888888"
 
-# Status colors. Kept conservative to fit the existing palette — green
-# for done, terracotta for running (matches the "active" brand color),
-# yellow for pending (matches the heavy_code badge in StatusBar), red
-# for failed (matches the "all" guardian badge in StatusBar).
-_STATUS_COLORS = {
-    "done": "green",
-    "running": _TERRACOTTA,
-    "pending": "yellow",
-    "failed": "red",
+# ── Per-theme palettes (dark / light) ──────────────────────────────
+# v2.4.2 (theme fix): muted #888888 secondary text is washed out on the
+# light theme. Mirrors the InfoBox.set_theme() pattern.
+_PALETTES = {
+    True: {"accent": "#d77757", "muted": "#888888"},    # dark
+    False: {"accent": "#b34d2e", "muted": "#6b6b76"},   # light
 }
+
+# Status colors. Kept conservative to fit the existing palette — green
+# for done, themed accent for running (matches the "active" brand
+# color), yellow for pending (matches the heavy_code badge in
+# StatusBar), red for failed (matches the "all" guardian badge in
+# StatusBar). Built per-theme inside _build_markup(); see _PALETTES.
 
 
 class TaskCanvasView(Static):
@@ -53,11 +57,41 @@ class TaskCanvasView(Static):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._last_text: str = ""
+        # v2.4.2: active theme (True = dark). Swapped via set_theme().
+        self._dark: bool = True
         # Initial placeholder so the widget is never visually empty
         # before the first canvas mutation lands.
+        self._refresh_display_empty()
+
+    def set_theme(self, dark: bool) -> None:
+        """v2.4.2: switch the accent/muted palette (called by the app on
+        mount and on every theme change)."""
+        self._dark = bool(dark)
+        try:
+            self.refresh_view()
+        except Exception:
+            pass
+
+    @property
+    def dark(self) -> bool:
+        return self._dark
+
+    @property
+    def _pal(self) -> dict:
+        return _PALETTES[bool(self._dark)]
+
+    @property
+    def has_content(self) -> bool:
+        """True when the canvas holds at least one node (i.e. the strip
+        is worth showing). Tracks the last rendered markup: empty canvas
+        renders to "" and clears the flag on the next refresh."""
+        return bool(self._last_text)
+
+    def _refresh_display_empty(self) -> None:
+        pal = self._pal
         self.update(
-            f"[{_TERRACOTTA}]task canvas[/{_TERRACOTTA}] "
-            f"[{_MUTED}](empty)[/{_MUTED}]"
+            f"[{pal['accent']}]task canvas[/{pal['accent']}] "
+            f"[{pal['muted']}](empty)[/{pal['muted']}]"
         )
 
     def refresh_view(self) -> None:
@@ -72,10 +106,7 @@ class TaskCanvasView(Static):
             return
         self._last_text = text
         if not text:
-            self.update(
-                f"[{_TERRACOTTA}]task canvas[/{_TERRACOTTA}] "
-                f"[{_MUTED}](empty)[/{_MUTED}]"
-            )
+            self._refresh_display_empty()
         else:
             self.update(text)
 
@@ -99,16 +130,28 @@ class TaskCanvasView(Static):
         if not nodes:
             return ""
 
+        pal = self._pal
+        accent = pal["accent"]
+        muted = pal["muted"]
+        # "running" follows the themed accent; done/pending/failed keep
+        # the conservative hues that read on both themes.
+        status_colors = {
+            "done": "green",
+            "running": accent,
+            "pending": "yellow",
+            "failed": "red",
+        }
+
         counts = {"done": 0, "running": 0, "pending": 0, "failed": 0}
         for n in nodes:
             counts[n.status] = counts.get(n.status, 0) + 1
 
         header = (
-            f"[{_TERRACOTTA}]task canvas[/{_TERRACOTTA}] "
-            f"[{_MUTED}]({len(nodes)}: "
+            f"[{accent}]task canvas[/{accent}] "
+            f"[{muted}]({len(nodes)}: "
             f"{counts['done']}d {counts['running']}r "
             f"{counts['pending']}p {counts['failed']}f)"
-            f"[/{_MUTED}]"
+            f"[/{muted}]"
         )
 
         # Same display order as the prompt fragment: running > failed >
@@ -122,12 +165,12 @@ class TaskCanvasView(Static):
 
         lines = [header]
         for _, n in visible:
-            color = _STATUS_COLORS.get(n.status, _MUTED)
+            color = status_colors.get(n.status, muted)
             # Truncate long labels the same way as the prompt fragment.
             label = n.label if len(n.label) <= 60 else n.label[:59] + "…"
             line = f"[{color}][{n.status}][/{color}] {label}"
             if n.model:
-                line += f" [{_MUTED}]-> {n.model}[/{_MUTED}]"
+                line += f" [{muted}]-> {n.model}[/{muted}]"
             lines.append(line)
         if hidden:
             hidden_counts = {"done": 0, "running": 0, "pending": 0, "failed": 0}
@@ -137,7 +180,7 @@ class TaskCanvasView(Static):
             for s in ("done", "running", "pending", "failed"):
                 if hidden_counts[s]:
                     parts.append(f"{hidden_counts[s]} {s[0]}")
-            lines.append(f"[{_MUTED}]+{len(hidden)} more ({', '.join(parts)})[/{_MUTED}]")
+            lines.append(f"[{muted}]+{len(hidden)} more ({', '.join(parts)})[/{muted}]")
         return "\n".join(lines)
 
     def on_unmount(self) -> None:

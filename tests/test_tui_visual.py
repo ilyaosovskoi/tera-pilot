@@ -330,3 +330,41 @@ async def test_status_bar_mounted_themed_and_updated():
         await pilot.pause()
         assert bar._state == "idle"
         assert app._exception is None
+
+
+@pytest.mark.asyncio
+async def test_canvas_strip_shows_only_with_nodes():
+    """v2.4.2: the task-graph strip stays hidden on an empty canvas,
+    appears once a node lands, and hides again after reset."""
+    from tera_pilot.agent.task_canvas import get_task_canvas
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.widgets.task_canvas_view import TaskCanvasView
+
+    canvas = get_task_canvas()
+    canvas.reset()
+    app = TeraPilotTUIApp()
+    try:
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            view = app.query_one(TaskCanvasView)
+            assert not view.has_content
+            assert not view.has_class("visible")
+
+            canvas.add_node("n1", "Write tests", status="running")
+            app._refresh_canvas()
+            await pilot.pause()
+            assert view.has_content
+            assert view.has_class("visible")
+
+            view.set_theme(False)
+            assert view.dark is False
+            assert view._pal["muted"].lower() not in ("grey62", "#888888")
+
+            canvas.reset()
+            app._refresh_canvas()
+            await pilot.pause()
+            assert not view.has_content
+            assert not view.has_class("visible")
+            assert app._exception is None
+    finally:
+        canvas.reset()

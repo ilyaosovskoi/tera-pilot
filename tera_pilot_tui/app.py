@@ -84,6 +84,9 @@ class TeraPilotTUIApp(App):
     def compose(self) -> ComposeResult:
         yield InfoBox(id="info")
         yield ChatLog(id="chat")
+        # v2.4.2: live task-graph strip — visible only while the canvas
+        # holds nodes (plan → subtasks with running/done/pending/failed).
+        yield TaskCanvasView(id="canvas")
         # v2.4.2: ephemeral thinking strip — visible only while a turn
         # runs (whimsical verb + spinner). Answers "is it reasoning or
         # did it die?" at a glance.
@@ -121,6 +124,10 @@ class TeraPilotTUIApp(App):
         try:
             thinking = self.query_one(ThinkingIndicator)
             thinking.set_theme(self._dark_theme)
+        except Exception:
+            pass
+        try:
+            self.query_one(TaskCanvasView).set_theme(self._dark_theme)
         except Exception:
             pass
         try:
@@ -2558,6 +2565,10 @@ class TeraPilotTUIApp(App):
                 self.query_one(ThinkingIndicator).set_theme(self._dark_theme)
             except Exception:
                 pass
+            try:
+                self.query_one(TaskCanvasView).set_theme(self._dark_theme)
+            except Exception:
+                pass
             status = self.bridge.status()
             info.update_info(
                 model=status.get("model", "unknown"),
@@ -2616,6 +2627,19 @@ class TeraPilotTUIApp(App):
             self._last_event_error = str(data.get("error", "unknown error"))
             chat.add_error(self._last_event_error)
         elif kind == "done":
+            pass
+        # v2.4.2: pull the live task graph after every agent event and
+        # show the strip only while the canvas holds nodes.
+        self._refresh_canvas()
+
+    def _refresh_canvas(self) -> None:
+        """v2.4.2: re-render the task-graph strip and toggle its
+        visibility. Never let widget wiring break event handling."""
+        try:
+            canvas = self.query_one(TaskCanvasView)
+            canvas.refresh_view()
+            canvas.set_class(canvas.has_content, "visible")
+        except Exception:
             pass
 
     def _confirm(self, info: Dict[str, Any]) -> None:
