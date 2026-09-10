@@ -267,6 +267,36 @@ time, as if it was thinking), so this GIF is sped up.*
 
 </div>
 
+Screenshots from recorded TUI sessions (September 2026, `demos/tera_pilot_demo_video/`):
+
+<div align="center">
+
+![Tera Pilot TUI — fixed discount bug, all 3 tests pass, audit trail summary](demo/fix-discount-audit.png)
+
+*Bug fix, end to end: the agent fixes `apply_discount`, all 3 tests pass
+(`test_ten_percent_off`, `test_no_discount`, `test_full_discount`), and the
+audit trail summary shows `calls: 7, errors: 0`.*
+
+![Tera Pilot TUI — SSRF attempt against cloud metadata IP blocked](demo/ssrf-blocked.png)
+
+*Secure by default: a request to fetch the cloud-metadata IP
+(`169.254.169.254`) is rejected before any content can leave the machine.*
+
+![Tera Pilot TUI — zero-to-project prompt for a Markdown-to-HTML converter](demo/md2html-prompt.png)
+
+*The one-prompt brief at the start of the session: a Markdown-to-HTML
+converter with a pytest suite, CLI (`python3 md2html.py input.md
+output.html`), stdlib only, tests written first — the agent hasn't acted
+yet; the next screenshot shows the build.*
+
+![Tera Pilot TUI — agent scaffolds the pytest suite test-first](demo/md2html-tests.png)
+
+*Test-first scaffolding: the agent writes `tests/test_md2html.py` (1825
+chars) with assertions for headings, bold, inline code, lists, code blocks
+and paragraphs.*
+
+</div>
+
 Measured on real repository tasks (methodology: `eval/README.md`):
 
 - **OpenRouter (2026-08-22): 5/5 tasks solved** end-to-end — including a live
