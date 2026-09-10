@@ -24,6 +24,8 @@ from .widgets.command_palette import CommandPalette, CommandEntry, SECTIONS, BUI
 from .widgets.command_suggestions import CommandSuggestions, SuggestionItem
 from .widgets.input_box import InputBox
 from .widgets.info_box import InfoBox
+from .widgets.status_bar import StatusBar
+from .widgets.thinking import ThinkingIndicator
 from .widgets.model_selector_modal import ModelSelectorModal
 from .widgets.verification_modal import VerificationModal
 from .widgets.task_canvas_view import TaskCanvasView
@@ -82,8 +84,16 @@ class TeraPilotTUIApp(App):
     def compose(self) -> ComposeResult:
         yield InfoBox(id="info")
         yield ChatLog(id="chat")
+        # v2.4.2: ephemeral thinking strip — visible only while a turn
+        # runs (whimsical verb + spinner). Answers "is it reasoning or
+        # did it die?" at a glance.
+        yield ThinkingIndicator(id="thinking")
         yield CommandSuggestions(id="suggestions")
         yield InputBox(id="input")
+        # v2.4.2: bottom statusline (tokens/cost, section + guardian
+        # badges, spinner state). Composed last so it docks at the very
+        # bottom edge, below the input box.
+        yield StatusBar(id="statusbar")
 
     def on_mount(self) -> None:
         self.bridge.set_event_sink(self._sink)
@@ -105,6 +115,21 @@ class TeraPilotTUIApp(App):
             directory=self.bridge.workspace,
             version=_tera_pilot_version,
         )
+
+        # v2.4.2: paint the newly-mounted statusline + thinking strip
+        # with the active theme and seed the statusline once.
+        try:
+            thinking = self.query_one(ThinkingIndicator)
+            thinking.set_theme(self._dark_theme)
+        except Exception:
+            pass
+        try:
+            bar = self.query_one(StatusBar)
+            bar.set_theme(self._dark_theme)
+            bar.update_status(status, state="idle",
+                              section=getattr(self.bridge, "section", "general"))
+        except Exception:
+            pass
 
         # Initialize chat — v2.4.1: styled welcome with brand + key hints.
         chat = self.query_one(ChatLog)
@@ -2511,7 +2536,9 @@ class TeraPilotTUIApp(App):
 
     def _apply_theme(self) -> None:
         """v2.4.1: reload the theme stylesheet and re-paint the InfoBox
-        with the palette that matches the new theme."""
+        with the palette that matches the new theme.
+        v2.4.2: also swap the ChatLog body palette — Rich inline styles
+        are not repainted by reload_css()."""
         self.CSS_PATH = "styles_dark.tcss" if self._dark_theme else "styles_light.tcss"
         try:
             self.reload_css()
@@ -2520,6 +2547,17 @@ class TeraPilotTUIApp(App):
         try:
             info = self.query_one(InfoBox)
             info.set_theme(self._dark_theme)
+            chat = self.query_one(ChatLog)
+            chat.set_theme(self._dark_theme)
+            # v2.4.2: repaint the statusline + thinking strip palettes.
+            try:
+                self.query_one(StatusBar).set_theme(self._dark_theme)
+            except Exception:
+                pass
+            try:
+                self.query_one(ThinkingIndicator).set_theme(self._dark_theme)
+            except Exception:
+                pass
             status = self.bridge.status()
             info.update_info(
                 model=status.get("model", "unknown"),
@@ -2750,6 +2788,37 @@ class TeraPilotTUIApp(App):
             )
             if state not in ("thinking", "running"):
                 info.clear_status()
+            # v2.4.2: push the same turn state into the bottom
+            # statusline (tokens/cost, section + guardian badges,
+            # spinner). Never let widget wiring break a status update.
+            try:
+                bar = self.query_one(StatusBar)
+                try:
+                    guardian = self.bridge.get_guardian_level().get("level", "off")
+                except Exception:
+                    guardian = "off"
+                bar.update_status(
+                    status,
+                    state=state if state in ("thinking", "running") else "idle",
+                    section=getattr(self.bridge, "section", "general"),
+                    guardian=guardian,
+                )
+            except Exception:
+                pass
+        except Exception:
+            pass
+        # v2.4.2: show the thinking strip (whimsical verb + spinner)
+        # while the agent works; hide it the moment the turn ends so
+        # "no strip" unambiguously means idle/dead, not "still busy".
+        try:
+            thinking = self.query_one(ThinkingIndicator)
+            working = state in ("thinking", "running")
+            if working and not thinking.has_class("visible"):
+                thinking.set_class(True, "visible")
+                thinking.start()
+            elif not working and thinking.has_class("visible"):
+                thinking.set_class(False, "visible")
+                thinking.stop()
         except Exception:
             pass
         # v2.3.1: mark the input box with the "working" class while the

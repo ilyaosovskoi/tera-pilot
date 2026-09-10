@@ -8,6 +8,12 @@
   --border:rgba(255,255,255,0.05); --border-strong:rgba(255,255,255,0.08);
   --accent:#F4F4F5; --accent-dim:rgba(244,244,245,0.12); --accent-glow:rgba(244,244,245,0.06);
   --danger:#FCA5A5; --success:#86EFAC; --warning:#FCD34D; --info:#93C5FD; --purple:#C4B5FD;
+  /* v2.4.2 (theme fix): translucent tints + primary action color. These
+     vars are referenced by the Guardian modal (index.html) but were never
+     defined — the gradient/chips/Use-Fix button rendered unstyled.
+     --primary aliases --accent so it follows every theme automatically. */
+  --warning-bg:rgba(252,211,77,0.12); --error-bg:rgba(252,165,165,0.12);
+  --primary:var(--accent);
   --s-4:4px;--s-6:6px;--s-8:8px;--s-10:10px;--s-12:12px;--s-14:14px;--s-16:16px;--s-20:20px;--s-24:24px;--s-28:28px;--s-32:32px;--s-48:48px;--s-64:64px;
   --m-fast:120ms;--m-med:180ms;--m-slow:240ms;--ease:cubic-bezier(0.22,1,0.36,1);
   --r-panel:20px;--r-card:18px;--r-composer:24px;--r-pill:999px;--r-sm:10px;
@@ -31,6 +37,8 @@
   --border:rgba(0,0,0,0.07); --border-strong:rgba(0,0,0,0.12);
   --accent:#1A1A1E; --accent-dim:rgba(26,26,30,0.08); --accent-glow:rgba(26,26,30,0.04);
   --danger:#DC2626; --success:#16A34A; --warning:#D97706; --info:#2563EB; --purple:#7C3AED;
+  /* v2.4.2: light-theme tints stay visible on white surfaces. */
+  --warning-bg:rgba(217,119,6,0.14); --error-bg:rgba(220,38,38,0.10);
   --card-shadow:0 1px 2px rgba(20,20,25,0.04),0 4px 16px -8px rgba(20,20,25,0.08);
   --card-shadow-hover:0 4px 10px rgba(20,20,25,0.06),0 14px 32px -12px rgba(20,20,25,0.14);
 }

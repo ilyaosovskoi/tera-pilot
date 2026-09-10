@@ -461,3 +461,31 @@ TaskCanvasView {
 .auto-accept {
     color: #af87ff;
 }
+
+/* ── Thinking strip (v2.4.2) ──────────────────────────────────── */
+/* Ephemeral one-line indicator between chat and input. Hidden unless
+   the .visible class is set while a turn runs. */
+#thinking {
+    height: 1;
+    margin: 0 2;
+    padding: 0 1;
+    display: none;
+    color: #d77757;
+}
+
+#thinking.visible {
+    display: block;
+}
+
+/* ── StatusBar statusline (v2.4.2) ────────────────────────────── */
+/* Bottom two-line statusline: state + provider/model + tokens/cost,
+   hints row. Docked at the very bottom edge, below the input box. */
+StatusBar {
+    dock: bottom;
+    height: 2;
+    margin: 0 2;
+    padding: 0 1;
+    border-top: solid #1f1f23;
+    background: #0a0a0c;
+    color: #f5f5f7;
+}

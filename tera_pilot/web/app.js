@@ -4144,9 +4144,11 @@ function showDiffReview(info){
   statsEl.textContent='+'+info.lines_added+' / -'+info.lines_removed+' lines';
   const html=escapeHtml(info.diff).split('\n').map(line=>{
     if(line.startsWith('+++')||line.startsWith('---'))return '<span style="color:var(--text-muted);font-weight:500">'+line+'</span>';
-    if(line.startsWith('+'))return '<span style="color:#86EFAC;background:rgba(134,239,172,0.08)">'+line+'</span>';
-    if(line.startsWith('-'))return '<span style="color:#FCA5A5;background:rgba(252,165,165,0.08)">'+line+'</span>';
-    if(line.startsWith('@@'))return '<span style="color:#93C5FD">'+line+'</span>';
+    // v2.4.2 (theme fix): diff colors follow the active theme instead of
+    // hard-coded dark-palette hex values (unreadable on light themes).
+    if(line.startsWith('+'))return '<span style="color:var(--success)">'+line+'</span>';
+    if(line.startsWith('-'))return '<span style="color:var(--danger)">'+line+'</span>';
+    if(line.startsWith('@@'))return '<span style="color:var(--info)">'+line+'</span>';
     return line;
   }).join('\n');
   content.innerHTML=html;

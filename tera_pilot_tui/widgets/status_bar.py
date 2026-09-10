@@ -37,6 +37,15 @@ _SPINNER_FRAMES = [
 _TERRACOTTA = "#d77757"
 _SHIMMER = "#eb9f7f"
 
+# ── Per-theme palettes (dark / light) ──────────────────────────────
+# v2.4.2 (theme fix): "grey62"/dim secondary text is unreadable on the
+# light theme, so the bar owns its accent + muted colors and swaps them
+# via set_theme(). Mirrors the InfoBox.set_theme() pattern.
+_PALETTES = {
+    True: {"accent": "#d77757", "muted": "grey62"},    # dark
+    False: {"accent": "#b34d2e", "muted": "#6b6b76"},  # light
+}
+
 
 class StatusBar(Static):
     """Top status bar with animated state indicators.
@@ -56,13 +65,27 @@ class StatusBar(Static):
         self._guardian: str = "off"
         self._spinner_task: Optional[asyncio.Task] = None
         self._spinner_frame: int = 0
+        # v2.4.2: active theme (True = dark). Swapped via set_theme().
+        self._dark: bool = True
         # Set initial content so _render() never returns None
-        self.update(
-            f" [{_TERRACOTTA}]General[/{_TERRACOTTA}]  "
-            f" [green]●[/green] idle  |  [b]?[/b]/[dim]?[/dim]  "
-            f" [dim]0 tok | $0.0000[/dim]\n"
-            "[dim]Enter=send | /=cmds | Ctrl+C=stop | Ctrl+D=quit[/dim]"
-        )
+        self._refresh_display()
+
+    def set_theme(self, dark: bool) -> None:
+        """v2.4.2: switch the accent/muted palette (called by the app on
+        mount and on every theme change)."""
+        self._dark = bool(dark)
+        try:
+            self._refresh_display()
+        except Exception:
+            pass
+
+    @property
+    def dark(self) -> bool:
+        return self._dark
+
+    @property
+    def _pal(self) -> Dict[str, str]:
+        return _PALETTES[bool(self._dark)]
 
     def update_status(
         self,
@@ -109,36 +132,44 @@ class StatusBar(Static):
         """Rebuild and update the status bar text.
 
         v2.1.0 (Loop 3): Terracotta primary + muted layout.
+        v2.4.2: accent/muted follow the active theme palette.
         """
+        pal = self._pal
+        accent = pal["accent"]
+        muted = pal["muted"]
         state = self._state
 
         # State indicator with spinner or static icon
         if state == "thinking":
             icon = _SPINNER_FRAMES[self._spinner_frame % len(_SPINNER_FRAMES)]
-            state_markup = f"[{_TERRACOTTA}]{icon} thinking[/{_TERRACOTTA}]"
+            state_markup = f"[{accent}]{icon} thinking[/{accent}]"
         elif state == "running":
             icon = _SPINNER_FRAMES[self._spinner_frame % len(_SPINNER_FRAMES)]
-            state_markup = f"[{_TERRACOTTA}]{icon} tool running[/{_TERRACOTTA}]"
+            state_markup = f"[{accent}]{icon} tool running[/{accent}]"
         else:
             state_markup = "[green]●[/green] idle"
 
         # Section badge — terracotta accent
         section_label = SECTION_LABELS.get(self._section, self._section.title())
         section_style = {
-            "general": _TERRACOTTA,
+            "general": accent,
             "heavy_code": "magenta",
             "office": "yellow",
-        }.get(self._section, _TERRACOTTA)
+        }.get(self._section, accent)
 
         # Guardian badge
-        g_label, g_color = GUARDIAN_LABELS.get(self._guardian, ("off", "grey62"))
+        g_label, g_color = GUARDIAN_LABELS.get(self._guardian, ("off", muted))
+        # The static "off → grey62" entry predates theming; remap it so
+        # the badge stays readable on the light theme.
+        if self._guardian == "off":
+            g_color = muted
         guardian_markup = f"[{g_color}]guardian:{g_label}[/{g_color}]"
 
         left = f" [{section_style}]{section_label}[/{section_style}]  {guardian_markup} "
         center = f" {state_markup}  |  [b]{self._provider}[/b]/[dim]{self._model}[/dim] "
-        right = f" [dim]{self._tokens:,} tok | ${self._cost:.4f}[/dim] "
+        right = f" [{muted}]{self._tokens:,} tok | ${self._cost:.4f}[/{muted}] "
 
-        hints = "[dim]Enter=send | /=cmds | Ctrl+C=stop | Ctrl+D=quit[/dim]"
+        hints = f"[{muted}]Enter=send | /=cmds | Ctrl+C=stop | Ctrl+D=quit[/{muted}]"
 
         self.update(f"{left}{center}{right}\n{hints}")
 

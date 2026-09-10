@@ -78,6 +78,13 @@ _WHIMSICAL_VERBS = [
 ]
 
 # ── Terracotta + shimmer colors ──────────────────────────────────────
+# v2.4.2 (theme fix): per-theme accent/shimmer so the indicator stays
+# readable on the light theme. Mirrors the InfoBox.set_theme() pattern.
+_PALETTES = {
+    True: {"accent": "#d77757", "shimmer": "#eb9f7f"},    # dark
+    False: {"accent": "#b34d2e", "shimmer": "#7a3a22"},   # light
+}
+
 _TERRACOTTA = "#d77757"
 _SHIMMER = "#eb9f7f"
 
@@ -101,6 +108,21 @@ class ThinkingIndicator(Static):
         self._anim_task: Optional[asyncio.Task] = None
         self._verb: str = random.choice(_WHIMSICAL_VERBS)
         self._shimmer: bool = False
+        # v2.4.2: active theme (True = dark). Swapped via set_theme().
+        self._dark: bool = True
+
+    def set_theme(self, dark: bool) -> None:
+        """v2.4.2: switch the accent/shimmer palette."""
+        self._dark = bool(dark)
+
+    @property
+    def dark(self) -> bool:
+        return self._dark
+
+    @property
+    def running(self) -> bool:
+        """True while the animation task is alive."""
+        return self._anim_task is not None and not self._anim_task.done()
 
     def start(self) -> None:
         """Start the thinking animation. Picks a new random verb."""
@@ -130,8 +152,11 @@ class ThinkingIndicator(Static):
         """Animate the spinner — 120ms per frame."""
         try:
             while True:
+                # Palette looked up per frame so a mid-turn theme switch
+                # takes effect on the next tick.
+                pal = _PALETTES[bool(self._dark)]
                 frame = _SPINNER_FRAMES[self._spinner_frame % len(_SPINNER_FRAMES)]
-                color = _SHIMMER if self._shimmer else _TERRACOTTA
+                color = pal["shimmer"] if self._shimmer else pal["accent"]
                 self.update(f"[{color}]{frame} {self._verb}[/{color}]")
                 self._spinner_frame = (self._spinner_frame + 1) % len(_SPINNER_FRAMES)
                 # Toggle shimmer every 4 frames (~480ms)

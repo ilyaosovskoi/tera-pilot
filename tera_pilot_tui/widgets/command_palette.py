@@ -140,8 +140,8 @@ class CommandPalette(ModalScreen):
         max-width: 80;
         height: auto;
         max-height: 22;
-        background: #111114;
-        border: solid #2e2e33;
+        background: $surface;
+        border: solid $border;
         padding: 0;
         margin-bottom: 4;
     }
@@ -157,7 +157,7 @@ class CommandPalette(ModalScreen):
 
     #palette-filter {
         height: 3;
-        border: solid #2e2e33;
+        border: solid $border;
         margin: 0 1;
         padding: 0;
     }

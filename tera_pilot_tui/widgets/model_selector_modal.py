@@ -31,14 +31,14 @@ class ModelSelectorModal(ModalScreen):
         width: 80;
         height: auto;
         max-height: 30;
-        border: solid #2e2e33;
-        background: #111114;
+        border: solid $border;
+        background: $surface;
         padding: 1 2;
     }
 
     
     #selector-title {
-        color: #f5f5f7;
+        color: $text;
         text-style: bold;
         margin-bottom: 1;
     }
@@ -46,7 +46,7 @@ class ModelSelectorModal(ModalScreen):
     #selector-filter {
         margin-bottom: 1;
         height: 3;
-        border: solid #2e2e33;
+        border: solid $border;
     }
 
     #selector-list {
@@ -62,7 +62,7 @@ class ModelSelectorModal(ModalScreen):
 
     #selector-footer {
         height: 1;
-        color: #86868b;
+        color: $text-muted;
         text-style: italic;
     }
     """

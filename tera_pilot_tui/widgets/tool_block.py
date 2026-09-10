@@ -22,15 +22,36 @@ from textual.widgets import Static
 
 
 # ── Border colors by tool type ───────────────────────────────────────
+# v2.4.2 (theme fix): dark hues are tuned for near-black surfaces; the
+# light variants are darkened so headers stay readable on white.
+# Mirrors the InfoBox.set_theme() pattern.
 _TOOL_BORDER_COLORS = {
-    "execute_command": "#fd5db1",
-    "run_code": "#fd5db1",
-    "bash": "#fd5db1",
-    "write_file": "#fd5db1",
-    "str_replace": "#fd5db1",
-    "read_file": "#b1b9f9",
-    "self_verify": "#4eba65",
-    "default": "#fd5db1",
+    True: {   # dark
+        "execute_command": "#fd5db1",
+        "run_code": "#fd5db1",
+        "bash": "#fd5db1",
+        "write_file": "#fd5db1",
+        "str_replace": "#fd5db1",
+        "read_file": "#b1b9f9",
+        "self_verify": "#4eba65",
+        "default": "#fd5db1",
+    },
+    False: {  # light
+        "execute_command": "#a4138c",
+        "run_code": "#a4138c",
+        "bash": "#a4138c",
+        "write_file": "#a4138c",
+        "str_replace": "#a4138c",
+        "read_file": "#4a54c4",
+        "self_verify": "#1a7f37",
+        "default": "#a4138c",
+    },
+}
+
+# ── Body text color by theme ─────────────────────────────────────────
+_BODY_COLORS = {
+    True: "white",      # dark
+    False: "#1c1c22",   # light
 }
 
 # ── Unicode box drawing characters ──────────────────────────────────
@@ -65,17 +86,34 @@ class ToolBlock(Static):
         self._tool_path = tool_path
         self._content = content
         self._collapsed = False
-        self._border_color = _TOOL_BORDER_COLORS.get(
-            tool_name, _TOOL_BORDER_COLORS["default"]
-        )
+        # v2.4.2: active theme (True = dark). Swapped via set_theme().
+        self._dark: bool = True
+        self._border_color = self._resolve_border_color(tool_name)
+
+    # ---- theme ------------------------------------------------------------
+
+    def set_theme(self, dark: bool) -> None:
+        """v2.4.2: switch the palette (called by the app on theme change)."""
+        self._dark = bool(dark)
+        self._border_color = self._resolve_border_color(self._tool_name)
+        try:
+            self._redraw()
+        except Exception:
+            pass
+
+    @property
+    def dark(self) -> bool:
+        return self._dark
+
+    def _resolve_border_color(self, tool_name: str) -> str:
+        pal = _TOOL_BORDER_COLORS[bool(self._dark)]
+        return pal.get(tool_name, pal["default"])
 
     def set_tool_info(self, tool_name: str, tool_path: str = "") -> None:
         """Set the tool name and optional path."""
         self._tool_name = tool_name
         self._tool_path = tool_path
-        self._border_color = _TOOL_BORDER_COLORS.get(
-            tool_name, _TOOL_BORDER_COLORS["default"]
-        )
+        self._border_color = self._resolve_border_color(tool_name)
         self._redraw()
 
     def append_output(self, line: str) -> None:
@@ -136,7 +174,7 @@ class ToolBlock(Static):
 
         if body:
             # Use Text for body to avoid markup injection from tool output
-            body_text = Text(body, style="white")
+            body_text = Text(body, style=_BODY_COLORS[bool(self._dark)])
             # Combine header + body into a single renderable
             from rich.console import Group
             self.update(Group(header_text, body_text))

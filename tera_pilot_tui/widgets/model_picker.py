@@ -39,13 +39,13 @@ class ModelPickerModal(ModalScreen[str]):
         width: 60;
         height: auto;
         max-height: 25;
-        border: solid #505050;
+        border: solid $border;
         background: $surface;
         padding: 1 2;
     }
 
     #picker-title {
-        color: white;
+        color: $text;
         text-style: bold;
         margin-bottom: 1;
     }

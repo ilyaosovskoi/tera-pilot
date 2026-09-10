@@ -53,6 +53,46 @@ _SEPARATOR_COLOR = "#505050"
 # Surface background for user messages
 _SURFACE = "#373737"
 
+# ── Per-theme palettes (dark / light) ──────────────────────────────
+# v2.4.2 (theme fix): Rich inline styles are NOT repainted by
+# reload_css() — before this map, the whole conversation body was
+# hard-coded to dark-palette colors ("white" text, #aaaaaa results,
+# #505050 separators), which became unreadable on the light theme.
+# Mirrors the InfoBox.set_theme() pattern: the app calls
+# ChatLog.set_theme() on every theme switch.
+_PALETTES = {
+    True: {   # dark
+        "body": "white",
+        "thought": "grey62",
+        "result": "#aaaaaa",
+        "label": "#888888",
+        "separator": "#505050",
+        "error": "bold #ff6b6b",
+        "warning": "#ffaa88",
+        "warning_bold": "bold #ffaa88",
+        "approve": "#88ff88",
+        "reject": "#ff8888",
+        "modify": "#ffff88",
+        "unknown": "#aaaaaa",
+        "code_theme": "ansi_dark",
+    },
+    False: {  # light
+        "body": "#1c1c22",
+        "thought": "#5a5a64",
+        "result": "#55555e",
+        "label": "#6e6e78",
+        "separator": "#c9c9d2",
+        "error": "bold #d1242f",
+        "warning": "#9a6700",
+        "warning_bold": "bold #9a6700",
+        "approve": "#1a7f37",
+        "reject": "#d1242f",
+        "modify": "#9a6700",
+        "unknown": "#55555e",
+        "code_theme": "ansi_light",
+    },
+}
+
 
 class ChatLog(RichLog):
     """Scrollable chat area with support for streaming, tools, and markdown.
@@ -70,6 +110,9 @@ class ChatLog(RichLog):
         super().__init__(highlight=True, markup=True, wrap=True, **kwargs)
         self._streaming_text: str = ""
         self._streaming_active: bool = False
+        # v2.4.2: active theme (True = dark). Set by the app on mount and
+        # whenever the user switches theme, so the body palette matches.
+        self._dark: bool = True
         # v2.3.1-fix: line count before the in-progress streaming entry was
         # written. Used to roll the entry back and re-render it in place so
         # token chunks never pile up as N duplicate log entries (the old
@@ -79,6 +122,21 @@ class ChatLog(RichLog):
         self._stream_baseline: Optional[int] = None
         self._stream_write_scheduled: bool = False
 
+    # ---- theme ------------------------------------------------------------
+
+    def set_theme(self, dark: bool) -> None:
+        """v2.4.2: switch the body palette (called by the app on mount
+        and on every theme change)."""
+        self._dark = bool(dark)
+
+    @property
+    def dark(self) -> bool:
+        return self._dark
+
+    @property
+    def _pal(self) -> Dict[str, str]:
+        return _PALETTES[bool(self._dark)]
+
     # ---- user / system ------------------------------------------------------
 
     def add_user(self, text: str) -> None:
@@ -86,7 +144,7 @@ class ChatLog(RichLog):
         # Use Text to avoid markup injection from user content
         # v2.3.1: animate=True gives new messages a smooth scroll glide
         # instead of an instant jump (minimal motion language).
-        self.write(Text(f"> {text}", style="white"), animate=True)
+        self.write(Text(f"> {text}", style=self._pal["body"]), animate=True)
         self.write(Text(""))
 
     def add_system(self, text: str) -> None:
@@ -95,7 +153,7 @@ class ChatLog(RichLog):
 
     def add_plan(self, plan: str) -> None:
         """Display a plan proposal."""
-        self.write(Text("[plan]", style="bold #888888"), animate=True)
+        self.write(Text("[plan]", style=f"bold {self._pal['label']}"), animate=True)
         self.write(Markdown(clean_display_text(plan)), animate=True)
         self.write(Text(""))
 
@@ -104,9 +162,10 @@ class ChatLog(RichLog):
     def add_separator(self) -> None:
         """Display a thin separator line between messages.
 
-        v2.1.0 (Loop 3): Thin #505050 line between messages.
+        v2.1.0 (Loop 3): Thin separator line between messages.
+        v2.4.2: color follows the active theme palette.
         """
-        self.write(Text("─" * 60, style=_SEPARATOR_COLOR))
+        self.write(Text("─" * 60, style=self._pal["separator"]))
 
     # ---- model --------------------------------------------------------------
 
@@ -114,7 +173,7 @@ class ChatLog(RichLog):
         """Display agent thinking (greyed out)."""
         if not text:
             return
-        self.write(Text(clean_display_text(text).rstrip(), style="grey62"))
+        self.write(Text(clean_display_text(text).rstrip(), style=self._pal["thought"]))
 
     def append_token_delta(self, chunk: str) -> None:
         """Append a streaming token chunk to the live assistant response.
@@ -135,12 +194,12 @@ class ChatLog(RichLog):
             self._streaming_text = chunk
             if self._size_known:
                 self._stream_baseline = len(self.lines)
-                self.write(Text(clean_display_text(self._streaming_text), style="white"))
+                self.write(Text(clean_display_text(self._streaming_text), style=self._pal["body"]))
         else:
             self._streaming_text += chunk
             if self._size_known:
                 self._rollback_stream_entry()
-                self.write(Text(clean_display_text(self._streaming_text), style="white"))
+                self.write(Text(clean_display_text(self._streaming_text), style=self._pal["body"]))
 
     def _rollback_stream_entry(self) -> None:
         """Remove the in-progress streaming entry from the log.
@@ -208,32 +267,33 @@ class ChatLog(RichLog):
     def add_error(self, text: str) -> None:
         """Display an error message."""
         # Use Text to avoid markup injection from error content
-        self.write(Text(f"[!] {text}", style="bold #ff6b6b"))
+        self.write(Text(f"[!] {text}", style=self._pal["error"]))
         self.write(Text(""))
 
     def add_reviewer_verdict(self, verdict: str, feedback: str = "",
                              iterations: int = 0) -> None:
         """Render a reviewer verdict (no panel)."""
+        pal = self._pal
         color = {
-            "APPROVE": "#88ff88",
-            "REJECT": "#ff8888",
-            "MODIFY": "#ffff88",
-            "EXHAUSTED": "#888888",
-        }.get(verdict.upper(), "#aaaaaa")
+            "APPROVE": pal["approve"],
+            "REJECT": pal["reject"],
+            "MODIFY": pal["modify"],
+            "EXHAUSTED": pal["label"],
+        }.get(verdict.upper(), pal["unknown"])
         self.write(Text(f"[verdict] {verdict}", style=f"bold {color}"))
         if iterations:
             self.write(Text(f"iterations: {iterations}", style="dim"))
         if feedback:
-            self.write(Text(feedback.rstrip(), style="white"))
+            self.write(Text(feedback.rstrip(), style=pal["body"]))
         self.write(Text(""))
 
     def add_observer_warnings(self, warnings: list) -> None:
         """Render observer-mode warnings (no panel)."""
         if not warnings:
             return
-        self.write(Text(f"[warnings {len(warnings)}]", style="bold #ffaa88"))
+        self.write(Text(f"[warnings {len(warnings)}]", style=self._pal["warning_bold"]))
         for w in warnings:
-            self.write(Text(f"  • {w}", style="#ffaa88"))
+            self.write(Text(f"  • {w}", style=self._pal["warning"]))
         self.write(Text(""))
 
     # ---- tools ───────────────────────────────────────────────────────────
@@ -243,15 +303,15 @@ class ChatLog(RichLog):
         """Display a tool invocation (no panel)."""
         body = self._render_tool_args(tool, args)
         label = f"[{sub_label}] {tool}" if sub_label else tool
-        self.write(Text(f"→ {label}", style="bold #888888"))
+        self.write(Text(f"→ {label}", style=f"bold {self._pal['label']}"))
         self.write(body)
         self.write(Text(""))
 
     def add_tool_result(self, tool: str, result: str) -> None:
         """Display a tool result (no panel)."""
         preview = clean_display_text(result or "").rstrip()
-        self.write(Text(f"← {tool}", style="dim #888888"))
-        self.write(Text(preview or "(no output)", style="#aaaaaa"))
+        self.write(Text(f"← {tool}", style=f"dim {self._pal['label']}"))
+        self.write(Text(preview or "(no output)", style=self._pal["result"]))
         self.write(Text(""))
 
     def _render_tool_args(self, tool: str, args: Dict[str, Any]):
@@ -268,7 +328,8 @@ class ChatLog(RichLog):
                 lexer = _guess_lexer(path)
                 header = Text(f"{path}\n", style="bold")
                 return _Group(header, Syntax(content, lexer,
-                                             theme="ansi_dark", word_wrap=True))
+                                             theme=self._pal["code_theme"],
+                                             word_wrap=True))
         # Fallback: compact key: value listing
         # Since RichLog was created with markup=False, we must use
         # Text objects instead of markup strings to avoid Rich trying

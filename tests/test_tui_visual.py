@@ -9,6 +9,9 @@ Covers the changes that shipped together:
   3. The status header cycles a braille spinner + phase word.
   4. The welcome message carries the brand/key-hint styling.
   5. Dark and light theme CSS stay structurally in sync (same selectors).
+  6. v2.4.2: ChatLog/ToolBlock are theme-aware too, and the picker
+     modals use $surface/$border/$text variables instead of hard-coded
+     dark colors — so /theme light repaints the body, not just chrome.
 """
 
 import re
@@ -211,3 +214,119 @@ def test_info_box_default_version_is_current():
         (Path(__file__).resolve().parent.parent / "package.json").read_text()
     )["version"]
     assert m.group(1) == version
+
+
+# ── ChatLog / ToolBlock theme awareness ─────────────────────────────
+
+
+def test_chat_log_palette_switches_with_theme():
+    """v2.4.2: ChatLog.set_theme(False) must swap every body color away
+    from the dark palette (no white/#aaaaaa text left for light mode),
+    and set_theme(True) must restore the dark values."""
+    from tera_pilot_tui.widgets.chat_log import ChatLog
+
+    chat = ChatLog()
+    assert chat.dark is True
+    assert chat._pal["body"] == "white"
+
+    chat.set_theme(False)
+    assert chat.dark is False
+    light = chat._pal
+    for key in ("body", "thought", "result", "label", "separator", "unknown"):
+        assert light[key].lower() not in (
+            "white", "#aaaaaa", "#888888", "#505050", "grey62",
+        ), key
+    assert light["code_theme"] == "ansi_light"
+
+    chat.set_theme(True)
+    assert chat.dark is True
+    assert chat._pal["body"] == "white"
+    assert chat._pal["code_theme"] == "ansi_dark"
+
+
+def test_tool_block_palette_switches_with_theme():
+    """v2.4.2: ToolBlock.set_theme(False) must darken the border hues
+    and set_theme(True) must restore the dark ones."""
+    from tera_pilot_tui.widgets.tool_block import ToolBlock
+
+    tb = ToolBlock(tool_name="execute_command", content="hi")
+    assert tb.dark is True
+    dark_border = tb._border_color
+
+    tb.set_theme(False)
+    assert tb.dark is False
+    assert tb._border_color != dark_border
+
+    tb.set_theme(True)
+    assert tb.dark is True
+    assert tb._border_color == dark_border
+
+
+def test_picker_modals_use_theme_variables():
+    """v2.4.2: the picker/palette modals must style surfaces with
+    $surface/$border/$text variables (which follow the active theme)
+    instead of hard-coded dark hex colors."""
+    from pathlib import Path
+
+    base = Path(__file__).resolve().parent.parent / "tera_pilot_tui" / "widgets"
+    for name in ("model_selector_modal.py", "command_palette.py", "model_picker.py"):
+        css = (base / name).read_text(encoding="utf-8")
+        assert "#111114" not in css, name
+        assert "#2e2e33" not in css, name
+        assert "$surface" in css or "$border" in css, name
+
+
+# ── Thinking strip + StatusBar mounted ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_thinking_strip_shows_only_while_working():
+    """v2.4.2: the thinking strip is hidden when idle, appears with a
+    running animation on thinking/running, and hides again when the
+    turn ends — so 'no strip' unambiguously means idle/dead."""
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.widgets.thinking import ThinkingIndicator
+
+    app = TeraPilotTUIApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        thinking = app.query_one(ThinkingIndicator)
+        assert not thinking.has_class("visible")
+        assert not thinking.running
+
+        app._refresh_status("thinking")
+        await pilot.pause()
+        assert thinking.has_class("visible")
+        assert thinking.running
+
+        app._refresh_status("idle")
+        await pilot.pause()
+        assert not thinking.has_class("visible")
+        assert not thinking.running
+        assert app._exception is None
+
+
+@pytest.mark.asyncio
+async def test_status_bar_mounted_themed_and_updated():
+    """v2.4.2: the bottom statusline is mounted, follows the theme
+    palette, and reflects the turn state pushed via _refresh_status."""
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.widgets.status_bar import StatusBar
+
+    app = TeraPilotTUIApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        bar = app.query_one(StatusBar)
+        assert bar.dark is True
+
+        bar.set_theme(False)
+        assert bar.dark is False
+        assert bar._pal["muted"].lower() not in ("grey62", "#888888")
+
+        app._refresh_status("running")
+        await pilot.pause()
+        assert bar._state == "running"
+        app._refresh_status("idle")
+        await pilot.pause()
+        assert bar._state == "idle"
+        assert app._exception is None
