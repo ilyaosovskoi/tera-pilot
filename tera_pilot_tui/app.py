@@ -438,6 +438,12 @@ class TeraPilotTUIApp(App):
         # v2.1.0 (G17): automatic learning loop
         elif cmd == "/learnings":
             self._exec_learnings(arg)
+        # v2.4.0: self-improvement loop (post-run proposals + dogfooding tasks)
+        elif cmd == "/improve":
+            self._exec_improve(arg)
+        # v2.4.0: endurance limits (how long one run may keep working)
+        elif cmd == "/endurance":
+            self._exec_endurance(arg)
         # v2.1.0 (G18): web search backend status
         elif cmd == "/websearch":
             self._exec_websearch(arg)
@@ -686,6 +692,8 @@ class TeraPilotTUIApp(App):
             "canvas": lambda: self._exec_canvas(""),
             "websearch": lambda: self._exec_websearch(""),
             "learnings": lambda: self._exec_learnings(""),
+            "improve": lambda: self._exec_improve(""),
+            "endurance": lambda: self._exec_endurance(""),
             "agents": lambda: self._exec_agents(""),
             "audit": lambda: self._exec_audit(""),
             "audit-signed": lambda: self._exec_audit_signed(""),
@@ -1498,7 +1506,8 @@ class TeraPilotTUIApp(App):
                 f"    /budget compaction <50-95>\n"
                 f"    /budget caching on|off\n"
                 f"    /budget predictable on|off\n"
-                f"    /budget reset"
+                f"    /budget reset\n\n"
+                f"  Longer runs (hard ceiling, wall clock, auto-extension): /endurance"
             )
             self.query_one(InputBox).focus()
             return
@@ -1941,6 +1950,129 @@ class TeraPilotTUIApp(App):
         else:
             chat.add_system(f"[red]Error:[/red] {r.get('error', 'unknown')}")
         self.query_one(InputBox).focus()
+
+    # ── v2.4.0 — Self-improvement loop ────────────────────────────
+
+    def _exec_improve(self, arg: str) -> None:
+        """Review the self-improvement backlog and prepare dogfooding tasks.
+
+        Usage:
+            /improve                — list open proposals + counts
+            /improve show <id>      — full detail for one proposal
+            /improve next           — highest-priority open proposal
+            /improve task [id]      — build a self-task and pre-fill the composer
+            /improve done <id>      — mark applied (after the fix lands)
+            /improve dismiss <id>   — stop surfacing / injecting it
+            /improve restore <id>   — undo a dismissal
+            /improve reset          — clear the backlog for this workspace
+
+        ``/improve task`` never runs anything by itself: it writes the
+        prepared task into the composer, so the human reviews and submits
+        it through the normal approval flow.
+        """
+        chat = self.query_one(ChatLog)
+        workspace = self.bridge.workspace or os.getcwd()
+        r = self.bridge.handle_improve_command(workspace, arg or "")
+        box = self.query_one(InputBox)
+        # The composer is a single-line Input: pre-fill the compact task
+        # variant (the full markdown task is printed to the chat log
+        # above it), so Enter runs the prepared task as-is.
+        composer_prompt = r.get("composer_prompt")
+        if composer_prompt:
+            box.value = composer_prompt
+        text = r.get("text")
+        if text:
+            chat.add_system(text)
+        elif not r.get("ok"):
+            chat.add_system(f"[red]Error:[/red] {r.get('error', 'unknown')}")
+        box.focus()
+
+    # ── v2.4.0 — Endurance limits ─────────────────────────────────
+
+    def _exec_endurance(self, arg: str) -> None:
+        """Show / tune how long one agent run may keep working.
+
+        Usage:
+            /endurance                 — show the effective policy
+            /endurance iterations <n>  — explicit hard ceiling (0 = derive)
+            /endurance ceiling <n>     — upper bound of the derived ceiling
+            /endurance floor <n>       — lower bound of the derived ceiling
+            /endurance factor <n>      — soft × factor when deriving
+            /endurance margin <n>      — iterations without progress that still extend
+            /endurance seconds <n>     — wall-clock budget per run (0 = unlimited)
+            /endurance reset           — restore defaults
+        """
+        chat = self.query_one(ChatLog)
+        arg = (arg or "").strip()
+        if arg:
+            parts = arg.split(None, 1)
+            sub = parts[0].lower()
+            raw = parts[1].strip() if len(parts) > 1 else ""
+            if sub not in ("reset",) and not raw:
+                chat.add_system(
+                    "[red]Usage:[/red] /endurance [iterations|ceiling|floor|factor|margin|seconds] <n>"
+                )
+                self.query_one(InputBox).focus()
+                return
+            try:
+                if sub == "reset":
+                    from tera_pilot.endurance import reset_endurance_limits
+                    limits = reset_endurance_limits()
+                    self.bridge.set_endurance_limits()  # re-sync the live agent
+                    chat.add_system(
+                        "[b]Endurance limits reset[/b]\n"
+                        + "\n".join(limits.describe(self.bridge.max_iterations or 8))
+                    )
+                    self.query_one(InputBox).focus()
+                    return
+                kwargs = {
+                    "iterations": "hard_iterations",
+                    "ceiling": "hard_ceiling",
+                    "floor": "hard_floor",
+                    "factor": "extend_factor",
+                    "margin": "extend_margin",
+                    "seconds": "max_wall_seconds",
+                }.get(sub)
+                if kwargs is None:
+                    chat.add_system(f"[red]Unknown subcommand:[/red] {sub}")
+                    self.query_one(InputBox).focus()
+                    return
+                value = float(raw) if kwargs == "max_wall_seconds" else int(float(raw))
+                r = self.bridge.set_endurance_limits(**{kwargs: value})
+                if not r.get("ok"):
+                    chat.add_system(f"[red]Error:[/red] {r.get('error', 'unknown')}")
+                    self.query_one(InputBox).focus()
+                    return
+                chat.add_system("[b]Endurance limits updated[/b]")
+                self._print_endurance(chat, r)
+                self.query_one(InputBox).focus()
+                return
+            except ValueError:
+                chat.add_system(f"[red]Not a number:[/red] {raw!r}")
+                self.query_one(InputBox).focus()
+                return
+        r = self.bridge.get_endurance_limits()
+        if not r.get("ok"):
+            chat.add_system(f"[red]Error:[/red] {r.get('error', 'unknown')}")
+        else:
+            self._print_endurance(chat, r)
+        self.query_one(InputBox).focus()
+
+    def _print_endurance(self, chat, r: dict) -> None:
+        from tera_pilot.endurance import EnduranceLimits
+        limits = EnduranceLimits.from_dict(r.get("limits", {}))
+        soft = int(r.get("soft_iterations", 8) or 8)
+        lines = ["[b]Endurance — how long one run may work[/b]", ""]
+        for line in limits.describe(soft):
+            lines.append(f"  {line}")
+        lines += [
+            "",
+            "  [cyan]/endurance iterations <n>[/cyan]  explicit hard ceiling (0 = derive)",
+            "  [cyan]/endurance seconds <n>[/cyan]     wall-clock budget per run (0 = off)",
+            "  [cyan]/endurance factor <n>[/cyan]      soft × factor when deriving",
+            "  [cyan]/endurance margin <n>[/cyan]      iterations without progress that still extend",
+        ]
+        chat.add_system("\n".join(lines))
 
     # ── v2.1.0 (G18) — Web search backend status ──────────────────
 

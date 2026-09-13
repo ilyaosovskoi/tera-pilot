@@ -91,10 +91,17 @@ iteration n:
 Key behaviors you will encounter (and must preserve):
 
 - **Iteration budget is a SOFT cap** — while the agent keeps executing tools
-  successfully, the loop auto-extends up to `hard_max_iterations` (3× soft,
-  at least 40, at most 200). Genuinely stuck loops (repeated errors, no tools)
+  successfully, the loop auto-extends up to `hard_max_iterations`, derived by
+  the `EnduranceLimits` policy (`tera_pilot/endurance.py`): by default 3× soft,
+  at least 40, at most 200, plus an optional per-run wall-clock budget. Users
+  tune it with `/endurance`, the `endurance` config block, or the
+  `TERA_PILOT_*` env vars. Genuinely stuck loops (repeated errors, no tools)
   still stop at the cap. `max_iterations` is a property precisely so the
   hard ceiling stays in sync when callers mutate it.
+- **Every turn feeds the self-improvement loop** — `_run_agent_loop` wraps
+  `_run_agent_loop_inner` and calls `self_improvement.observe_run(result)`
+  afterwards. Keep that observation strictly post-hoc and non-fatal: a broken
+  improvement backlog must never fail a user's task.
 - **Prose without a tool call** is retried twice, then accepted as a final
   answer (marked `degraded` if no tool ever ran).
 - **Repetition-dominated responses** are refused (repetition guard) instead of

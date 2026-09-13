@@ -360,11 +360,45 @@ python3 benchmarks/bench_security.py
 Tera Pilot runs a ReAct-style agent loop: **Plan → Explore → Act → Verify → Report**.
 
 Each turn is bounded by an **iteration budget** — a soft cap that auto-extends
-while the agent keeps making real progress (up to 3× the soft cap, 40–200), so
-large multi-file tasks run to completion while genuinely stuck loops still
-stop; runs that hit the ceiling keep their partial output. Soft-cap priority:
-`--max-iterations` > `token_budget.max_iterations` > `agent_max_iterations` >
-default 8; the `heavy_code` section gets a floor of 20.
+while the agent keeps making real progress (by default up to 3× the soft cap,
+40–200), so large multi-file tasks run to completion while genuinely stuck
+loops still stop; runs that hit the ceiling keep their partial output.
+Soft-cap priority: `--max-iterations` > `token_budget.max_iterations` >
+`agent_max_iterations` > default 8; the `heavy_code` section gets a floor
+of 20.
+
+**How long a run may work** is a configurable *endurance policy*, not a
+hardcoded constant: `/endurance` in the TUI (or the `endurance` block in
+`~/.tera_pilot/config.json`) controls the hard ceiling, the
+extension factor and the «recently productive» margin, plus an optional
+**wall-clock budget** per run (checked between iterations, so a slow provider
+can't keep one turn alive forever). Environment overrides
+(`TERA_PILOT_HARD_MAX_ITERATIONS`, `TERA_PILOT_RUN_MAX_SECONDS`, …) make the
+same policy available in CI.
+
+### Self-Improvement
+
+Tera Pilot learns from its own runs, per project, with measured evidence:
+
+- **Observe** — after every turn the runtime analyses the finished run and
+  records `ImprovementProposal`s for measurable failure patterns: budget
+  exhaustion, prose without tool use, writes that were never verified, high
+  tool-error rates, repeated identical tool calls, and file thrashing.
+- **Remember** — proposals persist in
+  `~/.tera_pilot/improvements/<project>.jsonl`; recurring signals bump an
+  occurrence counter instead of duplicating, and the top patterns are
+  injected into the system prompt as *rules to avoid*. The agent's own
+  history changes how it behaves today.
+- **Fix (dogfooding)** — `/improve list|show|next` reviews the backlog and
+  `/improve task <id>` prepares a self-improvement task for Tera Pilot's own
+  repository; the prompt is pre-filled into the composer so the human
+  submits it and the run goes through the normal approvals. It is only
+  generated when the workspace really is the Tera Pilot source tree.
+
+Everything is local, zero-telemetry, and bounded (at most three patterns,
+~1200 characters injected), so self-improvement guidance can never dominate
+the prompt. Both halves can be switched off in `config.json`
+(`self_improvement.enabled` / `self_improvement.inject`).
 
 Tools: files (`read_file`, `write_file`, `str_replace`, `apply_diff`, `delete_file`, `rename_file`), search (`search_project`, `grep`, `glob`, `list_files`, `get_project_structure`), execution (`execute_command`, `run_code`), Git (status, diff, stage, commit, checkpoints and undo), web (`web_search`, `web_fetch`), MCP tools, agents (subagents, parallel tasks, watchdog, task decomposition), verification (`self_verify`, test execution, reviewer subagents) and office workflows (`.docx`, `.xlsx`, `.pptx`).
 
