@@ -3,7 +3,8 @@
 Layout: status bar on top, scrollable chat log in the middle, inline
 command-suggestion bar above the input, input line at the bottom.
 
-The original Input.Submitted mechanism is preserved — Enter works natively.
+v2.4.3: the composer (InputBox) is a growing multi-line TextArea. Enter is
+still intercepted by InputBox._on_key, which calls _submit_prompt directly.
 Inline suggestions appear when "/" is typed but do NOT intercept Enter.
 """
 
@@ -15,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Input
+from textual.widgets import TextArea
 
 from .bridge import TeraPilotBridge
 from .widgets.approval_modal import ApprovalModal, GuardianModal
@@ -146,7 +147,8 @@ class TeraPilotTUIApp(App):
             "[dim]Type / for slash commands · Ctrl+P for the command palette · "
             "Ctrl+G for the web GUI[/dim]\n"
             "[dim]Ctrl+C interrupts · Ctrl+D quits · Ctrl+T switches theme · "
-            "Up/Down recall history[/dim]"
+            "Up/Down recall history · Shift+Enter for a new line[/dim]\n"
+            "[dim]The composer grows as you type — long requests are fine.[/dim]"
         )
 
         # Set up suggestions
@@ -292,22 +294,15 @@ class TeraPilotTUIApp(App):
         self._refresh_status("thinking")
         self._run_turn(prompt)
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Fallback handler — intentionally disabled.
+    # v2.4.3: no TextArea.Submitted equivalent exists — InputBox._on_key is
+    # the single submission path (the old disabled Input.Submitted fallback
+    # existed because a second handler double-submitted prompts).
 
-        InputBox._on_key intercepts Enter before Input.Submitted can fire.
-        Keeping this enabled caused DOUBLE submission: the call from the
-        key handler set _running=True, then this handler fired again,
-        saw _running=True, and silently dropped the message — meanwhile
-        the user's prompt was lost on the first call.
-        """
-        return
-
-    def on_input_changed(self, event: Input.Changed) -> None:
-        """Show/hide inline suggestions when input starts/stop with '/'."""
-        if event.input.id != "input":
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        """Show/hide inline suggestions when the composer starts/stops with '/'."""
+        if event.text_area.id != "input":
             return
-        val = event.value
+        val = event.text_area.text
         if val.startswith("/"):
             self._show_suggestions(val)
         elif self._suggestions_active:
@@ -1974,9 +1969,10 @@ class TeraPilotTUIApp(App):
         workspace = self.bridge.workspace or os.getcwd()
         r = self.bridge.handle_improve_command(workspace, arg or "")
         box = self.query_one(InputBox)
-        # The composer is a single-line Input: pre-fill the compact task
-        # variant (the full markdown task is printed to the chat log
-        # above it), so Enter runs the prepared task as-is.
+        # Pre-fill the composer with the compact task variant (the full
+        # markdown task is printed to the chat log above it), so Enter runs
+        # the prepared task as-is. composer_prompt is already single-line;
+        # it is set as text so the caret lands at the end.
         composer_prompt = r.get("composer_prompt")
         if composer_prompt:
             box.value = composer_prompt

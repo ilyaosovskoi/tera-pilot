@@ -368,3 +368,110 @@ async def test_canvas_strip_shows_only_with_nodes():
             assert app._exception is None
     finally:
         canvas.reset()
+
+
+# ── bottom-edge clearance + action buttons (v2.4.3) ────────────────────
+
+
+def _push_guardian_modify_modal(app) -> None:
+    """Push the Guardian MODIFY modal (the 3-button variant)."""
+    app._show_confirm({
+        "action": "execute_command",
+        "summary": "Run: rm -rf /tmp/important",
+        "guardian_verdict": "MODIFY",
+        "suggested_args": {"command": "rm /tmp/important"},
+        "rationale": "Recursive delete is risky",
+        "risk_level": "high",
+        "reasons": ["recursive delete"],
+    })
+
+
+@pytest.mark.asyncio
+async def test_statusline_is_lifted_off_the_bottom_edge():
+    """v2.4.3: the docked statusline used to hug the very last terminal
+    row; it now leaves a blank row underneath, and the composer above it
+    is still intact."""
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.widgets.input_box import InputBox
+    from tera_pilot_tui.widgets.status_bar import StatusBar
+
+    app = TeraPilotTUIApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        bar = app.query_one(StatusBar)
+        box = app.query_one(InputBox)
+        rows_below = app.screen.size.height - (bar.region.y + bar.region.height)
+        assert rows_below >= 1, f"statusline touches the bottom edge: {bar.region}"
+        assert box.region.y + box.region.height <= bar.region.y
+        assert app._exception is None
+
+
+def test_action_button_rules_are_rounded_in_both_themes():
+    """v2.4.3: the Approve/Deny/Use Fix buttons are round-bordered accent
+    pills, not the old saturated 24-wide slabs."""
+    from pathlib import Path
+
+    base = Path(__file__).resolve().parent.parent / "tera_pilot_tui"
+    for name in ("styles_dark.tcss", "styles_light.tcss"):
+        css = (base / name).read_text(encoding="utf-8")
+        assert "#approval-buttons Button,\n#guardian-buttons Button {" in css, name
+        assert "border: round" in css, name
+        # The old slab palette must not come back through another rule.
+        for stale in ("#1e7a34", "#8f2d24", "#2c9c46", "#b03a2f", "#3d5a99"):
+            assert stale not in css, f"{name}: stale button colour {stale}"
+
+
+@pytest.mark.asyncio
+async def test_approval_buttons_are_rounded_with_live_states():
+    from tera_pilot_tui.app import TeraPilotTUIApp
+
+    app = TeraPilotTUIApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._show_confirm({"action": "execute_command", "summary": "Run: rm -rf /tmp"})
+        await pilot.pause(0.3)
+        modal = app._approval_modal
+        assert modal is not None
+        approve = modal.query_one("#approve")
+        deny = modal.query_one("#deny")
+
+        for btn in (approve, deny):
+            assert btn.styles.border_top[0] == "round", btn.styles.border_top
+            assert btn.region.height == 3
+        # The buttons are content-sized now, not 24-wide blocks.
+        assert deny.region.width < 24, deny.region
+
+        idle_bg = deny.styles.background.hex
+        assert idle_bg not in ("#8F2D24", "#B03A2F"), idle_bg
+        await pilot.hover("#deny")
+        await pilot.pause()
+        assert deny.styles.background.hex != idle_bg, "hover state is not styled"
+
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert app._exception is None
+
+
+@pytest.mark.asyncio
+async def test_guardian_buttons_are_rounded_accent_pills():
+    from tera_pilot_tui.app import TeraPilotTUIApp
+
+    app = TeraPilotTUIApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        _push_guardian_modify_modal(app)
+        await pilot.pause(0.3)
+        modal = app._approval_modal
+        assert modal is not None
+
+        accents = {}
+        for bid in ("#approve", "#use_fix", "#reject"):
+            btn = modal.query_one(bid)
+            assert btn.styles.border_top[0] == "round", (bid, btn.styles.border_top)
+            accents[bid] = btn.styles.border_top[1].hex
+        # Each action keeps its own accent colour (green / blue / red).
+        assert len(set(accents.values())) == 3, accents
+
+        await pilot.press("escape")
+        await pilot.pause(0.2)
+        assert app._exception is None

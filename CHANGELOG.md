@@ -34,6 +34,19 @@ and the tests.
    so nothing gets faster or slower unless the user asks for it. A run that
    hits the wall-clock budget stops between iterations with an explicit
    message and keeps its partial output.
+3. **The TUI composer grows with the prompt** — the bottom input line is now
+   a soft-wrapping, auto-growing composer (up to eight lines, then it
+   scrolls) instead of a single-line field, so a long request stays
+   readable while you type it. Shift+Enter (or Ctrl+J) inserts a newline,
+   Enter still submits the whole prompt, Up/Down still recall history while
+   the prompt is one line, and the docked statusline no longer overlaps the
+   input box's bottom border.
+4. **TUI footer & approval buttons, restyled** — the bottom statusline keeps
+   a blank row under it instead of hugging the last terminal row, and the
+   Approve / Deny / Use Fix / Reject buttons in the approval and Guardian
+   modals are now rounded accent pills (hairline border, tinted surface,
+   accent label, deeper fill on focus) instead of solid 24-wide slabs, so
+   they match the modals' round frames in both themes.
 
 ## [2.4.0] — Agent profiles, fleets & convenient keys
 
