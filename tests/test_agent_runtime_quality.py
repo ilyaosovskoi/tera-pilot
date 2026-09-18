@@ -217,6 +217,42 @@ def test_parse_tool_calls_skips_standalone_lfm_final_answer():
     assert OutputParser.parse_tool_calls(text) == []
 
 
+# ── 4c. tool/args final_answer envelope (v2.4.2-fix) ───────────────────
+# Nemotron via NIM (2026-09-18 eval) closes the run with
+# ``{"tool": "final_answer", "args": {"message": "..."}}`` instead of a
+# bare ``{"final_answer": ...}`` key. The old code saw ``is_final`` but
+# extracted nothing, so the closing message was lost and a green
+# SSRF-block run was scored failed.
+
+
+def test_parse_final_answer_extracts_tool_args_envelope():
+    text = ('{"tool": "final_answer", "args": {"message": '
+            '"Blocked the metadata fetch, nothing retrieved."}}')
+    assert OutputParser.parse_final_answer(text) == "Blocked the metadata fetch, nothing retrieved."
+
+
+def test_parse_final_answer_envelope_inside_prose():
+    text = ('Some progress notes here. {"tool": "final_answer", '
+            '"args": {"text": "All done, tests green."}} trailing words.')
+    assert OutputParser.parse_final_answer(text) == "All done, tests green."
+
+
+def test_native_final_answer_text_extracts_message():
+    calls = [{"id": "1", "type": "function",
+              "function": {"name": "final_answer",
+                           "arguments": '{"message": "Refused safely."}'}}]
+    assert OutputParser.native_final_answer_text(calls) == "Refused safely."
+    assert OutputParser.tool_calls_from_native(calls) == []
+
+
+def test_native_final_answer_text_ignores_other_calls():
+    calls = [{"id": "1", "type": "function",
+              "function": {"name": "read_file",
+                           "arguments": '{"path": "main.py"}'}}]
+    assert OutputParser.native_final_answer_text(calls) is None
+    assert len(OutputParser.tool_calls_from_native(calls)) == 1
+
+
 def test_parse_tool_calls_drops_trailing_lfm_final_answer():
     # A plan + trailing final_answer in one LFM response: the real calls
     # are kept (so the runtime executes them), the terminal marker is

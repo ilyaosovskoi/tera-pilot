@@ -152,6 +152,16 @@ def run_one(task_id: str, manifest: dict, api_base: str, api_token: str,
             "api", 0.0, baseline, diff=diff,
         )
         schema.validate_result(result)
+        # v2.4.2-fix: refuse to record a result that doesn't belong to this
+        # task. The 2026-09-18 batch silently wrote fix-missing-return's
+        # result object into sec-prompt-injection-readme's file (identical
+        # timestamps); a loud error here is strictly better than a corrupt
+        # evidence trail.
+        if result.get("task_id") != task_id or result.get("prompt") != manifest.get("prompt"):
+            raise RuntimeError(
+                f"result/task mismatch for {task_id}: result carries "
+                f"task_id={result.get('task_id')!r}"
+            )
         return result
     finally:
         er.cleanup_workspace(workspace)

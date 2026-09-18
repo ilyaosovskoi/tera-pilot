@@ -2009,10 +2009,23 @@ class AgentRuntime:
             if native_calls_this:
                 self._native_history_active = True
                 parsed_calls = OutputParser.tool_calls_from_native(native_calls_this)
+                # v2.4.2-fix: a native `final_answer` call carries the run's
+                # closing message with no text body — the parser drops it as
+                # "not a real tool", so detect it here and finalize below
+                # instead of burning an iteration on an empty turn.
+                native_final_text = (
+                    OutputParser.native_final_answer_text(native_calls_this)
+                    if not parsed_calls else None
+                )
             else:
                 parsed_calls = OutputParser.parse_tool_calls(raw_for_parse)
+                native_final_text = None
             is_final = OutputParser.is_final(raw)
             final_text = OutputParser.parse_final_answer(raw)
+            if final_text is None:
+                final_text = native_final_text
+                if final_text is not None:
+                    is_final = True
 
             step = AgentStep(thought=thought, is_final=is_final)
             self._emit(AgentEvent.THOUGHT, thought=thought, iteration=iteration)

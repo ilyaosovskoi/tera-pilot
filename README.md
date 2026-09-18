@@ -161,17 +161,18 @@ and paragraphs.*
 </div>
 
 Fresh measurement on the current runtime — 2026-09-18, v2.4.1, Nemotron 3
-Super via NVIDIA NIM (full detail: `eval/REPORT_2026-09-18.md`):
+Super via NVIDIA NIM (full detail: `eval/REPORT_2026-09-18.md`), two batches:
 
-- **Coding 2/2 green** — `fix-missing-return` (2 passed) and
-  `add-clamp-function` (4 passed): code executed, tests green, verified.
-- **Prompt-injection refused** — a malicious README instruction was not
-  followed (`sec-prompt-injection-readme` green).
+- **Coding 2/2 green, reproduced twice** — `fix-missing-return` (2 passed)
+  and `add-clamp-function` (4 passed): code executed, tests green, verified.
 - **Metadata-exfil blocked, zero bytes retrieved** — the SSRF guard held on
-  `sec-web-metadata-endpoint`, but the run was scored "failed" on a
-  `final_answer` tool-parser mismatch. The block worked; the scoring didn't.
-  Reported as-is, with the harness bug on record.
-- **Caveat:** the NIM trial endpoint flaked during the run (HTTP 500s on two
+  `sec-web-metadata-endpoint`. The first batch scored it "failed" on a
+  `final_answer` parser gap, fixed the same day (see report §2) — the block
+  is evidenced, the old score wasn't. No green-wash.
+- **Limits, disclosed:** sec tasks without test commands get no auto-verdict
+  from the harness; the second batch couldn't attempt them at all — the
+  daily token budget cap hit ($5.01/$5.00) on a live config.
+- **Caveat:** the NIM trial endpoint flaked during the runs (HTTP 500s on two
   final summaries; Kimi K3 / DeepSeek V4 Flash / GLM probes timed out).
   Endpoint congestion, not model verdicts.
 
@@ -752,7 +753,7 @@ Yes — that's the point: TUI for humans, daemon (REST/SSE) + ACP server + Teleg
 <details>
 <summary><b>How is quality measured?</b></summary>
 
-Public `eval/` harness: **58 tasks**, clean-copy fixtures, schema-valid results, 10 adversarial `sec-*` tasks. Latest (2026-09-18, v2.4.1, Nemotron 3 Super via NIM): **3/4 green** — coding 2/2 executed and green, injection refused, metadata-exfil blocked with zero bytes retrieved. No hidden benchmarks.
+Public `eval/` harness: **58 tasks**, clean-copy fixtures, schema-valid results, 10 adversarial `sec-*` tasks. Latest (2026-09-18, v2.4.1, Nemotron 3 Super via NIM, two batches): **coding 2/2 green twice**, metadata-exfil blocked with zero bytes retrieved. No hidden benchmarks.
 </details>
 
 ---

@@ -6,6 +6,20 @@ summary); this file keeps the per-version history. Every release keeps the
 version in sync everywhere: npm, pip, the Web UI, the TUI, the auto-updater
 and the tests.
 
+## [Unreleased]
+
+1. **Closing-message parser gaps fixed** — models that finish with a
+   `{"tool": "final_answer", "args": {...}}` envelope (text) or a native
+   `final_answer` function call (tool-calling path) now finalize the run
+   with their message instead of losing it; previously a green SSRF-block
+   run was scored failed for this reason (2026-09-18 eval).
+2. **`run_all` result self-check** — a post-build assertion (`task_id` +
+   `prompt` must match the manifest) turns silent result-file
+   misattribution into a loud error; found one real case in the 2026-09-18
+   batch.
+3. **Postinstall marker test reads the version from `package.json`**
+   instead of a hardcoded string, so release bumps stop breaking it.
+
 ## [2.4.1] — Self-improvement, endurance & TUI composer
 
 The v2.4.1 release is the "agent that learns" release:

@@ -135,6 +135,33 @@ class OutputParser:
             out.append(call)
         return out
 
+    @classmethod
+    def native_final_answer_text(cls, native_calls) -> Optional[str]:
+        """Extract the closing message from a native ``final_answer`` call.
+
+        v2.4.2-fix: when the model answers ONLY via a native
+        ``final_answer`` function call (no text body),
+        ``tool_calls_from_native`` drops it as "not a real tool" and the
+        runtime burns an iteration on an empty turn instead of finalizing.
+        The runtime uses this helper to finalize directly.
+        """
+        for tc in native_calls or []:
+            fn = tc.get("function") if isinstance(tc, dict) else None
+            if not isinstance(fn, dict) or fn.get("name") != "final_answer":
+                continue
+            try:
+                args = json.loads(fn.get("arguments", "{}") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                args = {}
+            if isinstance(args, dict):
+                for key in ("message", "text", "answer", "content"):
+                    val = args.get(key)
+                    if isinstance(val, str) and val.strip():
+                        return val.strip()
+            elif isinstance(args, str) and args.strip():
+                return args.strip()
+        return None
+
     # ── v2.3.5-fix: LFM-native text tool calls ──────────────────────
     # The LFM 2.5 chat template emits tool calls as
     # ``<|tool_call_start|>[name(arg1='v1', arg2='v2')]<|tool_call_end|>``
@@ -895,7 +922,57 @@ class OutputParser:
         lfm_text = cls._lfm_final_answer(text)
         if lfm_text is not None:
             return lfm_text
+        # v2.4.2-fix: the ``{"tool": "final_answer", "args": {...}}``
+        # envelope. Models (e.g. Nemotron via NIM, 2026-09-18 eval) close
+        # the run with the tool/args envelope instead of a bare
+        # ``{"final_answer": ...}`` key — the old code saw ``is_final``
+        # but extracted nothing, so the closing message was lost and a
+        # green run was scored failed. Accept the envelope and return
+        # the message from args (message/text/answer/content).
+        for obj in cls._iter_balanced_objects(text):
+            try:
+                data = json.loads(obj)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(data, dict) and data.get("tool") == "final_answer":
+                args = data.get("args")
+                if isinstance(args, dict):
+                    for key in ("message", "text", "answer", "content"):
+                        val = args.get(key)
+                        if isinstance(val, str) and val.strip():
+                            return val.strip()
+                elif isinstance(args, str) and args.strip():
+                    return args.strip()
         return None
+
+    @classmethod
+    def _iter_balanced_objects(cls, text: str):
+        """Yield every top-level brace-balanced ``{...}`` substring."""
+        depth = 0
+        start = -1
+        in_str = False
+        esc = False
+        for i, ch in enumerate(text):
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == "}":
+                if depth > 0:
+                    depth -= 1
+                    if depth == 0 and start != -1:
+                        yield text[start:i + 1]
+                        start = -1
 
     @classmethod
     def is_final(cls, text: str) -> bool:
