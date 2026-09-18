@@ -32,6 +32,8 @@ from tera_pilot.providers import ProviderRegistry, ProviderMessage, ProviderResp
 from tera_pilot.project_context import get_project_context
 from tera_pilot.context_manager import get_context_manager
 from tera_pilot.activity_log import CATEGORY_INFO, STATUS_OK, STATUS_ERROR
+from tera_pilot.endurance import EnduranceLimits, get_endurance_limits
+from tera_pilot.self_improvement import build_self_improvement_fragment, observe_run
 from tera_pilot.skill_loader import load_all_skills_with_builtins, build_skill_catalog
 from .types import AgentEvent, AgentStep, Task, TaskResult, TaskType, ToolCall, ToolName
 from .context_memory import ContextMemory, _estimate_tokens
@@ -67,13 +69,22 @@ class AgentRuntime:
 
     @max_iterations.setter
     def max_iterations(self, value: int) -> None:
-        # Keep the hard ceiling derived and in sync: 3× soft, at least 40,
-        # at most 200. Mutations after construction (the API server raises
-        # the cap for heavy_code per request) must not leave a stale ceiling
-        # computed from the original value.
+        # Keep the hard ceiling derived and in sync: by default 3× soft, at
+        # least 40, at most 200 — but now driven by the configurable
+        # EnduranceLimits policy (``/endurance``), so a user who needs very
+        # long runs can raise the ceiling without editing source. Mutations
+        # after construction (the API server raises the cap for heavy_code
+        # per request) must not leave a stale ceiling computed from the
+        # original value.
         value = max(0, int(value or 0))
         self._max_iterations = value
-        self.hard_max_iterations = min(200, max(value * 3, 40))
+        endurance = getattr(self, "endurance", None)
+        if endurance is None:
+            # Defensive: keep the property usable even if __init__ was
+            # bypassed (e.g. an old subclass calling the setter first).
+            endurance = get_endurance_limits().normalized()
+            self.endurance = endurance
+        self.hard_max_iterations = endurance.hard_for(value)
 
     def __init__(
         self,
@@ -88,6 +99,7 @@ class AgentRuntime:
         section: str = "general",
         on_token_delta: Optional[Callable[[str], None]] = None,
         compact_prompt: Optional[bool] = None,
+        endurance: Optional[EnduranceLimits] = None,
     ):
         self._registry = registry
         self.memory = ContextMemory(persist_path=memory_persist_path)
@@ -123,6 +135,13 @@ class AgentRuntime:
         # sync: the API server sets ``agent.max_iterations`` directly per
         # request (e.g. the heavy_code floor of 20) and would otherwise
         # leave the hard ceiling computed from the original value.
+        #
+        # The ceiling itself, the extension policy and the wall-clock
+        # budget come from EnduranceLimits (``/endurance``, config.json,
+        # or TERA_PILOT_* env vars) so «work longer» is a user decision,
+        # not a source edit. Defaults reproduce the historical behavior
+        # exactly (3× soft, floor 40, ceiling 200, no time cap).
+        self.endurance = (endurance or get_endurance_limits()).normalized()
         self.max_iterations = max_iterations
         self._last_successful_tool_iteration = 0
         self.enable_planning = enable_planning
@@ -1441,6 +1460,43 @@ class AgentRuntime:
         return plan, False
 
     def _run_agent_loop(self, task: Task, **gen_kwargs) -> TaskResult:
+        """Run one agent turn, then feed the outcome to self-improvement.
+
+        Wrapping (rather than instrumenting the loop body) keeps the
+        observation strictly post-hoc: it sees the FINAL TaskResult, and
+        ``observe_run`` swallows its own errors, so a broken improvement
+        backlog can never fail a user's task.
+        """
+        result = self._run_agent_loop_inner(task, **gen_kwargs)
+        self._observe_for_self_improvement(task, result)
+        return result
+
+    def _observe_for_self_improvement(self, task: Task, result: TaskResult) -> None:
+        """Record improvement proposals from a finished run (never raises)."""
+        try:
+            workspace = str(self.tools.workspace) if self.tools.workspace else ""
+            if not workspace:
+                return
+            summary = observe_run(
+                result,
+                workspace=workspace,
+                section=self.section,
+                planned_iterations=self.max_iterations,
+            )
+            created = list(summary.get("created") or [])
+            if created:
+                self._emit(
+                    AgentEvent.THOUGHT,
+                    thought=(
+                        f"[self-improvement] recorded {len(created)} new proposal(s) "
+                        "from this run — /improve to review"
+                    ),
+                    note="self_improvement",
+                )
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("[agent] self-improvement observation failed: %s", e)
+
+    def _run_agent_loop_inner(self, task: Task, **gen_kwargs) -> TaskResult:
         all_steps: List[AgentStep] = []
         # v2.3.4: set when the loop gives up on tool calls and accepts the
         # model's prose as the final answer (iteration 3+ with no tool call).
@@ -1679,6 +1735,22 @@ class AgentRuntime:
                 system_prompt = system_prompt + "\n\n" + persona_fragment
         except Exception as e:
             logger.debug("[agent] persona injection failed: %s", e)
+        # v2.4.0 — self-improvement loop. The backlog recorded from
+        # PREVIOUS runs in this workspace injects its top recurring
+        # failure patterns as «rules to avoid» (bounded, high/medium
+        # only, and opt-out via config). This is the behavioural half of
+        # self-improvement: the agent's own history changes how it works
+        # today. The code-level half is `/improve task`, which prepares
+        # a dogfooding task the human submits. Wrapped defensively — a
+        # broken backlog must never affect the run.
+        try:
+            si_fragment = build_self_improvement_fragment(
+                str(self.tools.workspace) if self.tools.workspace else ""
+            )
+            if si_fragment:
+                system_prompt = system_prompt + "\n\n" + si_fragment
+        except Exception as e:
+            logger.debug("[agent] self-improvement injection failed: %s", e)
         initial_user_prompt = PromptBuilder.task_prompt(
             task, plan=plan, history=self.memory.to_prompt_history()
         )
@@ -1742,16 +1814,47 @@ class AgentRuntime:
         self._last_successful_tool_iteration = 0
         effective_max = self.max_iterations
         exhausted = False
+        #: Set when the run stops for a reason other than the iteration
+        #: ceiling, so the error surfaced to the user is accurate.
+        exhaust_error: Optional[str] = None
         iteration = 0
+        # v2.4.0 — endurance: wall-clock budget for this run. Checked
+        # between iterations (the in-flight LLM call always completes),
+        # so a slow provider cannot keep one turn alive forever without
+        # the user's knowledge. 0 = unlimited (the historical behavior).
+        run_started_at = time.time()
+        wall_budget = float(getattr(self.endurance, "max_wall_seconds", 0.0) or 0.0)
+        extend_margin = int(getattr(self.endurance, "extend_margin", 2) or 0)
         while True:
             iteration += 1
+            if wall_budget > 0 and (time.time() - run_started_at) >= wall_budget:
+                exhaust_error = (
+                    f"Run wall-clock budget reached "
+                    f"({wall_budget:.0f}s after {iteration - 1} iteration(s))"
+                )
+                self._emit(
+                    AgentEvent.THOUGHT,
+                    thought=(
+                        "[endurance] wall-clock budget reached — stopping with "
+                        "partial output (raise it with /endurance seconds)"
+                    ),
+                    iteration=iteration,
+                    note="wall_clock_budget",
+                )
+                logger.info(
+                    "[agent] stopping at wall-clock budget %.0fs (iteration %d)",
+                    wall_budget, iteration,
+                )
+                exhausted = True
+                break
             if iteration > effective_max:
                 # Soft cap hit while the agent is still executing tools
-                # (successfully, within the last 2 iterations) — extend
-                # the budget instead of aborting a productive run, up to
-                # the hard ceiling. Spinning loops never extend: repeated
-                # errors / no tools leave `_last_successful_tool_iteration`
-                # stale, so the condition fails and we stop.
+                # (successfully, within the last ``extend_margin``
+                # iterations) — extend the budget instead of aborting a
+                # productive run, up to the hard ceiling. Spinning loops
+                # never extend: repeated errors / no tools leave
+                # `_last_successful_tool_iteration` stale, so the
+                # condition fails and we stop.
                 if (
                     effective_max < self.hard_max_iterations
                     # v2.3.6-fix: never extend a run where NO tool ever
@@ -1761,7 +1864,12 @@ class AgentRuntime:
                     # once — ``iteration - 0 <= 2`` is true at iteration 2
                     # even though the model never did any real work.
                     and self._last_successful_tool_iteration > 0
-                    and iteration - self._last_successful_tool_iteration <= 2
+                    # v2.4.0: the «recently productive» window is now the
+                    # endurance policy's ``extend_margin`` (default 2 =
+                    # unchanged). Raising it makes the budget more
+                    # forgiving for tasks that alternate long reads with
+                    # edits; 0 makes it strict.
+                    and iteration - self._last_successful_tool_iteration <= extend_margin
                 ):
                     first_extend = effective_max == self.max_iterations
                     effective_max += 1
@@ -2321,7 +2429,7 @@ class AgentRuntime:
                 # module-level namespace when called at class scope,
                 # which would falsely report `raw` as defined.
                 final_output = locals().get("raw", "")
-            error_msg = f"Max iterations ({effective_max}) reached"
+            error_msg = exhaust_error or f"Max iterations ({effective_max}) reached"
             success = False
 
         tool_calls = [s.action for s in all_steps if s.action]

@@ -6,6 +6,48 @@ summary); this file keeps the per-version history. Every release keeps the
 version in sync everywhere: npm, pip, the Web UI, the TUI, the auto-updater
 and the tests.
 
+## [Unreleased]
+
+1. **Self-improvement loop** — after every turn the runtime analyses the
+   finished run and records evidence-backed `ImprovementProposal`s for the
+   patterns that actually cost the user work: runs that ended at the budget
+   ceiling, prose answers with no tool use, writes that were never verified,
+   high tool-error rates, repeated identical tool calls and repeated edits to
+   one file. Proposals persist per project in
+   `~/.tera_pilot/improvements/<project>.jsonl`, recurring signals bump an
+   occurrence counter instead of duplicating, and the top patterns are
+   injected into the system prompt as *rules to avoid* — the agent's own
+   history changes how it works today. `/improve list|show|next|done|dismiss|
+   reset` reviews and closes the backlog; `/improve task <id>` prepares a
+   dogfooding task for Tera Pilot's own repository and pre-fills the composer
+   (the human submits it, so the normal sandbox, command policy and approval
+   flow still apply). Bounded by design: at most three patterns / ~1200 chars
+   injected, and both halves can be disabled via `self_improvement.enabled` /
+   `self_improvement.inject`.
+2. **Configurable endurance («work longer»)** — the hard iteration ceiling,
+   the extension factor, the «recently productive» margin and an optional
+   per-run wall-clock budget are no longer hardcoded. `/endurance` inspects
+   and tunes the policy (also `endurance` in `config.json` and
+   `TERA_PILOT_HARD_MAX_ITERATIONS` / `TERA_PILOT_RUN_MAX_SECONDS` for CI),
+   and the live runtime picks changes up immediately. Defaults reproduce the
+   previous behaviour exactly (3× soft, floor 40, ceiling 200, no time cap),
+   so nothing gets faster or slower unless the user asks for it. A run that
+   hits the wall-clock budget stops between iterations with an explicit
+   message and keeps its partial output.
+3. **The TUI composer grows with the prompt** — the bottom input line is now
+   a soft-wrapping, auto-growing composer (up to eight lines, then it
+   scrolls) instead of a single-line field, so a long request stays
+   readable while you type it. Shift+Enter (or Ctrl+J) inserts a newline,
+   Enter still submits the whole prompt, Up/Down still recall history while
+   the prompt is one line, and the docked statusline no longer overlaps the
+   input box's bottom border.
+4. **TUI footer & approval buttons, restyled** — the bottom statusline keeps
+   a blank row under it instead of hugging the last terminal row, and the
+   Approve / Deny / Use Fix / Reject buttons in the approval and Guardian
+   modals are now rounded accent pills (hairline border, tinted surface,
+   accent label, deeper fill on focus) instead of solid 24-wide slabs, so
+   they match the modals' round frames in both themes.
+
 ## [2.4.0] — Agent profiles, fleets & convenient keys
 
 The v2.4.0 release is the “pick your agent for today” release:

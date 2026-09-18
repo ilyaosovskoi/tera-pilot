@@ -32,12 +32,25 @@ ChatLog:focus {
 }
 
 /* ── Input Box (hairline border) ─────────────────── */
+/* v2.4.3: auto-growing composer. `margin` keeps it clear of the docked
+   StatusBar — Textual's bottom-dock layout eats one margin row, and at
+   1 the statusline's top border landed ON the input's bottom border.
+   4 leaves a blank spacer row on top of that eaten row, so the composer
+   and the statusline never touch. */
 InputBox {
     dock: bottom;
-    height: 3;
+    /* width: 100% (not 1fr) — fr resolves against the raw screen width and
+       ignores the horizontal margins, which pushed the box off-screen. */
+    width: 100%;
+    height: auto;
+    max-height: 10;
+    min-height: 3;
     border: solid #d4d4d8;
-    margin: 0 2 1 2;
+    margin: 0 2 4 2;
+    padding: 0 1;
     background: #ffffff;
+    scrollbar-size-vertical: 1;
+    scrollbar-color: #c4c4cc;
 }
 
 InputBox:focus {
@@ -134,44 +147,58 @@ ApprovalModal {
     margin-top: 1;
 }
 
-#approval-buttons Button {
-    width: 24;
+/* v2.4.3: rounded accent buttons. The old rules painted 24-wide solid
+   slabs (Textual's tall top/bottom borders) — filled rectangles that
+   clashed with the modal's round hairline border. Now: round border,
+   tinted surface and accent label at rest, a deeper fill once focused,
+   so the armed choice is unmistakable. */
+#approval-buttons Button,
+#guardian-buttons Button {
+    width: auto;
+    min-width: 16;
+    height: 3;
     margin: 0 1;
     padding: 0 2;
+    border: round #c9c9d1;
+    background: #ffffff;
+    color: #3f3f46;
+    text-style: bold;
 }
 
 #approval-buttons #approve {
-    background: #1e7a34;
-    color: #ffffff;
-    text-style: bold;
-    border: solid #2c9c46;
+    border: round #2f8a54;
+    background: #f1faf4;
+    color: #1e6b40;
 }
 
 #approval-buttons #approve:hover {
-    background: #2c9c46;
-    text-style: bold;
+    border: round #35a061;
+    background: #e2f4ea;
+    color: #175433;
 }
 
 #approval-buttons #approve:focus {
-    background: #2c9c46;
-    text-style: bold;
+    border: round #1f8a4c;
+    background: #d0ebdb;
+    color: #0d3d24;
 }
 
 #approval-buttons #deny {
-    background: #8f2d24;
-    color: #ffffff;
-    text-style: bold;
-    border: solid #b03a2f;
+    border: round #c0564a;
+    background: #fdf5f4;
+    color: #9c3227;
 }
 
 #approval-buttons #deny:hover {
-    background: #b03a2f;
-    text-style: bold;
+    border: round #d0665a;
+    background: #f9e5e2;
+    color: #86291f;
 }
 
 #approval-buttons #deny:focus {
-    background: #b03a2f;
-    text-style: bold;
+    border: round #c0392b;
+    background: #f4d5d0;
+    color: #6d1f17;
 }
 
 /* ── Guardian Modal ─────────────────────────────────────────────── */
@@ -233,61 +260,58 @@ GuardianModal {
     margin-top: 1;
 }
 
-#guardian-buttons Button {
-    width: 24;
-    margin: 0 1;
-    padding: 0 2;
-}
-
 #guardian-buttons #approve {
-    background: #1e7a34;
-    color: #ffffff;
-    text-style: bold;
-    border: solid #2c9c46;
+    border: round #2f8a54;
+    background: #f1faf4;
+    color: #1e6b40;
 }
 
 #guardian-buttons #approve:hover {
-    background: #2c9c46;
-    text-style: bold;
+    border: round #35a061;
+    background: #e2f4ea;
+    color: #175433;
 }
 
 #guardian-buttons #approve:focus {
-    background: #2c9c46;
-    text-style: bold;
+    border: round #1f8a4c;
+    background: #d0ebdb;
+    color: #0d3d24;
 }
 
 #guardian-buttons #use_fix {
-    background: #3d5a99;
-    color: #ffffff;
-    text-style: bold;
-    border: solid #4f6fb8;
+    border: round #4f5fb8;
+    background: #f4f5fd;
+    color: #3a4bb8;
 }
 
 #guardian-buttons #use_fix:hover {
-    background: #4f6fb8;
-    text-style: bold;
+    border: round #6673d6;
+    background: #e8eafb;
+    color: #2f3d99;
 }
 
 #guardian-buttons #use_fix:focus {
-    background: #4f6fb8;
-    text-style: bold;
+    border: round #3a4bb8;
+    background: #dcdef9;
+    color: #232e78;
 }
 
 #guardian-buttons #reject {
-    background: #8f2d24;
-    color: #ffffff;
-    text-style: bold;
-    border: solid #b03a2f;
+    border: round #c0564a;
+    background: #fdf5f4;
+    color: #9c3227;
 }
 
 #guardian-buttons #reject:hover {
-    background: #b03a2f;
-    text-style: bold;
+    border: round #d0665a;
+    background: #f9e5e2;
+    color: #86291f;
 }
 
 #guardian-buttons #reject:focus {
-    background: #b03a2f;
-    text-style: bold;
+    border: round #c0392b;
+    background: #f4d5d0;
+    color: #6d1f17;
 }
 
 /* ── Verification Modal (G4) ────────────────────────────────────── */
@@ -480,10 +504,13 @@ TaskCanvasView {
 /* ── StatusBar statusline (v2.4.2) ────────────────────────────── */
 /* Bottom two-line statusline: state + provider/model + tokens/cost,
    hints row. Docked at the very bottom edge, below the input box. */
+/* v2.4.3: bottom margin lifts the statusline off the very last row —
+   Textual's bottom-dock layout consumes one margin row, so 1 is enough
+   to leave a visible gap under the bar. */
 StatusBar {
     dock: bottom;
     height: 2;
-    margin: 0 2;
+    margin: 0 2 1 2;
     padding: 0 1;
     border-top: solid #e4e4e7;
     background: #fafafa;

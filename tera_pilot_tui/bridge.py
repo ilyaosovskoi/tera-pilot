@@ -1577,6 +1577,59 @@ class TeraPilotBridge:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    # ── v2.4.0 — self-improvement loop ─────────────────────────────
+
+    def handle_improve_command(self, workspace: str, arg: str) -> Dict[str, Any]:
+        """Handle the /improve slash command (self-improvement backlog).
+
+        Delegates to ``tera_pilot.self_improvement.handle_improve_command``.
+        The optional ``task_prompt`` in the result is what the TUI
+        pre-fills the composer with — the human still submits it.
+        """
+        try:
+            from tera_pilot.self_improvement import handle_improve_command as _handle
+            return _handle(workspace, arg)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # ── v2.4.0 — endurance limits (how long a run may work) ────────
+
+    def get_endurance_limits(self) -> Dict[str, Any]:
+        """Current endurance policy + the effective hard ceiling."""
+        try:
+            from tera_pilot.endurance import endurance_summary
+            soft = self.max_iterations or 8
+            agent = self._agent
+            if agent is not None:
+                soft = int(getattr(agent, "max_iterations", soft) or soft)
+            return {"ok": True, **endurance_summary(soft)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def set_endurance_limits(self, **fields) -> Dict[str, Any]:
+        """Update the endurance policy and apply it to the live agent.
+
+        Applying immediately matters: the user who just raised the
+        ceiling because a run died at iteration 40 should not have to
+        restart the TUI for it to take effect.
+        """
+        try:
+            from tera_pilot.endurance import (
+                endurance_summary,
+                set_endurance_limits as _set,
+            )
+            limits = _set(**fields)
+            agent = self._agent
+            if agent is not None:
+                agent.endurance = limits
+                # Re-run the setter so hard_max_iterations is re-derived
+                # from the SAME soft cap with the new policy.
+                agent.max_iterations = int(getattr(agent, "max_iterations", 8) or 8)
+            soft = int(getattr(agent, "max_iterations", self.max_iterations) or 8)
+            return {"ok": True, **endurance_summary(soft)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     # ── v2.1.0 (G18) — Web search backend status ──────────────────
 
     def get_websearch_status(self) -> Dict[str, Any]:

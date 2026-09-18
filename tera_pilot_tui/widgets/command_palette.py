@@ -78,6 +78,7 @@ BUILTIN_COMMANDS: List[CommandEntry] = [
     CommandEntry("key", "/key", "Save an API key for a provider", "provider", False),
     CommandEntry("cost", "/cost", "Cost-aware provider routing", "provider", False),
     CommandEntry("budget", "/budget", "Token budget & efficiency policy", "provider", False),
+    CommandEntry("endurance", "/endurance", "How long one run may keep working (limits / wall clock)", "provider", False),
     CommandEntry("spend", "/spend", "Team spend dashboard", "provider", False),
     CommandEntry("second_opinion", "/second_opinion", "Cross-model Second Opinion (Pro)", "provider", False),
     CommandEntry("verify", "/verify", "Cross-model verification of the last response", "provider", False),
@@ -105,6 +106,7 @@ BUILTIN_COMMANDS: List[CommandEntry] = [
     CommandEntry("tools", "/tools", "Browse loaded & available progressive tools", "info", False),
     CommandEntry("capabilities", "/capabilities", "Browse & run pre-built capability templates", "info", True),
     CommandEntry("learnings", "/learnings", "List / scan / dismiss auto-learning entries", "info", False),
+    CommandEntry("improve", "/improve", "Self-improvement backlog: review / plan / close proposals", "info", False),
     CommandEntry("agents", "/agents", "List agents + their audit stats", "info", False),
     # ── Actions & UI ──────────────────────────────────────────────
     CommandEntry("gui", "/gui", "Launch the Tera Pilot GUI window (Ctrl+G)", "actions", False),
