@@ -30,7 +30,7 @@
 <div align="center">
 <img src="./maskot.png" alt="Tera Pilot mascot — robot pilot in the cockpit" width="220"/>
 <br/>
-<em>👋 «Привет! Я — Пилот. Проведу тебя за 5 минут от „очередной агент?“ до „мне это точно надо“. Погнали.»</em>
+<em>👋 "Hi! I'm the Pilot. I'll take you from "just another agent?" to "I definitely need this" in 5 minutes. Let's go."</em>
 </div>
 
 - [⚡ Why Tera Pilot — in 30 seconds](#-why-tera-pilot--in-30-seconds)
@@ -190,7 +190,7 @@ single-model agent stops. Tera Pilot is provider-neutral with failover, and
 the **runtime** blocks SSRF/destructive actions regardless of what any model
 says (see [Security](#️-security-posture--verification)).
 
-> 🤖 *«Заметь: даже крошечная локалка на 2.6B чинит код. А попытка украсть credentials через SSRF — отбита. Это и есть разница между „генерит текст“ и „пилотирует проект“.»*
+> 🤖 *"Note: even a tiny local 2.6B model fixes code here. And the credential-theft attempt via SSRF was blocked. That's the difference between "generating text" and "piloting the project.""*
 
 ---
 
@@ -298,7 +298,7 @@ The TUI exposes provider selection, model overrides, workspace selection and aut
 <div align="center">
 <img src="./maskot.png" alt="Pilot mascot" width="160"/>
 <br/>
-<em>«Один агент — хорошо. Эскадрилья — лучше. Я покажу обе.»</em>
+<em>"One agent is good. A squadron is better. Let me show you both."</em>
 </div>
 
 ### Agent Profiles — pick today's agent
@@ -487,7 +487,7 @@ python3 benchmarks/bench_security.py
 
 ## 🔧 Technical Reference *(click to expand)*
 
-> 🤖 *«Дальше — двигатель под капотом. Обычному пилоту сюда не обязательно, но инженеры любят заглянуть.»*
+> 🤖 *"Next up — the engine under the hood. Casual pilots can skip it, but engineers love a peek."*
 
 <details>
 <summary><b>⚙️ Core Agent Runtime</b></summary>
@@ -768,7 +768,7 @@ Public `eval/` harness: **58 tasks**, clean-copy fixtures, schema-valid results,
 <div align="center">
 <img src="./maskot.png" alt="Tera Pilot mascot ready for takeoff" width="200"/>
 
-**«Ты дочитал до конца — ты уже не „мимо проходил“. Докажи за 60 секунд:»**
+**"You read to the end — you're not "just passing by" anymore. Prove it in 60 seconds:"**
 
 ```bash
 npm install -g tera-pilot && tera-pilot-tui
