@@ -29,7 +29,7 @@ def test_sandbox_profile_lifecycle(tmp_path):
     sb.apply_profile(profile="workspace", workspace_root=str(tmp_path))
     assert sb.current_profile() == "workspace"
     assert "workspace" in sb.describe_state()
-    # повторное применение (не-off) запрещено
+    # re-applying (non-off) is forbidden
     with pytest.raises(RuntimeError):
         sb.apply_profile(profile="workspace", workspace_root=str(tmp_path))
     with pytest.raises(ValueError):
@@ -40,29 +40,29 @@ def test_sandbox_profile_lifecycle(tmp_path):
 def test_sandbox_path_would_be_writable(tmp_path):
     sb = native.sandbox
     ws = str(tmp_path)
-    # новый (несуществующий) файл внутри workspace — writable (resolve-семантика)
+    # a new (nonexistent) file inside the workspace — writable (resolve semantics)
     assert sb.path_would_be_writable("workspace", ws, str(tmp_path / "new_file.py")) is True
     assert sb.path_would_be_writable("workspace", ws, str(tmp_path / "sub" / "deep.py")) is True
-    # снаружи — нет
+    # outside — no
     assert sb.path_would_be_writable("workspace", ws, "/etc/passwd") is False
-    # read-only: только явные extra_readwrite_paths
+    # read-only: only explicit extra_readwrite_paths
     assert sb.path_would_be_writable("read-only", None, str(tmp_path / "x.txt"), [ws]) is True
     assert sb.path_would_be_writable("read-only", None, "/etc/passwd", [ws]) is False
-    # strict == read-only для fs
+    # strict == read-only for fs
     assert sb.path_would_be_writable("strict", None, str(tmp_path / "x.txt"), [ws]) is True
-    # ".." не должен позволять выйти за пределы workspace (normalize-семантика)
+    # ".." must not allow escaping the workspace (normalize semantics)
     assert sb.path_would_be_writable("workspace", ws, f"{ws}/sub/../../etc/passwd") is False
-    # ".." внутри workspace остаётся внутри
+    # ".." inside the workspace stays inside
     (tmp_path / "a" / "b").mkdir(parents=True)
     assert sb.path_would_be_writable("workspace", ws, f"{ws}/a/b/../c.py") is True
 
 
 def test_sandbox_symlink_dotdot_parity(tmp_path):
-    """`..` в сочетании с симлинками обязан совпадать с Python `Path.resolve()`.
+    """`..` combined with symlinks must match Python `Path.resolve()`.
 
-    Регрессия: первая версия Rust-порта лексически схлопывала `..` до
-    резолва симлинков, и `<ws>/link/../x.py` с симлинком `link` наружу
-    ошибочно считался writable (Python — нет).
+    Regression: the first version of the Rust port collapsed `..`
+    lexically before resolving symlinks, so `<ws>/link/../x.py` with
+    `link` pointing outside was wrongly considered writable (Python: no).
     """
     from tera_pilot.agent import _fallback_sandbox as fsb
 
@@ -71,16 +71,16 @@ def test_sandbox_symlink_dotdot_parity(tmp_path):
     sibling = tmp_path.parent / "sibling_outside"
     sibling.mkdir(exist_ok=True)
     (tmp_path / "sub").mkdir(exist_ok=True)
-    (tmp_path / "link").symlink_to(sibling)  # симлинк наружу workspace
+    (tmp_path / "link").symlink_to(sibling)  # symlink outside the workspace
     (tmp_path / "real").mkdir(exist_ok=True)
-    (tmp_path / "linkin").symlink_to(tmp_path / "real")  # симлинк внутрь
+    (tmp_path / "linkin").symlink_to(tmp_path / "real")  # symlink inside
 
     cases = [
         f"{ws}/sub/../../etc/passwd",
         f"{ws}/../outside.txt",
-        f"{ws}/link/../x.py",  # наружу + `..` — эскейп
+        f"{ws}/link/../x.py",  # outside + `..` — escape
         f"{ws}/link/../../etc/passwd",
-        f"{ws}/linkin/../x.py",  # внутрь + `..` — внутри
+        f"{ws}/linkin/../x.py",  # inside + `..` — stays inside
         f"{ws}/linkin/deep/../x.py",
         "/etc/passwd",
     ]
@@ -89,7 +89,7 @@ def test_sandbox_symlink_dotdot_parity(tmp_path):
         pv = fsb.path_would_be_writable("workspace", ws, c)
         assert nv == pv, f"parity mismatch for {c}: native={nv} python={pv}"
 
-    # Явные security-инварианты
+    # Explicit security invariants
     assert sb.path_would_be_writable("workspace", ws, f"{ws}/link/../x.py") is False
     assert sb.path_would_be_writable("workspace", ws, f"{ws}/sub/../../etc/passwd") is False
 
@@ -120,7 +120,7 @@ def test_circuit_breaker_transitions_and_metrics():
         assert key in m
     assert m["lifetime_failure"] == 3
 
-    # ошибок меньше порога — не открывается (rate 2/5 = 0.4 < 0.5)
+    # errors below threshold — stays closed (rate 2/5 = 0.4 < 0.5)
     reg2 = cb.CircuitBreakerRegistry(min_samples=5, error_rate_threshold=0.5)
     b2 = reg2.get("k")
     for _ in range(3):
@@ -162,7 +162,7 @@ def test_interjection_buffer_roundtrip():
     assert formatted is not None
     assert "The user sent a message while you were working:" in formatted
     assert "a" in formatted and "b" in formatted
-    assert ij.drain_formatted() is None  # пусто
+    assert ij.drain_formatted() is None  # empty
 
     assert "[truncated" in native.interjection.render_entry("y", True)
 
@@ -198,7 +198,7 @@ def test_compaction_engine_with_python_sampler():
     assert len(fresh) == 5
     assert "---" in s
     assert "[CONVERSATION HISTORY SUMMARY]" in fresh[0].content
-    assert len(calls) == 1 + 1 + 4  # code + intra + 16/5=4 чанка
+    assert len(calls) == 1 + 1 + 4  # code + intra + 16/5=4 chunks
 
 
 def test_compaction_engine_errors():
@@ -223,7 +223,7 @@ def test_cancel_token_semantics():
     t.cancel("stop")
     assert t.is_cancelled()
     assert t.reason == "stop"
-    t.cancel("other")  # первый reason побеждает
+    t.cancel("other")  # first reason wins
     assert t.reason == "stop"
 
 
@@ -234,23 +234,23 @@ def test_cancel_token_parent_child_propagation():
     parent.cancel("parent cancelled")
     assert child.is_cancelled()
 
-    # ребёнок уже-отменённого родителя сразу отменён
+    # a child of an already-cancelled parent is cancelled immediately
     dead_parent = act.CancelToken()
     dead_parent.cancel("x")
     assert dead_parent.child().is_cancelled()
 
-    # независимая отмена ребёнка не трогает родителя
+    # independent child cancellation does not touch the parent
     p2 = act.CancelToken()
     c2 = p2.child()
     c2.cancel("child only")
     assert c2.is_cancelled() and not p2.is_cancelled()
 
 
-# ── скорость (smoke) ─────────────────────────────────────────────────
+# ── speed (smoke) ───────────────────────────────────────────────────
 
 
 def test_native_breaker_fast_smoke():
-    """Санитарная проверка: 5k записей за разумное время (< 1 c)."""
+    """Sanity check: 5k records in reasonable time (< 1 s)."""
     cb = native.circuit_breaker
     reg = cb.CircuitBreakerRegistry(window_secs=60.0)
     b = reg.get("bench")

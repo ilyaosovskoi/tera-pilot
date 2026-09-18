@@ -1178,8 +1178,8 @@ class ToolEngine:
         self._diff_review_event.set()
 
     # ── v1.0.5: str_replace ────────────────────────────────────────
-    # Implements §3.1 of качество_кода_llm.md ("правки, а не полная
-    # перезапись файла"). The model must specify the *exact* unique
+    # Implements §3.1 of the code-quality guide ("edits, not full
+    # file rewrites"). The model must specify the *exact* unique
     # snippet to replace; if the snippet is not found or is ambiguous,
     # the tool returns an error and the model is forced to re-read the
     # file and try again — this is the deterministic verification the

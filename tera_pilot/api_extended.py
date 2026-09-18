@@ -3015,7 +3015,7 @@ def _llm_chat_title(handler, first_user: str) -> str:
     """Short LLM round-trip to name a chat; returns "" on any failure.
 
     v2.3.4: chat titles used to be a raw truncation of the first message
-    (``> Создай в папке  mini_project  небольшой Python-модуль  uti...``).
+    (``> Create a small Python module uti... in the mini_project folder``).
     Now we ask the active provider for a short title, mirroring the
     oneshot pattern (temp config with a tiny max_tokens, original config
     restored in ``finally`` so the probe can never leak into later runs).

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Микро-бенчмарк native (Rust) vs fallback (pure Python).
+"""Native (Rust) vs fallback (pure Python) micro-benchmark.
 
-Замеряет реальный выигрыш `tera_pilot_native` на горячих путях:
+Measures the real speedup of `tera_pilot_native` on the hot paths:
 
-- circuit_breaker: record + try_claim на каждый LLM/MCP-вызов
-  (Python — O(window) сканы под threading.Lock; Rust — O(1) amortized);
-- sandbox.path_would_be_writable: на каждую запись файла агентом
+- circuit_breaker: record + try_claim on every LLM/MCP call
+  (Python — O(window) scans under threading.Lock; Rust — O(1) amortized);
+- sandbox.path_would_be_writable: on every agent file write
   (Python — Path.resolve + is_relative_to; Rust — canonicalize + prefix);
-- interjection: push + drain (буфер mid-turn сообщений).
+- interjection: push + drain (mid-turn message buffer).
 
-Запуск:  python3 benchmarks/bench_native.py
+Run:  python3 benchmarks/bench_native.py
 """
 
 from __future__ import annotations
@@ -19,12 +19,12 @@ import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-# Скрипт лежит в benchmarks/, а пакет tera_pilot — в корне репозитория.
+# The script lives in benchmarks/, and the tera_pilot package is at the repo root.
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
 def _bench(label, fn, n):
-    # прогрев
+    # warm-up
     fn(1)
     start = time.perf_counter()
     fn(n)
@@ -63,12 +63,12 @@ def bench_circuit_breaker():
     fallback_per_op = _bench("fallback (pure Python)", fallback_run, n)
 
     ratio = fallback_per_op / native_per_op
-    print(f"  → Rust быстрее в {ratio:.1f}x")
+    print(f"  → Rust is faster by {ratio:.1f}x")
     return ratio
 
 
 def bench_sandbox_checks():
-    print("\nSandbox path_would_be_writable (против реального workspace):")
+    print("\nSandbox path_would_be_writable (against a real workspace):")
     n = 100_000
     ws = str(PROJECT_ROOT)
 
@@ -92,7 +92,7 @@ def bench_sandbox_checks():
     fallback_per_op = _bench("fallback (pure Python)", fallback_run, n)
 
     ratio = fallback_per_op / native_per_op
-    print(f"  → Rust быстрее в {ratio:.1f}x")
+    print(f"  → Rust is faster by {ratio:.1f}x")
     return ratio
 
 
@@ -121,7 +121,7 @@ def bench_interjection():
     fallback_per_op = _bench("fallback (pure Python)", fallback_run, n)
 
     ratio = fallback_per_op / native_per_op
-    print(f"  → Rust быстрее в {ratio:.1f}x")
+    print(f"  → Rust is faster by {ratio:.1f}x")
     return ratio
 
 
@@ -131,7 +131,7 @@ def main() -> None:
     try:
         import tera_pilot_native  # noqa: F401
     except ImportError:
-        print("tera_pilot_native не установлен. Соберите: cd tera-pilot-native/pyo3 && maturin build --release")
+        print("tera_pilot_native is not installed. Build it: cd tera-pilot-native/pyo3 && maturin build --release")
         return
     bench_circuit_breaker()
     bench_sandbox_checks()

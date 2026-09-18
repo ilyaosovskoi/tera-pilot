@@ -1,16 +1,16 @@
 """
-Tera Pilot CLI — диспетчер подкоманд.
+Tera Pilot CLI — subcommand dispatcher.
 
-    tera-pilot                 # Web UI (по умолчанию)
+    tera-pilot                 # Web UI (default)
     tera-pilot doctor [...]    # environment doctor (P0 onboarding)
-    tera-pilot audit [...]     # экспорт/верификация подписанного аудита
-    tera-pilot license [...]   # Pro-лицензия
-    tera-pilot key [...]       # удобная настройка API-ключей
-    tera-pilot fleet [...]     # несколько агентов-профилей сразу + главный терминал
+    tera-pilot audit [...]     # signed audit export/verification
+    tera-pilot license [...]   # Pro license
+    tera-pilot key [...]       # convenient API key setup
+    tera-pilot fleet [...]     # several agent profiles at once + main terminal
 
-Всё, что не является подкомандой, делегируется ``web_server.main()``,
-поэтому флаги Web UI (--host, --port, --project, --no-browser) работают
-как раньше.
+Everything that is not a subcommand is delegated to ``web_server.main()``,
+so the Web UI flags (--host, --port, --project, --no-browser) keep working
+as before.
 """
 
 from __future__ import annotations
@@ -188,7 +188,7 @@ def _run_fleet(argv: List[str]) -> int:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    """Точка входа CLI. Возвращает код выхода процесса."""
+    """CLI entry point. Returns the process exit code."""
     args = list(sys.argv[1:] if argv is None else argv)
     if args:
         if args[0] == "doctor":

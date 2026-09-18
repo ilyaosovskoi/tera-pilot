@@ -33,7 +33,7 @@ def _sample_entries():
 
 @pytest.fixture
 def isolated_home(tmp_path, monkeypatch):
-    """Изолируем ~/.tera_pilot от реального конфига пользователя."""
+    """Isolate ~/.tera_pilot from the user's real config."""
     monkeypatch.setenv("HOME", str(tmp_path))
     return tmp_path
 
@@ -50,7 +50,7 @@ def test_audit_signed_export_and_verify_roundtrip(isolated_home, tmp_path):
     assert data[0]["_hash"]
     assert data[0]["_prev_hash"] == ""  # genesis entry
 
-    # Публичный ключ сохраняется рядом с приватным для проверки на другой машине.
+    # The public key is stored next to the private one for verification on another machine.
     assert (isolated_home / ".tera_pilot" / "audit_key.pub").exists()
 
     assert audit_cli._cmd_verify(str(out)) == 0
@@ -61,7 +61,7 @@ def test_audit_tampering_is_detected(isolated_home, tmp_path):
     audit_cli.export_entries(_sample_entries(), str(out), unsigned=False)
 
     data = json.loads(out.read_text(encoding="utf-8"))
-    data[0]["command"] = "rm -rf /"  # подмена записи
+    data[0]["command"] = "rm -rf /"  # record substitution
     out.write_text(json.dumps(data), encoding="utf-8")
 
     assert audit_cli._cmd_verify(str(out)) == 1
@@ -74,7 +74,7 @@ def test_audit_reordering_is_detected(isolated_home, tmp_path):
     audit_cli.export_entries(entries, str(out), unsigned=False)
 
     data = json.loads(out.read_text(encoding="utf-8"))
-    data.reverse()  # переупорядочивание ломает цепочку хешей
+    data.reverse()  # reordering breaks the hash chain
     out.write_text(json.dumps(data), encoding="utf-8")
 
     assert audit_cli._cmd_verify(str(out)) == 1

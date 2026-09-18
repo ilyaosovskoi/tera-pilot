@@ -280,7 +280,7 @@ def _chat_title_from_text(text: str, limit: int = 60) -> str:
 
     v2.3.4: the old code used ``text[:60]`` verbatim, which kept markdown
     quote prefixes (``> ``), double spaces and punctuation, so titles looked
-    like ``> Создай в папке  mini_project  небольшой Python-модуль  uti...``.
+    like ``> Create a small Python module uti... in the mini_project folder``.
     We strip quote prefixes/markdown markers and collapse whitespace so the
     default title (and the non-LLM fallback in /api/chat/generate_title) is
     readable.

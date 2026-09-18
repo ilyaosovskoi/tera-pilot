@@ -5,7 +5,7 @@
 // v2.3.4: single frontend version constant. The About tab and the ready
 // toast prefer the LIVE backend version (status.version, from
 // tera_pilot/__init__.py) and fall back to this when opened standalone.
-const APP_VERSION = '2.4.0';
+const APP_VERSION = '2.4.1';
 
 window.__apiBase = null;  // Set by __teraPilotReady from the local API server
 // v1.0.5-security: bearer token for mutating endpoints on the local HTTP
@@ -643,7 +643,7 @@ if(agentModeToggle){
       var msg = state._pendingPlanMessage;
       state._pendingPlanMessage = null;
       msg.plan_approved = true;
-      msg.plan_mode = true;  // v1.2.1-fix: явно указываем что это план-мод
+      msg.plan_mode = true;  // v1.2.1-fix: explicitly flag this as plan-mode
       callBridge('send_agent_message', msg);
     }
   });
@@ -665,7 +665,7 @@ if(agentModeToggle){
       var msg = state._pendingPlanMessage;
       state._pendingPlanMessage = null;
       msg.plan_feedback = feedback;
-      msg.plan_mode = true;  // v1.2.1-fix: явно указываем что это план-мод
+      msg.plan_mode = true;  // v1.2.1-fix: explicitly flag this as plan-mode
       callBridge('send_agent_message', msg);
     }
   });

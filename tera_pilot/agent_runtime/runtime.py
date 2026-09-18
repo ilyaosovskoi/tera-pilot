@@ -147,8 +147,8 @@ class AgentRuntime:
         self.enable_planning = enable_planning
         self.on_event = on_event
         self.verbose = verbose
-        # v1.2.1-fix (Plan Mode gating): состояние для ожидания подтверждения плана
-        self._pending_plan: Optional[Tuple[Task, str]] = None  # (task, plan_text) - ожидающий подтверждения
+        # v1.2.1-fix (Plan Mode gating): state for awaiting plan confirmation
+        self._pending_plan: Optional[Tuple[Task, str]] = None  # (task, plan_text) - awaiting confirmation
         # v1.0.5-correctness: token tracker for real usage accounting (H-RT-3).
         # If None, _generate_with_retry just skips the record() call.
         self._token_tracker = token_tracker
@@ -965,7 +965,7 @@ class AgentRuntime:
 
         v1.0.5-hotfix: added INFO logging at call start/end so the user
         can see what's happening when a call is slow (the user reported
-        "долго отвечает" — with this logging they'll see exactly which
+        "slow responses" — with this logging they'll see exactly which
         step is slow and how long it took).
 
         v2.0.0-tui: when ``self._on_token_delta`` is set, we use
@@ -1441,21 +1441,21 @@ class AgentRuntime:
         """Create a plan and check if the user wants to cancel.
         Returns (plan, cancelled).
 
-        v1.2.1-fix (Plan Mode gating): когда plan_mode=True и autonomy позволяет,
-        реально останавливает выполнение и ждёт подтверждения пользователя.
+        v1.2.1-fix (Plan Mode gating): when plan_mode=True and autonomy allows,
+        actually pauses execution and waits for user confirmation.
 
         autonomy: 'always_ask' | 'new_files_only' | 'never_ask'
-        plan_mode: если True и autonomy != 'never_ask' — ждём подтверждения
+        plan_mode: if True and autonomy != 'never_ask' — wait for confirmation
         """
         plan = self._create_plan(task)
         self._emit(AgentEvent.PLAN_CREATED, plan=plan, task=task.description)
 
-        # Если plan_mode включён и autonomy не 'never_ask' — ждём подтверждения
+        # If plan_mode is on and autonomy is not 'never_ask' — wait for confirmation
         if plan_mode and autonomy != 'never_ask':
             self._pending_plan = (task, plan)
-            return plan, True  # cancelled=True сигнализирует что нужно ожидать подтверждения
+            return plan, True  # cancelled=True signals that confirmation is awaited
 
-        # v1.2.1-fix: сбрасываем pending_plan если autonomy='never_ask' или plan_mode=False
+        # v1.2.1-fix: reset pending_plan when autonomy='never_ask' or plan_mode=False
         self._pending_plan = None
         return plan, False
 
@@ -1505,29 +1505,29 @@ class AgentRuntime:
         self._degraded_prose = False
         autonomy = gen_kwargs.pop("autonomy", "always_ask")
 
-        # v1.2.1-fix (Plan Mode gating): извлекаем параметры plan_mode
+        # v1.2.1-fix (Plan Mode gating): extract plan_mode params
         plan_mode = gen_kwargs.pop("plan_mode", False)
         plan_approved = gen_kwargs.pop("plan_approved", None)
         plan_feedback = gen_kwargs.pop("plan_feedback", None)
         plan = ""  # default; may be overridden by approved plan below
 
-        # v1.2.1-fix: обработка подтверждения/фидбэка по плану
+        # v1.2.1-fix: handle plan confirmation/feedback
         if self._pending_plan is not None:
             if plan_approved:
-                # Продолжаем с сохранённого плана
+                # Continue with the saved plan
                 task, plan = self._pending_plan
                 self._pending_plan = None
-                # План будет использован ниже
+                # The plan will be used below
             elif plan_feedback is not None:
-                # Пересоздаём план с учётом фидбэка
+                # Recreate the plan taking feedback into account
                 old_task, old_plan = self._pending_plan
                 self._pending_plan = None
-                # Добавляем фидбэк в задачу для контекста
+                # Add feedback to the task for context
                 task.description = f"[PLAN FEEDBACK] {plan_feedback}\n\nOriginal task: {old_task.description}"
-                # Сбрасываем план — будет создан новый ниже
+                # Reset the plan — a new one will be created below
                 plan = ""
             else:
-                # Ещё ожидаем подтверждения — возвращаем специальный результат
+                # Still awaiting confirmation — return a special result
                 return TaskResult(
                     success=False,
                     output="",
@@ -1597,7 +1597,7 @@ class AgentRuntime:
         if self.enable_planning and task.type not in (TaskType.CHAT, TaskType.ANALYZE) and not plan:
             plan, cancelled = self._create_plan_with_cancel_check(task, autonomy, plan_mode=plan_mode)
             if cancelled:
-                # v1.2.1-fix: это означает что мы ожидаем подтверждения плана
+                # v1.2.1-fix: this means we are awaiting plan confirmation
                 return TaskResult(
                     success=False,
                     output="",
@@ -2575,7 +2575,7 @@ class AgentRuntime:
         logger.info("Agent history and memory cleared")
 
     def clear_pending_plan(self):
-        """v1.2.1-fix (Plan Mode gating): Сбросить ожидающий подтверждения план."""
+        """v1.2.1-fix (Plan Mode gating): reset the plan awaiting confirmation."""
         self._pending_plan = None
         logger.debug("[agent] pending plan cleared")
 

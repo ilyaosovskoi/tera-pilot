@@ -6,7 +6,9 @@ summary); this file keeps the per-version history. Every release keeps the
 version in sync everywhere: npm, pip, the Web UI, the TUI, the auto-updater
 and the tests.
 
-## [Unreleased]
+## [2.4.1] — Self-improvement, endurance & TUI composer
+
+The v2.4.1 release is the "agent that learns" release:
 
 1. **Self-improvement loop** — after every turn the runtime analyses the
    finished run and records evidence-backed `ImprovementProposal`s for the
@@ -47,6 +49,16 @@ and the tests.
    modals are now rounded accent pills (hairline border, tinted surface,
    accent label, deeper fill on focus) instead of solid 24-wide slabs, so
    they match the modals' round frames in both themes.
+5. **Docs & landing refresh** — README rebuilt around the new logo and the
+   Pilot mascot (interactive structure, head-to-head comparison with
+   Claude Code / Codex CLI / Cursor / Copilot Agent Mode / Aider, and a
+   live NVIDIA NIM probe: Nemotron 3 Super passes executed-code checks and
+   refuses SSRF/destructive prompts); the landing page gains matching
+   Compare and Benchmark sections plus a mascot-guided final CTA.
+6. **English-only tree** — all remaining Russian docstrings, comments and
+   user-facing CLI/doctor strings translated to English (the Russian intent
+   regexes in the web bridge stay — detecting Russian user input is a
+   feature, not documentation).
 
 ## [2.4.0] — Agent profiles, fleets & convenient keys
 

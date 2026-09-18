@@ -359,7 +359,7 @@ Thought: All changes verified. Task complete.
 """
 
 # v1.0.5: SYSTEM_PROMPT restructured to encode the principles from
-# качество_кода_llm.md. Each section maps to a specific principle:
+# the code-quality guide (качество_кода_llm.md). Each section maps to a specific principle:
 #   §2.1 — explicit planning phase  → WORKFLOW step 1
 #   §2.3 — negative examples        → ANTI-PATTERNS
 #   §2.5 — tests before/with code   → WORKFLOW step 4

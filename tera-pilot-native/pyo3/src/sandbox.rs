@@ -44,7 +44,7 @@ fn normalize_lexically(path: &Path) -> PathBuf {
                 if let Some(Component::Normal(_)) = out.last() {
                     out.pop();
                 }
-                // ".." у корня не даёт уйти выше — игнорируем (как Python)
+                // ".." at the root cannot escape higher — ignore (like Python)
             }
             other => out.push(other),
         }

@@ -107,7 +107,7 @@ class TeraPilotTUIApp(App):
         try:
             from tera_pilot import __version__ as _tera_pilot_version
         except Exception:
-            _tera_pilot_version = "2.4.0"
+            _tera_pilot_version = "2.4.1"
 
         # Initialize InfoBox with current state + the active theme palette.
         info = self.query_one(InfoBox)

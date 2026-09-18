@@ -1,28 +1,28 @@
 """
 Environment Doctor — ``tera-pilot doctor`` (P0 onboarding).
 
-Одна команда, которая отвечает на вопрос «готова ли эта машина запустить
-Tera Pilot?»:
+One command that answers the question "is this machine ready to run
+Tera Pilot?":
 
-    tera-pilot doctor                 # человекочитаемый отчёт
-    tera-pilot doctor --json          # machine-readable JSON (для CI / скриптов)
-    tera-pilot doctor --project DIR   # проверить конкретную рабочую директорию
+    tera-pilot doctor                 # human-readable report
+    tera-pilot doctor --json          # machine-readable JSON (for CI / scripts)
+    tera-pilot doctor --project DIR   # check a specific working directory
 
-Статусы проверок:
+Check statuses:
 
-    ok    — готово к работе
-    warn  — работает, но чего-то не хватает или что-то опционально
-            (например, не запущен локальный Ollama/LM Studio, не заданы
-            облачные ключи, не собрано Rust-ускорение)
-    fail  — блокирует нормальную работу (Python < 3.11, отсутствует
-            критичная зависимость, недоступная рабочая директория)
+    ok    — ready to work
+    warn  — works, but something is missing or optional
+            (e.g. local Ollama/LM Studio not running, no cloud
+            keys set, Rust acceleration not built)
+    fail  — blocks normal operation (Python < 3.11, a missing
+            critical dependency, an unreachable working directory)
 
-Код возврата: 0 — если нет ни одного ``fail``, иначе 1. Предупреждения
-сами по себе не валят проверку: полностью локальная конфигурация без
-облачных ключей — это валидный сетап.
+Exit code: 0 — if there is not a single ``fail``, else 1. Warnings
+alone never fail the check: a fully local setup without
+cloud keys is a valid configuration.
 
-См. также ``THREAT_MODEL.md`` — сетевые пробы здесь ограничены
-localhost-эндпоинтами локальных моделей и ничего не отправляют наружу.
+See also ``THREAT_MODEL.md`` — the network probes here are limited to
+localhost endpoints of local models and send nothing outside.
 """
 
 from __future__ import annotations
@@ -41,20 +41,20 @@ STATUS_OK = "ok"
 STATUS_WARN = "warn"
 STATUS_FAIL = "fail"
 
-# Критичные зависимости — без них Tera Pilot не запустится.
+# Critical dependencies — Tera Pilot won't start without them.
 CORE_DEPS = [
-    ("pydantic", "конфигурация и типы"),
-    ("textual", "полноэкранный TUI (tera-pilot-tui)"),
-    ("requests", "HTTP-клиент (провайдеры, daemon, web search)"),
-    ("aiohttp", "HTTP-клиент (стриминг)"),
-    ("toml", "конфигурация (TOML)"),
-    ("yaml", "конфигурация (YAML)"),
-    ("rich", "вывод в терминале"),
+    ("pydantic", "configuration and types"),
+    ("textual", "full-screen TUI (tera-pilot-tui)"),
+    ("requests", "HTTP client (providers, daemon, web search)"),
+    ("aiohttp", "HTTP client (streaming)"),
+    ("toml", "configuration (TOML)"),
+    ("yaml", "configuration (YAML)"),
+    ("rich", "terminal output"),
 ]
 
-# Опциональные зависимости — без них деградируют отдельные секции.
+# Optional dependencies — individual sections degrade without them.
 OPTIONAL_DEPS = [
-    ("cryptography", "подписанный аудит (Ed25519)"),
+    ("cryptography", "signed audit (Ed25519)"),
     ("docx", "Office: .docx"),
     ("openpyxl", "Office: .xlsx"),
     ("pptx", "Office: .pptx"),
@@ -63,18 +63,18 @@ OPTIONAL_DEPS = [
 
 @dataclass
 class CheckResult:
-    """Результат одной проверки doctor."""
+    """Result of a single doctor check."""
 
     name: str
     status: str          # ok | warn | fail
     detail: str = ""
-    hint: str = ""       # что сделать, если статус не ok
+    hint: str = ""       # what to do if status is not ok
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
 
-# ── Отдельные проверки ──────────────────────────────────────────────
+# ── Individual checks ─────────────────────────────────────────────
 
 
 def _check_python() -> CheckResult:
@@ -83,8 +83,8 @@ def _check_python() -> CheckResult:
     return CheckResult(
         name="python",
         status=STATUS_OK if ok else STATUS_FAIL,
-        detail=f"Python {v.major}.{v.minor}.{v.micro} (требуется >= 3.11)",
-        hint="" if ok else "Установите Python 3.11+ и перезапустите doctor.",
+        detail=f"Python {v.major}.{v.minor}.{v.micro} (requires >= 3.11)",
+        hint="" if ok else "Install Python 3.11+ and re-run doctor.",
     )
 
 
@@ -94,14 +94,14 @@ def _check_package() -> CheckResult:
         return CheckResult(
             name="package",
             status=STATUS_OK,
-            detail=f"tera_pilot v{tera_pilot.__version__} импортируется из {tera_pilot.__file__}",
+            detail=f"tera_pilot v{tera_pilot.__version__} imports from {tera_pilot.__file__}",
         )
     except Exception as e:
         return CheckResult(
             name="package",
             status=STATUS_FAIL,
-            detail=f"не удалось импортировать tera_pilot: {e}",
-            hint="Установите пакет: pip install -e . (из корня проекта)",
+            detail=f"failed to import tera_pilot: {e}",
+            hint="Install the package: pip install -e . (from the project root)",
         )
 
 
@@ -113,17 +113,17 @@ def _check_config_dir() -> CheckResult:
         return CheckResult(
             name="config_dir",
             status=STATUS_FAIL,
-            detail=f"~/.tera_pilot недоступен: {e}",
-            hint="Проверьте права на домашнюю директорию.",
+            detail=f"~/.tera_pilot unavailable: {e}",
+            hint="Check permissions on the home directory.",
         )
     writable = os.access(d, os.W_OK)
     files = sorted(p.name for p in d.iterdir()) if d.exists() else []
-    detail = f"~/.tera_pilot — файлы: {', '.join(files) if files else 'пусто (создастся при первом запуске)'}"
+    detail = f"~/.tera_pilot — files: {', '.join(files) if files else 'empty (created on first run)'}"
     return CheckResult(
         name="config_dir",
         status=STATUS_OK if writable else STATUS_WARN,
         detail=detail,
-        hint="" if writable else "Нет прав на запись в ~/.tera_pilot — исправьте права.",
+        hint="" if writable else "No write access to ~/.tera_pilot — fix permissions.",
     )
 
 
@@ -137,7 +137,7 @@ def _check_dependencies() -> List[CheckResult]:
             out.append(CheckResult(
                 name=f"dep:{mod}",
                 status=STATUS_FAIL,
-                detail=f"{mod} не установлен — {purpose}",
+                detail=f"{mod} not installed — {purpose}",
                 hint=f"pip install {mod}",
             ))
         else:
@@ -149,8 +149,8 @@ def _check_dependencies() -> List[CheckResult]:
             out.append(CheckResult(
                 name=f"dep:{mod}",
                 status=STATUS_WARN,
-                detail=f"{mod} не установлен — {purpose}",
-                hint=f"pip install {mod} (опционально)",
+                detail=f"{mod} not installed — {purpose}",
+                hint=f"pip install {mod} (optional)",
             ))
         else:
             out.append(CheckResult(name=f"dep:{mod}", status=STATUS_OK, detail=f"{mod} — {purpose}"))
@@ -158,7 +158,7 @@ def _check_dependencies() -> List[CheckResult]:
 
 
 def _provider_env_vars() -> Dict[str, str]:
-    """provider_id -> имя env-переменной ключа (из зарегистрированных провайдеров)."""
+    """provider_id -> key env-var name (from the registered providers)."""
     try:
         from tera_pilot.providers import get_registry
         reg = get_registry()
@@ -188,7 +188,7 @@ def _check_providers() -> List[CheckResult]:
         pass
 
     if set_vars or cfg_keys:
-        detail = "ключи найдены"
+        detail = "keys found"
         if set_vars:
             detail += " · env: " + ", ".join(sorted(set_vars.values()))
         if cfg_keys:
@@ -198,15 +198,15 @@ def _check_providers() -> List[CheckResult]:
         out.append(CheckResult(
             name="providers:keys",
             status=STATUS_WARN,
-            detail="API-ключи не найдены ни в окружении, ни в ~/.tera_pilot/config.json",
-            hint="Настройте провайдера в UI (Settings → Providers) либо задайте env-переменную "
-                 "ключа (например OPENAI_API_KEY). Для локальных моделей ключи не нужны.",
+            detail="No API keys found in the environment or ~/.tera_pilot/config.json",
+            hint="Configure a provider in the UI (Settings → Providers) or set a key "
+                 "env variable (e.g. OPENAI_API_KEY). Local models need no keys.",
         ))
     return out
 
 
 def _probe_http(url: str, timeout: float = 2.0) -> Tuple[bool, str]:
-    """Лёгкая проба localhost-эндпоинта. Ничего не отправляет наружу."""
+    """Lightweight localhost-endpoint probe. Sends nothing outside."""
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             return resp.status == 200, f"HTTP {resp.status}"
@@ -221,8 +221,8 @@ def _check_ollama() -> CheckResult:
     return CheckResult(
         name="ollama",
         status=STATUS_OK if ok else STATUS_WARN,
-        detail="Ollama отвечает на 127.0.0.1:11434" if ok else "Ollama не запущен на 127.0.0.1:11434",
-        hint="" if ok else "Запустите `ollama serve` или используйте облачного провайдера.",
+        detail="Ollama responds on 127.0.0.1:11434" if ok else "Ollama not running on 127.0.0.1:11434",
+        hint="" if ok else "Run `ollama serve` or use a cloud provider.",
     )
 
 
@@ -231,8 +231,8 @@ def _check_lmstudio() -> CheckResult:
     return CheckResult(
         name="lmstudio",
         status=STATUS_OK if ok else STATUS_WARN,
-        detail="LM Studio отвечает на 127.0.0.1:1234" if ok else "LM Studio не запущен на 127.0.0.1:1234",
-        hint="" if ok else "Запустите LM Studio с включённым local server.",
+        detail="LM Studio responds on 127.0.0.1:1234" if ok else "LM Studio not running on 127.0.0.1:1234",
+        hint="" if ok else "Start LM Studio with the local server enabled.",
     )
 
 
@@ -243,19 +243,19 @@ def _check_native() -> CheckResult:
         return CheckResult(
             name="native",
             status=STATUS_WARN,
-            detail=f"не удалось проверить native-ускорение: {e}",
+            detail=f"could not check native acceleration: {e}",
         )
     if NATIVE_AVAILABLE:
         return CheckResult(
             name="native",
             status=STATUS_OK,
-            detail="Rust-ускорение активно (tera_pilot_native)",
+            detail="Rust acceleration active (tera_pilot_native)",
         )
     return CheckResult(
         name="native",
         status=STATUS_WARN,
-        detail="Rust-ускорение не установлено — используются pure-Python fallback'и",
-        hint="Опционально: соберите tera-pilot-native (см. pyproject.toml, секция native).",
+        detail="Rust acceleration not installed — using pure-Python fallbacks",
+        hint="Optional: build tera-pilot-native (see pyproject.toml, native section).",
     )
 
 
@@ -268,20 +268,20 @@ def _check_websearch() -> CheckResult:
             return CheckResult(
                 name="websearch",
                 status=STATUS_OK,
-                detail=f"активный search-бэкенд: {active}",
+                detail=f"active search backend: {active}",
             )
         return CheckResult(
             name="websearch",
             status=STATUS_WARN,
-            detail="search-бэкенд не настроен (нужен MCP-сервер с ролью search)",
-            hint="См. .tera_pilot/skills/web-research/SKILL.md — подключите MCP search-сервер "
-                 "для web_search/web_fetch инструментов.",
+            detail="search backend not configured (needs an MCP server with the search role)",
+            hint="See .tera_pilot/skills/web-research/SKILL.md — connect an MCP search server "
+                 "for the web_search/web_fetch tools.",
         )
     except Exception as e:
         return CheckResult(
             name="websearch",
             status=STATUS_WARN,
-            detail=f"web search недоступен: {e}",
+            detail=f"web search unavailable: {e}",
         )
 
 
@@ -291,23 +291,23 @@ def _check_workspace(project: Optional[str]) -> CheckResult:
         return CheckResult(
             name="workspace",
             status=STATUS_FAIL,
-            detail=f"путь не существует: {w}",
-            hint="Укажите существующую директорию через --project.",
+            detail=f"path does not exist: {w}",
+            hint="Point to an existing directory via --project.",
         )
     writable = os.access(w, os.W_OK)
     return CheckResult(
         name="workspace",
         status=STATUS_OK if writable else STATUS_FAIL,
-        detail=f"{w} — {'можно писать' if writable else 'нет прав на запись'}",
-        hint="" if writable else "Выберите рабочую директорию с правами на запись.",
+        detail=f"{w} — {'writable' if writable else 'not writable'}",
+        hint="" if writable else "Choose a working directory with write access.",
     )
 
 
-# ── Сборка отчёта ───────────────────────────────────────────────────
+# ── Report assembly ───────────────────────────────────────────────
 
 
 def run_checks(project: Optional[str] = None) -> List[CheckResult]:
-    """Выполнить все проверки. Никаких сетевых вызовов за пределы localhost."""
+    """Run all checks. No network calls beyond localhost."""
     checks: List[CheckResult] = []
     checks.append(_check_python())
     checks.append(_check_package())
@@ -323,7 +323,7 @@ def run_checks(project: Optional[str] = None) -> List[CheckResult]:
 
 
 def build_json_report(checks: List[CheckResult]) -> Dict[str, Any]:
-    """Machine-readable отчёт (схема v1) — для CI и скриптов."""
+    """Machine-readable report (schema v1) — for CI and scripts."""
     by_status = {STATUS_OK: 0, STATUS_WARN: 0, STATUS_FAIL: 0}
     for c in checks:
         by_status[c.status] = by_status.get(c.status, 0) + 1
@@ -338,7 +338,7 @@ def build_json_report(checks: List[CheckResult]) -> Dict[str, Any]:
 
 
 def print_human_report(checks: List[CheckResult]) -> None:
-    """Человекочитаемый отчёт (rich, с fallback на plain)."""
+    """Human-readable report (rich, with a plain fallback)."""
     try:
         from rich.console import Console
         from rich.table import Table
@@ -368,11 +368,11 @@ def print_human_report(checks: List[CheckResult]) -> None:
     fails = [c for c in checks if c.status == STATUS_FAIL]
     warns = [c for c in checks if c.status == STATUS_WARN]
     if fails:
-        console.print("[red]Найдены блокирующие проблемы. Устраните их и запустите doctor ещё раз.[/red]")
+        console.print("[red]Blocking issues found. Fix them and run doctor again.[/red]")
     elif warns:
-        console.print("[bold]Готово к работе[/bold] (есть некритичные предупреждения).")
+        console.print("[bold]Ready to work[/bold] (with non-critical warnings).")
     else:
-        console.print("[green]Всё готово — можно запускать tera-pilot![/green]")
+        console.print("[green]All set — launch tera-pilot![/green]")
 
 
 def _print_plain(checks: List[CheckResult]) -> None:
@@ -389,7 +389,7 @@ def _print_plain(checks: List[CheckResult]) -> None:
 
 
 def run_doctor(json_output: bool = False, project: Optional[str] = None) -> int:
-    """Запустить doctor. Возвращает код выхода (0 — готово, 1 — есть fail)."""
+    """Run doctor. Returns the exit code (0 — ready, 1 — has fail)."""
     checks = run_checks(project=project)
     if json_output:
         print(json.dumps(build_json_report(checks), ensure_ascii=False, indent=2))
@@ -399,7 +399,7 @@ def run_doctor(json_output: bool = False, project: Optional[str] = None) -> int:
 
 
 def run_doctor_cli(argv: Optional[List[str]] = None) -> int:
-    """CLI-точка входа: tera-pilot doctor [--json] [--project DIR]."""
+    """CLI entry point: tera-pilot doctor [--json] [--project DIR]."""
     args = list(argv or [])
     json_output = "--json" in args
     project: Optional[str] = None

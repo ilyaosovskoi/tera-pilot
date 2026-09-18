@@ -1,162 +1,164 @@
-# Tera Pilot: идеи самопродвижения агента
+# Tera Pilot: agent self-promotion ideas
 
-> Рабочий документ (черновик, сентябрь 2026). Записанные идеи, не план запуска.
-> Отправная точка для обсуждения; ничего из этого ещё не реализовано.
-
----
-
-## 1. Контекст и принципы
-
-Главный промо-угол Tera Pilot — не «ещё одна IDE-надстройка», а **проверяемые,
-подписанные действия агента** (Ed25519 + hash chain), локальность и
-нейтральность к провайдерам. Самопродвижение должно использовать эту же
-механику доказательств.
-
-Правила, которые нельзя нарушать даже ради маркетинга:
-
-1. **Дисциплина заявлений** (см. `TERA_PILOT_PRODUCT_STRATEGY.md` §11):
-   только измеренные цифры из eval-харнесса. Никаких «умнее, чем Claude Code»
-   без наших данных.
-2. **Без телеметрии / phone-home**: все сценарии локальные или через
-   открытые API (GitHub, Mastodon, Telegram). Иначе ломаем собственный
-   нарратив о приватности.
-3. **Правило «где»**: где API открыт и боты уместны — агент действует сам;
-   где самореклама жёстко карается — агент готовит черновик, публикует
-   человек.
-4. Сценарии 1–4 можно запускать уже сейчас (testing phase); 5–6 — ближе к
-   публичному релизу.
+> Working document (draft, September 2026). Recorded ideas, not a launch plan.
+> A starting point for discussion; none of this is implemented yet.
 
 ---
 
-## 2. Сценарии: «как» агент продвигает себя
+## 1. Context and principles
 
-### 2.1 Dogfooding — агент развивает собственный репозиторий
-Самый честный и дешёвый сценарий. Агент работает на своём же коде: чинит
-собственные баги, исправляет падающие тесты, рефакторит, добавляет фичи.
-Каждый такой PR — живое демо, а не постановочное видео.
+Tera Pilot's main promo angle is not "yet another IDE add-on" but
+**verifiable, signed agent actions** (Ed25519 + hash chain), locality, and
+provider neutrality. Self-promotion should use that same machinery of proof.
 
-- Планировщик (cron / `workflow_dispatch`) ставит агенту задачу из backlog.
-- Агент решает её в чистой копии репо (как в eval-харнессе), прогоняет
-  тесты, открывает PR с отчётом.
-- К каждому PR прикладывается подписанный audit-экспорт
-  (`tera-pilot audit export`). Конкуренты так не могут — у них нет
-  встроенного доказательства.
+Rules that must not be broken even for marketing:
 
-### 2.2 Автоматический бенчмарк-турнир по провайдерам
-Стратегия запрещает заявлять о качестве без измерений — пусть агент измеряет сам.
-
-- Периодический запуск `eval/runner.py` (58 задач) по 17 провайдерам и
-  локальным моделям (Ollama / LM Studio).
-- Генерация сравнительных отчётов (прецеденты: `GROQ_EVAL_REPORT.md`,
-  `eval/REPORT_*.md`) и публикация.
-- Демонстрация multi-provider consensus — это само по себе фича.
-- Пример контента: «Измерено Tera Pilot на 58 реальных задачах: 5/5 у
-  OpenRouter, 4/5 у локальной 2.6B-модели».
-
-### 2.3 Контент-фабрика — автогенерация материалов
-Агент пишет changelog, release notes, посты, переводы — всегда на основе
-реальных данных (git-история, отчёты eval, audit-логи), не выдумок.
-
-- После каждого релиза агент анализирует diff и готовит черновик поста:
-  «что изменилось, измеренные результаты, ссылка на подписанное доказательство».
-- Публикует человек (или сам, где API открыт — см. платформы).
-- Контент, который сам себя проверяет: каждая цифра ссылается на
-  верифицируемый артефакт.
-
-### 2.4 Self-review PR в собственном репозитории
-Уже есть генератор GitHub Action workflow (`github_automation.py`) — включить
-на собственном репо и получить публичное живое демо CI-готовности.
-
-- На каждый входящий PR агент в read-only режиме (профиль `reviewer`)
-  делает ревью, комментирует находки, прикладывает отчёт.
-- Живой пример для внешних: «вот как это будет работать в вашем репо».
-- Одновременно dogfooding, реальная польза и доказательство P1.1 из
-  readiness-плана.
-
-### 2.5 Триаж issues и ответы сообществу
-Агент работает с тикетами: воспроизводит баг в чистой копии (фикстуры уже
-есть), классифицирует, готовит минимальный репро и черновик ответа.
-
-- Fleet из профилей: один разбирает баги, другой отвечает новичкам.
-- Каждая публичная ветка — демо возможностей + снятие нагрузки с автора.
-
-### 2.6 Playground «попробуй без установки»
-Публичный демо-воркспейс: любой заходит, даёт агенту задачу и в реальном
-времени смотрит, как тот планирует, редактирует, запускает тесты и
-спрашивает подтверждения.
-
-- Ограничение бюджета итераций/токенов, approvals видны в интерфейсе.
-- Trust-first UX нельзя объяснить словами — надо один раз увидеть вживую.
-- Telegram-версия: у продукта уже встроен `--inbound telegram` — человек
-  пишет боту задачу, агент выполняет на демо-воркспейсе и отвечает
-  результатом. Уникальная фича: попробовать агента прямо в Telegram.
+1. **Claims discipline** (see `TERA_PILOT_PRODUCT_STRATEGY.md` §11):
+   only measured numbers from the eval harness. No "smarter than Claude Code"
+   without our own data.
+2. **No telemetry / phone-home**: all scenarios are local or go through
+   open APIs (GitHub, Mastodon, Telegram). Otherwise we break our own
+   privacy narrative.
+3. **The "where" rule**: where the API is open and bots are welcome — the
+   agent acts on its own; where self-promotion is harshly punished — the
+   agent prepares a draft, a human publishes.
+4. Scenarios 1–4 can run right now (testing phase); 5–6 — closer to the
+   public release.
 
 ---
 
-## 3. Платформы: «где» агент себя продвигает
+## 2. Scenarios: "how" the agent promotes itself
 
-Центр системы — **GitHub** (нативная интеграция: `github_automation.py`,
-MCP/ACP, audit). Всё остальное ведёт на него.
+### 2.1 Dogfooding — the agent develops its own repository
 
-| Сценарий | Платформы | Кто публикует |
+The most honest and cheapest scenario. The agent works on its own code: fixes
+its own bugs, repairs failing tests, refactors, adds features. Every such PR
+is a live demo, not a staged video.
+
+- A scheduler (cron / `workflow_dispatch`) assigns the agent a task from the backlog.
+- The agent solves it in a clean copy of the repo (as in the eval harness),
+  runs the tests, opens a PR with a report.
+- Every PR includes a signed audit export
+  (`tera-pilot audit export`). Competitors can't do this — they have no
+  built-in proof.
+
+### 2.2 Automatic provider benchmark tournament
+
+The strategy forbids quality claims without measurements — so let the agent measure itself.
+
+- Periodic runs of `eval/runner.py` (58 tasks) across the 17 providers and
+  local models (Ollama / LM Studio).
+- Generating comparative reports (precedents: `GROQ_EVAL_REPORT.md`,
+  `eval/REPORT_*.md`) and publishing them.
+- Demonstrating multi-provider consensus — a feature in itself.
+- Example content: "Measured by Tera Pilot on 58 real tasks: 5/5 on
+  OpenRouter, 4/5 on the local 2.6B model".
+
+### 2.3 Content factory — auto-generated materials
+
+The agent writes changelogs, release notes, posts, translations — always based
+on real data (git history, eval reports, audit logs), never invented.
+
+- After every release the agent analyses the diff and drafts a post:
+  "what changed, measured results, link to signed proof".
+- A human publishes (or the agent itself, where the API is open — see platforms).
+- Self-verifying content: every number links to a verifiable artifact.
+
+### 2.4 Self-review PRs in its own repository
+
+A GitHub Action workflow generator already exists (`github_automation.py`) —
+enable it on the repo itself and get a public live demo of CI readiness.
+
+- For every incoming PR the agent in read-only mode (the `reviewer` profile)
+  reviews, comments findings, attaches a report.
+- A live example for outsiders: "this is how it will work in your repo".
+- Dogfooding, real value, and proof of P1.1 from the readiness plan at once.
+
+### 2.5 Issue triage and community answers
+
+The agent works tickets: reproduces the bug in a clean copy (fixtures already
+exist), classifies, prepares a minimal repro and a draft answer.
+
+- A fleet of profiles: one digs through bugs, another answers newcomers.
+- Every public thread is a capability demo plus load off the author's shoulders.
+
+### 2.6 Playground "try without installing"
+
+A public demo workspace: anyone drops in, gives the agent a task, and watches
+in real time how it plans, edits, runs tests, and asks for confirmation.
+
+- Iteration/token budget caps, approvals visible in the interface.
+- Trust-first UX can't be explained in words — you have to see it live once.
+- Telegram version: the product already has `--inbound telegram` built in — a
+  person messages the bot a task, the agent executes it on the demo workspace
+  and replies with the result. A unique feature: try the agent right in Telegram.
+
+---
+
+## 3. Platforms: "where" the agent promotes itself
+
+The center of the system is **GitHub** (native integration:
+`github_automation.py`, MCP/ACP, audit). Everything else leads back to it.
+
+| Scenario | Platforms | Who publishes |
 |---|---|---|
-| 2.1 Dogfooding | GitHub (PR, Issues, Releases); YouTube (сценарий ролика) | агент сам |
-| 2.2 Бенчмарки | GitHub README, GitHub Pages, dev.to, Mastodon/Fosstodon; HN | агент сам; HN — человек |
-| 2.3 Контент | X, dev.to, Telegram-канал; LinkedIn — черновики | агент + модерация |
-| 2.4 Self-review | GitHub Actions (свой репо) | агент сам |
-| 2.5 Триаж/ответы | GitHub Issues; Reddit, Discord — черновики | GitHub — агент; Reddit/Discord — человек |
-| 2.6 Playground | Telegram-бот, веб-песочница | агент сам |
+| 2.1 Dogfooding | GitHub (PR, Issues, Releases); YouTube (video script) | agent itself |
+| 2.2 Benchmarks | GitHub README, GitHub Pages, dev.to, Mastodon/Fosstodon; HN | agent itself; HN — human |
+| 2.3 Content | X, dev.to, Telegram channel; LinkedIn — drafts | agent + moderation |
+| 2.4 Self-review | GitHub Actions (own repo) | agent itself |
+| 2.5 Triage/answers | GitHub Issues; Reddit, Discord — drafts | GitHub — agent; Reddit/Discord — human |
+| 2.6 Playground | Telegram bot, web sandbox | agent itself |
 
-Детали по платформам:
+Platform details:
 
-- **GitHub** — Issues/Discussions (триаж, ответы, репро), PR (self-review и
-  self-fix), Releases (release notes), README + GitHub Pages (бенчмарки и
-  документация). Агент действует полностью сам через API.
-- **awesome-списки** — маленькие PR в `awesome-selfhosted`,
-  `awesome-ollama`, `awesome-llm-apps`, `awesome-coding-agents` → целевая
-  аудитория (Segments A, F из стратегии).
-- **Hacker News** — «Show HN» раз в релиз, пост готовит агент, публикует
-  человек (нет удобного API; спам убивает репутацию мгновенно).
-- **Mastodon / Fosstodon** — бот-аккаунт, агент постит через API.
-  Аудитория — self-hosted/приватность, боты приветствуются.
-- **X (Twitter)** — агент постит короткие отчёты через API. Осторожно:
-  низкая частота, модерация человеком, иначе бан за спам.
-- **Telegram-канал проекта** — свои подписчики без алгоритмов; агент
-  публикует сам (встроенная интеграция).
+- **GitHub** — Issues/Discussions (triage, answers, repros), PRs (self-review
+  and self-fix), Releases (release notes), README + GitHub Pages (benchmarks
+  and docs). The agent acts fully on its own via the API.
+- **Awesome lists** — small PRs to `awesome-selfhosted`, `awesome-ollama`,
+  `awesome-llm-apps`, `awesome-coding-agents` → target audience
+  (Segments A, F from the strategy).
+- **Hacker News** — "Show HN" once per release, the agent drafts the post, a
+  human publishes (no convenient API; spam kills reputation instantly).
+- **Mastodon / Fosstodon** — bot account, the agent posts via API.
+  Audience: self-hosted/privacy, bots welcome.
+- **X (Twitter)** — the agent posts short reports via API. Careful:
+  low frequency, human moderation, otherwise a spam ban.
+- **Project Telegram channel** — own subscribers without algorithms; the agent
+  publishes itself (built-in integration).
 - **Reddit** (r/selfhosted, r/LocalLLaMA, r/ollama, r/OpenSource, r/Python) —
-  только черновики: агент готовит, человек постит. Автопостинг = бан.
-- **Discord-серверы** (Ollama, LM Studio, LocalLLaMA) — только черновики.
-- **dev.to** — кросс-постинг статей (Markdown, агент пишет нативно).
-- **YouTube** — скринкаст «агент чинит свой баг вживую»: агент генерирует
-  пошаговый сценарий и титры, запись делает человек/CI-скрипт.
-- **PyPI / npm** — страницы пакетов: описание, keywords, ссылки
-  (пакет без внятного описания не находят).
-- **Product Hunt** — разовый запуск ближе к v1.
-- **Каталоги** — alternativeto.net, libhunt, Sourcegraph (листинг через форму).
-- **LinkedIn** — только черновики для человека.
+  drafts only: the agent prepares, a human posts. Autoposting = ban.
+- **Discord servers** (Ollama, LM Studio, LocalLLaMA) — drafts only.
+- **dev.to** — cross-posting articles (Markdown, the agent writes natively).
+- **YouTube** — screencast "the agent fixes its own bug live": the agent
+  generates a step-by-step script and captions, a human/CI script records.
+- **PyPI / npm** — package pages: description, keywords, links
+  (a package without a clear description is never found).
+- **Product Hunt** — one-shot launch closer to v1.
+- **Catalogs** — alternativeto.net, libhunt, Sourcegraph (listing via form).
+- **LinkedIn** — drafts for a human only.
 
 ---
 
-## 4. Приоритеты: с чего начать
+## 4. Priorities: where to start
 
-Фаворит — связка 2.1 + 2.4 (агент фиксит свои баги + ревьюит свои PR):
-дёшево, реально полезно, поток живых демо без постановочных видео.
+The favorite is the 2.1 + 2.4 combo (the agent fixes its own bugs + reviews
+its own PRs): cheap, genuinely useful, a stream of live demos with no staged videos.
 
-Из «где» первыми делать:
+From "where", first to build:
 
-1. **Telegram-бот «попробуй»** (2.6) — фича уже встроена
-   (`--inbound telegram`), нужен публичный демо-режим с ограничениями.
-2. **Self-review Action на этом репо** (2.4) — полностью автоматический.
+1. **"Try it" Telegram bot** (2.6) — the feature is already built in
+   (`--inbound telegram`), needs a public demo mode with limits.
+2. **Self-review Action on this repo** (2.4) — fully automatic.
 
-Дальше — по готовности: бенчмарк-турнир с публикацией в README/Pages
-(2.2) и контент-фабрика для релизов (2.3).
+Then, as ready: the benchmark tournament published to README/Pages
+(2.2) and the release content factory (2.3).
 
 ---
 
-## 5. Открытые вопросы
+## 5. Open questions
 
-- Язык публичного контента: русский/английский/оба (двуязычная фабрика)?
-- Где хостить веб-песочницу (2.6): Codespaces, VPS, GitHub Pages?
-- Нужен ли публичный демо-репо с «безопасными» задачами для playground?
-- Кто ведёт аккаунты-боты (Mastodon, Telegram, X) и кто несёт ответственность
-  за публикации?
+- Public content language: decided — English-first (this document included).
+- Where to host the web sandbox (2.6): Codespaces, VPS, GitHub Pages?
+- Do we need a public demo repo with "safe" tasks for the playground?
+- Who runs the bot accounts (Mastodon, Telegram, X) and who is responsible
+  for the publications?

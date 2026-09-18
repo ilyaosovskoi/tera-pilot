@@ -52,7 +52,7 @@ class InfoBox(Static):
         self._model: str = "unknown"
         self._provider: str = "unknown"
         self._directory: str = "~"
-        self._version: str = "2.4.0"
+        self._version: str = "2.4.1"
         # v2.3.6: animated status line (spinner + word) shown while a turn
         # runs. Cleared when idle.
         self._status: str = ""

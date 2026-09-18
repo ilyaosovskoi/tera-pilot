@@ -7,7 +7,7 @@ from tera_pilot import environment_doctor as doctor
 
 @pytest.fixture
 def isolated_home(tmp_path, monkeypatch):
-    """Изолируем ~/.tera_pilot от реального конфига пользователя."""
+    """Isolate ~/.tera_pilot from the user's real config."""
     monkeypatch.setenv("HOME", str(tmp_path))
     return tmp_path
 
@@ -34,12 +34,12 @@ def test_doctor_json_report_shape(isolated_home):
 
 
 def test_doctor_exit_code_reflects_failures():
-    # Несуществующая рабочая директория → fail → код выхода 1.
+    # A nonexistent working directory → fail → exit code 1.
     code = doctor.run_doctor(json_output=True, project="/nonexistent/tera-pilot-doctor-test")
     assert code == 1
 
 
 def test_doctor_cli_parses_flags():
     assert doctor.run_doctor_cli(["--json", "--project", "/nonexistent/tera-pilot-doctor-test"]) == 1
-    # Без флагов тоже работает (stdout перехватывается pytest).
+    # Works without flags too (stdout is captured by pytest).
     assert doctor.run_doctor_cli([]) in (0, 1)

@@ -44,7 +44,7 @@ class ToolName(Enum):
     FILE_INFO = "file_info"
     UNDO_WRITE = "undo_write"
     # v1.0.5: targeted string replacement — preferred over full
-    # write_file for edits (per качество_кода_llm.md §3.1). Forces the
+    # write_file for edits (per the code-quality guide §3.1). Forces the
     # model to localise the change instead of rewriting the whole file,
     # and gives a deterministic verification: either old_str is found
     # (patch applies cleanly) or it is not (model hallucinated context).

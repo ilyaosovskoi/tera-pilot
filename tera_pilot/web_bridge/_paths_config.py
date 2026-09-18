@@ -96,13 +96,14 @@ def _classify_user_intent(text: str) -> Dict[str, Any]:
     text_lower = text.lower().strip()
 
     # Strong action signals — these almost certainly mean "do something"
-    # v1.0.6: expanded Russian list — "запиши" was missing, which caused
-    # "Привет. Запиши любой файл в тестовую директорию" to be classified
-    # as 'chat' even with Agent Mode explicitly toggled on by the user.
+    # v1.0.6: expanded Russian list — the "zapishi" (write) verb was
+    # missing, which caused the Russian "write any file to the test
+    # directory" prompt to be classified as 'chat' even with Agent Mode
+    # explicitly toggled on.
     action_patterns = [
         # Russian imperatives — write/create/save/edit/delete/run/etc.
         r"\b(создай|сделай|напиши|запиши|сохрани|исправь|почини|запусти|удали|переименуй|сгенерируй|добавь|измени|обнови|отредактируй|поменяй|вынеси|перенеси|перемести|скопируй|вставь|замени)\b",
-        # Russian noun-form fallbacks ("нужна запись", "требуется создание")
+        # Russian noun-form fallbacks (e.g. "need a record", "creation required")
         r"\b(запис[ьи]|создани[ея]|сохранени[ея]|удалени[ея]|переименовани[ея]|обновлени[ея]|редактировани[ея])\b",
         # English imperatives
         r"\b(create|make|write|fix|run|delete|remove|rename|generate|add|change|update|implement|build|refactor|deploy|install|migrate|save|edit|patch|move|copy|insert|replace)\b",
@@ -110,7 +111,7 @@ def _classify_user_intent(text: str) -> Dict[str, Any]:
         r"\b(write|create|save|generate|output|produce)\s+(a\s+)?(file|code|script|test|class|function|module)\b",
         r"\b(fix|patch|resolve|debug|solve)\b",
         r"\b(run|execute|start|launch|test)\b",
-        # "запиши файл" / "создай файл" / "save file" — noun right after verb
+        # verb + noun: Russian "write file" / "create file" / English "save file"
         r"\b(запиши|сохрани|создай|сгенерируй)\s+(файл|код|скрипт|тест|класс|функци[юю]|модул[ьь])\b",
         r"\b(save|write|create|generate)\s+(a\s+)?(file|script|test|class|function|module)\b",
     ]
@@ -138,21 +139,21 @@ def _classify_user_intent(text: str) -> Dict[str, Any]:
 
     # v1.0.6: removed the over-aggressive "short message without action
     # signal → chat" rule. It was firing on perfectly valid short
-    # commands like "Запиши файл" (4 words, 1 action signal — but the
-    # old rule checked action_score == 0, so the action signal was
-    # ignored, and the message was tagged 'chat' anyway). Now we rely
-    # on the explicit action/chat score comparison below.
+    # commands like "zapishi file" ("write the file", 4 words, 1 action
+    # signal — but the old rule checked action_score == 0, so the action
+    # signal was ignored, and the message was tagged 'chat' anyway).
+    # Now we rely on the explicit action/chat score comparison below.
 
     # Vague/ambiguous → ambiguous (ask for clarification) ONLY when
-    # there's no action signal at all. "Запиши любой файл" contains
-    # both "запиши" (action) and "любой" (vague) — the action should win.
+    # there's no action signal at all. "zapishi any file" contains
+    # both an action verb and a vague word — the action should win.
     if vague_score > 0 and action_score == 0:
         return {"intent": "ambiguous", "confidence": 0.7, "reason": "vague_request_needs_clarification"}
 
     # Clear action — even a single strong action verb is enough.
     # v1.0.6: lowered the threshold from ">=2 or (>=1 and has_code)"
-    # to ">=1". The old threshold meant "запиши файл" (1 signal) was
-    # treated as ambiguous, defeating the whole point of the classifier.
+    # to ">=1". The old threshold meant a single-signal "write file"
+    # was treated as ambiguous, defeating the whole point of the classifier.
     if action_score >= 1:
         return {"intent": "action", "confidence": 0.85, "reason": f"action_signals={action_score}"}
 

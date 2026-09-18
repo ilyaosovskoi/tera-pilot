@@ -5,7 +5,7 @@ Markdown file.  Each session is recorded as a timestamped section so that
 recent context can be retrieved efficiently without any external database
 dependency.
 
-v1.0.5 changes (cross-chat context — "лучше хранил контекст между чатами"):
+v1.0.5 changes (cross-chat context — "better context retention across chats"):
 
 * Each saved session now carries structured metadata: project_root,
   provider, files touched, chat_id, tags. Stored as a JSON header line
