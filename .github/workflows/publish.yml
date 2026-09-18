@@ -1,0 +1,76 @@
+name: Publish (npmjs + GitHub Packages)
+
+# Dual publish: every published GitHub Release ships the npm tarball to
+# BOTH registries, so the repo sidebar "Packages" section stays populated
+# (GitHub Packages) while `npm install -g tera-pilot` keeps working from
+# the public npmjs registry.
+#
+# One-time setup (browser, no secrets shared in chat):
+#   1. npmjs — pick ONE:
+#      a) Trusted Publisher (recommended, no tokens): npmjs.com →
+#         package "tera-pilot" → Settings → Trusted Publisher →
+#         GitHub Actions, org/user "ilyaosovskoi", repo "tera-pilot",
+#         workflow "publish.yml". Then leave the NPM_TOKEN secret empty
+#         and OIDC takes over automatically.
+#      b) Fallback: create a granular access token (publish on "tera-pilot"
+#         only, bypass-2FA enabled) and store it as the NPM_TOKEN repo
+#         secret. Revoke/rotate it like any credential.
+#   2. GitHub Packages — nothing to do: the built-in GITHUB_TOKEN is
+#      sufficient (job needs `packages: write`, granted below).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: package.json version must match the release tag
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          TAG="${{ github.event.release.tag_name || github.ref_name }}"
+          TAG_VER="${TAG#v}"
+          echo "package.json: $VER, tag: $TAG"
+          test "$VER" = "$TAG_VER"
+
+  publish-npmjs:
+    needs: check-version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC trusted publishing (no token when configured)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - run: npm publish --provenance --access public
+        env:
+          # Empty when Trusted Publisher is used (OIDC takes over);
+          # set NPM_TOKEN repo secret as fallback (granular, bypass 2FA).
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-gpr:
+    needs: check-version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://npm.pkg.github.com
+          scope: "@ilyaosovskoi"
+      - name: Scope the package name for GitHub Packages
+        run: |
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.name='@ilyaosovskoi/tera-pilot';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+          grep '"name"' package.json
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
