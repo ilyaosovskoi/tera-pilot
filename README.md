@@ -1,10 +1,12 @@
 <div align="center">
 
-<img src="./tera_pilot.png" alt="Tera Pilot" width="520"/>
+<img src="./tera_pilot_logo.png" alt="Tera Pilot logo" width="180"/>
 
 # Tera Pilot
 
 ### Private, vendor-neutral coding agents — self-hosted, verifiable, and CI-ready.
+
+<img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&pause=1000&color=FEBC2E&center=true&vCenter=true&width=650&lines=Textual+TUI+first+%C2%B7+Web+UI+%C2%B7+HTTP+daemon+%C2%B7+MCP%2FACP;17+providers+%C2%B7+Ollama+%2F+LM+Studio+%C2%B7+Guardian+safety;Plan+%E2%86%92+Explore+%E2%86%92+Act+%E2%86%92+Verify+%E2%86%92+Report" alt="Typing animation: TUI first, 17 providers, Plan Explore Act Verify Report"/>
 
 **Textual TUI first · Web UI · HTTP daemon · MCP/ACP · 17 providers · Ollama/LM Studio · Guardian safety · Agent profiles · Fleets**
 
@@ -15,29 +17,56 @@
 [![Tests](https://img.shields.io/badge/tests-895%20%C2%B7%20875%20passing-blue)]()
 [![Status](https://img.shields.io/badge/status-testing%20phase-yellow)]()
 
+**⏱️ In a hurry? Read 30 seconds → [Why this is different](#-why-tera-pilot--in-30-seconds) · Try in 2 min → [Quick Start](#-quick-start--pick-your-path) · Still unsure → [Tera Pilot vs the rest](#-tera-pilot-vs-the-rest)**
+
 </div>
 
-## Contents
+---
 
-- [Why Tera Pilot?](#why-tera-pilot)
-- [Quick Start](#quick-start)
-- [Agent Profiles](#agent-profiles--pick-todays-agent) — pick today's agent (code / video / reviewer / apex)
-- [Fleet](#fleet--several-agents-at-once-one-main-terminal) — run several profiles at once, one watch terminal
-- [API keys](#api-keys-made-convenient) — `tera-pilot key` / `/key`
-- [Demo](#demo)
-- [Security Posture & Verification](#security-posture--verification)
-- [Technical Reference](#technical-reference) — [runtime](#core-agent-runtime) · [trust & control](#trust-and-control) · [interfaces](#interfaces) · [MCP/ACP](#mcp-and-acp) · [architecture](#architecture) · [audit](#audit-export--verification) · [evaluation](#reproducible-evaluation)
-- [Current Limitations](#current-limitations)
-- [License](#license)
+## 🧭 Contents
+
+> Your co-pilot will guide you. Follow him — he knows the route.
+
+<div align="center">
+<img src="./maskot.png" alt="Tera Pilot mascot — robot pilot in the cockpit" width="220"/>
+<br/>
+<em>👋 «Привет! Я — Пилот. Проведу тебя за 5 минут от „очередной агент?“ до „мне это точно надо“. Погнали.»</em>
+</div>
+
+- [⚡ Why Tera Pilot — in 30 seconds](#-why-tera-pilot--in-30-seconds)
+- [🎬 Proof, not promises](#-proof-not-promises--watch-it-work) — live GIF runs + measured eval
+- [🚀 Quick Start — pick your path](#-quick-start--pick-your-path)
+- [🎭 Agent profiles & Fleet](#-meet-the-crew--profiles--fleet) — pick today's agent, run several at once
+- [🔑 API keys](#-api-keys-made-convenient)
+- [⚔️ Tera Pilot vs the rest](#-tera-pilot-vs-the-rest) — why switch
+- [✅ Is it for you? 15-second check](#-is-tera-pilot-for-you-15-second-check)
+- [🛡️ Security posture](#️-security-posture--verification) — tested, not claimed
+- [🔧 Technical reference](#-technical-reference-click-to-expand) — runtime, trust, interfaces, MCP/ACP, audit, eval
+- [❓ FAQ — objections, answered](#-faq--objections-answered)
+- [🚧 Current limitations (honest)](#-current-limitations-honest)
+- [📜 License](#-license)
 
 **Repository docs:** [CHANGELOG](CHANGELOG.md) · [THREAT_MODEL](THREAT_MODEL.md) · [SECURITY](SECURITY.md) · [LICENSING](LICENSING.md) · [DEVELOPING](DEVELOPING.md) · [CONTRIBUTING](CONTRIBUTING.md) · [eval/README](eval/README.md)
 
 > **Development status: testing phase.** Tera Pilot is being tested with a small
 > group of early users before the public release. Everything here is MIT-licensed
 > and free to use, but you may run into rough edges — especially when installing
-> via npm (see [Quick Start](#quick-start) for a reliable fallback). Paid/Pro
+> via npm (see [Quick Start](#-quick-start--pick-your-path) for a reliable fallback). Paid/Pro
 > features are not available yet and will be enabled later; until then the
 > open-source core is the whole product.
+
+---
+
+## ⚡ Why Tera Pilot — in 30 seconds
+
+AI coding agents can already edit repos, run commands and finish multi-step tasks. The hard part is no longer generation quality — it is **trust, control, and evidence**.
+
+| If you've felt this pain… | Tera Pilot answers with… |
+|---|---|
+| 🔓 «My code leaves the machine and I can't prove otherwise» | 🔒 **Local-first** — Ollama / LM Studio keeps code on your machine. Cloud is opt-in BYOK |
+| 🔗 «I'm locked to one vendor / one IDE» | 🧩 **Vendor-neutral** — one runtime, **17 providers**, TUI + browser + daemon + ACP + CI |
+| 🎲 «The agent did *something*, but what exactly?» | ✅ **Verifiable** — every change tested, audited, exportable as **signed evidence** (Ed25519 + hash chain) |
+| 🧠 «Every task needs a new system prompt» | 🎭 **Profiles & fleets** — `/agent video`, `fleet start`, one watch terminal |
 
 **At a glance:**
 
@@ -49,184 +78,18 @@
 | 🖥️ **Runs anywhere** | terminal TUI, browser, REST/SSE daemon, ACP server, CI job |
 | ✅ **Verifiable** | every change tested, audited, and exportable as signed evidence |
 
-## Why Tera Pilot?
+<details>
+<summary><b>🤖 Pilot's tip: how to read this README in 3 depths (click)</b></summary>
 
-AI coding agents are becoming capable of editing repositories, running commands, calling external tools, and completing multi-step engineering tasks. The hard part is no longer only generation quality — it is **trust, control, and evidence**.
+- **30 seconds:** this section + [comparison table](#-tera-pilot-vs-the-rest).
+- **2 minutes:** + [Proof](#-proof-not-promises--watch-it-work) + [Quick Start](#-quick-start--pick-your-path).
+- **10 minutes (full flight):** everything to the [final challenge](#-your-60-second-challenge). There is a surprise at the end 👇.
 
-Tera Pilot is built for developers and teams that need to:
+</details>
 
-- keep code local when using Ollama or LM Studio;
-- bring their own API keys and choose among multiple providers;
-- run an agent from a terminal, TUI, browser, daemon, or CI job;
-- review and restrict file, command, Git, and MCP actions;
-- preserve an activity and audit trail of what the agent did;
-- verify the result instead of accepting an opaque final answer;
-- avoid lock-in to a single model vendor or hosted IDE.
+---
 
-Tera Pilot is **not** positioned as a replacement for Cursor autocomplete or GitHub Copilot distribution. Its focus is controlled, private, vendor-neutral agent execution.
-
-## Quick Start
-
-### One-command install (npm) — recommended
-
-No `git clone`, no manual `pip install`. Python 3.11+ is the only system
-prerequisite:
-
-```bash
-npm install -g tera-pilot
-```
-
-The npm `postinstall` step creates an isolated Python virtualenv at
-`~/.tera_pilot/venv` and installs the bundled Python package plus its
-dependencies into it, so all launchers work out of the box:
-
-> **Note:** the npm path is still settling during the testing phase — on some
-> machines the `postinstall` step needs a retry, or a Python interpreter that
-> isn't the system default (see `TERA_PILOT_PYTHON` below). If `npm install -g
-> tera-pilot` gives you trouble, use the [source install](#install-from-source)
-> below — it takes one extra command and is the most reliable path right now.
-
-```bash
-tera-pilot                              # Web UI
-tera-pilot-tui                          # Full-screen terminal UI (primary interactive app)
-tera-pilot-daemon --help                # REST API + SSE daemon
-tera-pilot-acp --help                   # ACP (Agent Client Protocol) server
-tera-pilot doctor                       # environment doctor
-tera-pilot audit                        # signed audit export/verification
-```
-
-Environment knobs (all optional):
-
-| Variable | Effect |
-|---|---|
-| `TERA_PILOT_PYTHON` | which Python interpreter to use (default `python3`) |
-| `TERA_PILOT_VENV` | where the virtualenv lives (default `~/.tera_pilot/venv`) |
-| `TERA_PILOT_SKIP_PIP=1` | install the npm package without running `pip install` (offline / custom setups) |
-
-On `npm uninstall -g tera-pilot` the npm-managed venv is removed with it
-(only if this package version created it — user data is never deleted
-speculatively).
-
-### Install from source
-
-```bash
-git clone https://github.com/ilyaosovskoi/tera-pilot.git
-cd tera-pilot
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
-
-The Python package provides the same commands: `tera-pilot`, `tera-pilot-tui`,
-`tera-pilot-daemon`, `tera-pilot-acp`, plus `tera-pilot doctor` and
-`tera-pilot audit` subcommands.
-
-Optional Rust acceleration (sandbox checks, circuit breaker, compaction,
-interjection buffer — a one-command build if you have a Rust toolchain):
-
-```bash
-make native        # maturin build + install tera_pilot_native, then verify
-```
-
-Without it, Tera Pilot automatically uses the pure-Python fallbacks (slower
-but fully functional). `tera-pilot doctor` reports which path is active.
-
-### Environment Doctor
-
-Not sure your machine is ready? One command checks Python version, dependencies, config directory, provider keys, local model servers (Ollama / LM Studio), optional Rust acceleration, web-search backend, and the workspace:
-
-```bash
-tera-pilot doctor          # human-readable report
-tera-pilot doctor --json   # machine-readable report (CI / scripts)
-```
-
-Exit code is 0 when there are no blocking issues; warnings alone (e.g. no cloud API keys on a fully local setup) do not fail the check.
-
-### Choose a Model
-
-Tera Pilot is provider-neutral. Configure a cloud provider with your own key, or use a local model without sending repository content to a cloud provider.
-
-- **Cloud (BYOK):** Anthropic, OpenAI, Google Gemini, DeepSeek, Groq, xAI, z.ai, Mistral, Cerebras, Together, Fireworks, SambaNova, Nvidia NIM, OpenRouter.
-- **Local:** Ollama and LM Studio for local inference, plus a keyless `local` OpenAI-compatible endpoint for any self-hosted server that speaks the OpenAI API (default: Ollama at `http://localhost:11434/v1`; override `api_base` for LM Studio, vLLM, llama.cpp, …).
-
-The TUI exposes provider selection, model overrides, workspace selection and autonomy settings through its visual controls and command palette. For a local-first workflow, choose Ollama or LM Studio in the provider selector and keep the workspace inside the intended project root.
-
-### Agent Profiles — pick today's agent
-
-Every agent has its own profile: a name, a system prompt (persona) and a
-security level. Built-in profiles are `code` (default), `video` (video
-production), `reviewer` (read-only) and `apex` (a top-tier general
-assistant persona). You never edit a system prompt to switch roles — you
-just pick the agent for today:
-
-```
-/agent                  # palette of all profiles → pick one
-/agent video            # activate the video agent (persists across restarts)
-/agent off              # back to stock behavior
-/agent new my-editor    # create a custom profile
-/agent edit my-editor prompt "You are a strict editor…"
-/agent edit my-editor security free   # controlled | balanced | free
-/agent list             # all profiles + the active one
-```
-
-Security levels map onto autonomy + Guardian: `controlled` (every side
-effect needs approval), `balanced` (new files auto-approved, dangerous
-actions gated) and `free` (maximum freedom). Profiles live in
-`~/.tera_pilot/agent-profiles/` as plain JSON — hand-editable and shared
-by the TUI, Web UI and daemon.
-
-### Fleet — several agents at once, one main terminal
-
-Launch several profiles in parallel, each with its own workspace, and
-watch a live summary of all of them from a single terminal — no need to
-open a window per agent:
-
-```bash
-# terminal 1 — the fleet (foreground; Ctrl+C stops it)
-tera-pilot fleet start --agent code:~/code --agent video:~/videos \
-                       --agent apex:~/docs
-
-# point the whole fleet at a specific provider/model (e.g. a local server)
-tera-pilot fleet start --agent code:~/code \
-                       --provider lmstudio --model qwen3-coder-30b \
-                       --api-base http://localhost:1234/v1
-
-# any terminal — queue work to a specific agent
-tera-pilot fleet task video "make a 30s teaser from clips/"
-
-# the "main" terminal — live summary of every agent; exits on its own
-# once every agent has finished or died (default grace: 15 s)
-tera-pilot fleet watch
-tera-pilot fleet watch --stale-after 30    # tune the grace period
-
-# stop all workers after their current task
-tera-pilot fleet stop
-```
-
-Each fleet agent is a headless Tera Pilot with its profile's persona and
-security level. `controlled` agents fail closed on side-effecting tools
-(effectively read-only until run interactively); `free` agents run
-un-gated. `fleet start --provider/--model/--api-base` overrides the
-provider config for every worker in the fleet (handy for pointing all
-agents at one local model); the stored API key is preserved. `fleet
-watch` treats a worker as stale when it stops heartbeating — dead or
-finished workers no longer leave the watch screen hanging forever — and
-shows them as `stale` in the live table.
-
-### API keys, made convenient
-
-```bash
-tera-pilot key              # interactive: pick provider, paste key (hidden)
-tera-pilot key list         # masked key status per provider
-tera-pilot key set gemini    # prompts for the key
-tera-pilot key set groq gsk_… # or pass it directly
-```
-
-Or from inside the TUI: `/key` opens the provider picker, then just paste
-the key on the input line. Keys are stored in `~/.tera_pilot/config.json`
-(masked in every listing, never echoed).
-
-## Demo
+## 🎬 Proof, not promises — watch it work
 
 Two minutes from zero to a running agent:
 
@@ -306,7 +169,239 @@ Measured on real repository tasks (methodology: `eval/README.md`):
 - **Fully-local 2.6B model via LM Studio (2026-08-21): 4/5 coding tasks
   solved** through the agent.
 
-## Security Posture & Verification
+> 🤖 *«Заметь: даже крошечная локалка на 2.6B чинит код. А попытка украсть credentials через SSRF — отбита. Это и есть разница между „генерит текст“ и „пилотирует проект“.»*
+
+---
+
+## 🚀 Quick Start — pick your path
+
+<details open>
+<summary><b>✅ Path A — one-command install (npm), recommended</b></summary>
+
+No `git clone`, no manual `pip install`. Python 3.11+ is the only system
+prerequisite:
+
+```bash
+npm install -g tera-pilot
+```
+
+The npm `postinstall` step creates an isolated Python virtualenv at
+`~/.tera_pilot/venv` and installs the bundled Python package plus its
+dependencies into it, so all launchers work out of the box:
+
+> **Note:** the npm path is still settling during the testing phase — on some
+> machines the `postinstall` step needs a retry, or a Python interpreter that
+> isn't the system default (see `TERA_PILOT_PYTHON` below). If `npm install -g
+> tera-pilot` gives you trouble, use [Path B](#-path-b--install-from-source) below — it takes one extra command and is the most reliable path right now.
+
+```bash
+tera-pilot                              # Web UI
+tera-pilot-tui                          # Full-screen terminal UI (primary interactive app)
+tera-pilot-daemon --help                # REST API + SSE daemon
+tera-pilot-acp --help                   # ACP (Agent Client Protocol) server
+tera-pilot doctor                       # environment doctor
+tera-pilot audit                        # signed audit export/verification
+```
+
+Environment knobs (all optional):
+
+| Variable | Effect |
+|---|---|
+| `TERA_PILOT_PYTHON` | which Python interpreter to use (default `python3`) |
+| `TERA_PILOT_VENV` | where the virtualenv lives (default `~/.tera_pilot/venv`) |
+| `TERA_PILOT_SKIP_PIP=1` | install the npm package without running `pip install` (offline / custom setups) |
+
+On `npm uninstall -g tera-pilot` the npm-managed venv is removed with it
+(only if this package version created it — user data is never deleted
+speculatively).
+
+</details>
+
+<details>
+<summary><b>📦 Path B — install from source (most reliable right now)</b></summary>
+
+```bash
+git clone https://github.com/ilyaosovskoi/tera-pilot.git
+cd tera-pilot
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+The Python package provides the same commands: `tera-pilot`, `tera-pilot-tui`,
+`tera-pilot-daemon`, `tera-pilot-acp`, plus `tera-pilot doctor` and
+`tera-pilot audit` subcommands.
+
+Optional Rust acceleration (sandbox checks, circuit breaker, compaction,
+interjection buffer — a one-command build if you have a Rust toolchain):
+
+```bash
+make native        # maturin build + install tera_pilot_native, then verify
+```
+
+Without it, Tera Pilot automatically uses the pure-Python fallbacks (slower
+but fully functional). `tera-pilot doctor` reports which path is active.
+
+</details>
+
+<details>
+<summary><b>🩺 Step 0 — Environment Doctor (not sure your machine is ready?)</b></summary>
+
+One command checks Python version, dependencies, config directory, provider keys, local model servers (Ollama / LM Studio), optional Rust acceleration, web-search backend, and the workspace:
+
+```bash
+tera-pilot doctor          # human-readable report
+tera-pilot doctor --json   # machine-readable report (CI / scripts)
+```
+
+Exit code is 0 when there are no blocking issues; warnings alone (e.g. no cloud API keys on a fully local setup) do not fail the check.
+
+</details>
+
+<details>
+<summary><b>🧠 Step 1 — Choose a Model (cloud BYOK or fully local)</b></summary>
+
+Tera Pilot is provider-neutral. Configure a cloud provider with your own key, or use a local model without sending repository content to a cloud provider.
+
+- **Cloud (BYOK):** Anthropic, OpenAI, Google Gemini, DeepSeek, Groq, xAI, z.ai, Mistral, Cerebras, Together, Fireworks, SambaNova, Nvidia NIM, OpenRouter.
+- **Local:** Ollama and LM Studio for local inference, plus a keyless `local` OpenAI-compatible endpoint for any self-hosted server that speaks the OpenAI API (default: Ollama at `http://localhost:11434/v1`; override `api_base` for LM Studio, vLLM, llama.cpp, …).
+
+The TUI exposes provider selection, model overrides, workspace selection and autonomy settings through its visual controls and command palette. For a local-first workflow, choose Ollama or LM Studio in the provider selector and keep the workspace inside the intended project root.
+
+</details>
+
+---
+
+## 🎭 Meet the crew — profiles & fleet
+
+<div align="center">
+<img src="./maskot.png" alt="Pilot mascot" width="160"/>
+<br/>
+<em>«Один агент — хорошо. Эскадрилья — лучше. Я покажу обе.»</em>
+</div>
+
+### Agent Profiles — pick today's agent
+
+Every agent has its own profile: a name, a system prompt (persona) and a
+security level. Built-in profiles are `code` (default), `video` (video
+production), `reviewer` (read-only) and `apex` (a top-tier general
+assistant persona). You never edit a system prompt to switch roles — you
+just pick the agent for today:
+
+```
+ /agent                  # palette of all profiles → pick one
+ /agent video            # activate the video agent (persists across restarts)
+ /agent off              # back to stock behavior
+ /agent new my-editor    # create a custom profile
+ /agent edit my-editor prompt "You are a strict editor…"
+ /agent edit my-editor security free   # controlled | balanced | free
+ /agent list             # all profiles + the active one
+```
+
+Security levels map onto autonomy + Guardian: `controlled` (every side
+effect needs approval), `balanced` (new files auto-approved, dangerous
+actions gated) and `free` (maximum freedom). Profiles live in
+`~/.tera_pilot/agent-profiles/` as plain JSON — hand-editable and shared
+by the TUI, Web UI and daemon.
+
+### Fleet — several agents at once, one main terminal
+
+Launch several profiles in parallel, each with its own workspace, and
+watch a live summary of all of them from a single terminal — no need to
+open a window per agent:
+
+```bash
+# terminal 1 — the fleet (foreground; Ctrl+C stops it)
+tera-pilot fleet start --agent code:~/code --agent video:~/videos \
+                       --agent apex:~/docs
+
+# point the whole fleet at a specific provider/model (e.g. a local server)
+tera-pilot fleet start --agent code:~/code \
+                       --provider lmstudio --model qwen3-coder-30b \
+                       --api-base http://localhost:1234/v1
+
+# any terminal — queue work to a specific agent
+tera-pilot fleet task video "make a 30s teaser from clips/"
+
+# the "main" terminal — live summary of every agent; exits on its own
+# once every agent has finished or died (default grace: 15 s)
+tera-pilot fleet watch
+tera-pilot fleet watch --stale-after 30    # tune the grace period
+
+# stop all workers after their current task
+tera-pilot fleet stop
+```
+
+Each fleet agent is a headless Tera Pilot with its profile's persona and
+security level. `controlled` agents fail closed on side-effecting tools
+(effectively read-only until run interactively); `free` agents run
+un-gated. `fleet start --provider/--model/--api-base` overrides the
+provider config for every worker in the fleet (handy for pointing all
+agents at one local model); the stored API key is preserved. `fleet
+watch` treats a worker as stale when it stops heartbeating — dead or
+finished workers no longer leave the watch screen hanging forever — and
+shows them as `stale` in the live table.
+
+### 🔑 API keys, made convenient
+
+```bash
+tera-pilot key              # interactive: pick provider, paste key (hidden)
+tera-pilot key list         # masked key status per provider
+tera-pilot key set gemini    # prompts for the key
+tera-pilot key set groq gsk_… # or pass it directly
+```
+
+Or from inside the TUI: `/key` opens the provider picker, then just paste
+the key on the input line. Keys are stored in `~/.tera_pilot/config.json`
+(masked in every listing, never echoed).
+
+---
+
+## ⚔️ Tera Pilot vs the rest
+
+> Tera Pilot is **not** positioned as a replacement for Cursor autocomplete or GitHub Copilot distribution. Its focus is controlled, private, vendor-neutral agent execution. This table is about **agentic execution**, not inline completion.
+
+|  | 🤖 **Tera Pilot** | 🐙 Copilot-style assistants | ✨ Cursor-style IDE agents | 💬 Generic chat agents |
+|---|---|---|---|---|
+| **Private by default (Ollama / LM Studio)** | ✅ local-first, code stays home | ❌ cloud by design | ❌ cloud by design | ❌ cloud by design |
+| **Vendor-neutral (17 providers, BYOK)** | ✅ switch in one command | ❌ one vendor | ⚠️ limited | ⚠️ partial |
+| **Runs in TUI + browser + daemon + CI** | ✅ all five | ❌ IDE-bound | ❌ IDE-bound | ⚠️ chat-bound |
+| **Agent profiles + fleets** | ✅ `/agent`, `fleet watch` | ❌ | ❌ | ❌ |
+| **Guardian + approvals + sandbox** | ✅ policy, not vibes | ⚠️ basic | ⚠️ basic | ❌ |
+| **Signed audit evidence** | ✅ Ed25519 + hash chain | ❌ | ❌ | ❌ |
+| **Reproducible eval (58 tasks)** | ✅ `eval/` is public | ❌ closed | ❌ closed | ❌ |
+| **Offline license, zero telemetry** | ✅ | ❌ | ❌ | ❌ |
+
+**The one-line difference:** others *generate code faster*. Tera Pilot lets you **prove what the agent did, keep the code where you want, and switch models without rewriting your workflow**.
+
+<details>
+<summary><b>🗣️ «Sounds good, but…» — 3 doubts every experienced dev has (click)</b></summary>
+
+1. **«Another agent? I already have one.»** — Keep it. Tera Pilot doesn't replace autocomplete; it replaces *uncontrolled execution*. Run the agent where Copilot can't go: local models, servers, CI, fleets.
+2. **«Local models are too weak.»** — Measured: a fully-local **2.6B** model solved **4/5** real coding tasks through this agent. The loop (plan → verify → report) compensates for size.
+3. **«Security claims are marketing.»** — Here they are tests: **895 tests (875 passing)**, **311** security/sandbox/policy tests, 5 fixed CVEs with regressions, SSRF blocked live in the demo above. Reproduce with one command — see [Security](#️-security-posture--verification).
+
+</details>
+
+---
+
+## ✅ Is Tera Pilot for you? 15-second check
+
+Tick the boxes mentally. **3+ «yes» → install it today:**
+
+- [ ] I want the option to **never send code to the cloud**
+- [ ] I'm tired of **vendor lock-in** (one model, one IDE, one price hike away from pain)
+- [ ] I want **more than one agent** — reviewer + coder + researcher in parallel
+- [ ] I need **evidence**, not just output (audit, tests, diffs)
+- [ ] I run work from **terminal / server / CI**, not only from an IDE
+
+<div align="center">
+<em>3+ yes? Then the next 60 seconds are worth it 👇</em>
+</div>
+
+---
+
+## 🛡️ Security Posture & Verification
 
 Security is treated as a continuously tested property, not a one-time claim.
 The suite is **895 tests (875 passing, 20 environment-dependent skips)**, of
@@ -318,11 +413,12 @@ repo-shipped `.git` hooks executing on plain git calls, `npm run` aliases
 executing `package.json` scripts); details in `CHANGELOG.md` (v2.3.4) and the
 test suite.
 
-**Verified controls:**
+<details open>
+<summary><b>🔍 Verified controls — click to expand the full matrix</b></summary>
 
 | Control | What is enforced |
 |---|---|
-| Command policy | shell metacharacters (`;`, `&&`, `|`, backtick, `$`, …), disallowed binaries and dangerous flags (`python3 -c`, `pip install`, `git clone`, …) blocked before execution |
+| Command policy | shell metacharacters (`;`, `&&`, `\|`, backtick, `$`, …), disallowed binaries and dangerous flags (`python3 -c`, `pip install`, `git clone`, …) blocked before execution |
 | Workspace sandbox | absolute paths, `..`, symlink escapes and path-prefix lookalikes (`/tmp/ws` vs `/tmp/ws-evil`) rejected with `PermissionError`; workspace-root deletion refused |
 | Git sandbox | `-C`/`--git-dir`/`--work-tree` escapes, `!`-aliases and exec-capable config keys blocked on the command line **and** neutralized at runtime when read from a malicious repo's own `.git/config`/`.git/hooks` |
 | npm scripts | `npm run` **and its aliases** (`test`, `exec`, `ci`, `link`, `install-test`, …) all blocked; auto-detected test/lint commands need approval |
@@ -337,6 +433,8 @@ test suite.
 Security checks add tens of microseconds per operation — well under a percent
 of the cost of the command or file operation itself
 (`benchmarks/bench_security.py`).
+
+</details>
 
 **Documented boundary — what this is NOT:** the OS sandbox is a defense layer,
 not a hardened multi-tenant VM (processes inside can still read system
@@ -353,9 +451,14 @@ python3 -m pytest tests/test_security_suite.py tests/test_tool_engine_sandbox.py
 python3 benchmarks/bench_security.py
 ```
 
-## Technical Reference
+---
 
-### Core Agent Runtime
+## 🔧 Technical Reference *(click to expand)*
+
+> 🤖 *«Дальше — двигатель под капотом. Обычному пилоту сюда не обязательно, но инженеры любят заглянуть.»*
+
+<details>
+<summary><b>⚙️ Core Agent Runtime</b></summary>
 
 Tera Pilot runs a ReAct-style agent loop: **Plan → Explore → Act → Verify → Report**.
 
@@ -402,7 +505,10 @@ the prompt. Both halves can be switched off in `config.json`
 
 Tools: files (`read_file`, `write_file`, `str_replace`, `apply_diff`, `delete_file`, `rename_file`), search (`search_project`, `grep`, `glob`, `list_files`, `get_project_structure`), execution (`execute_command`, `run_code`), Git (status, diff, stage, commit, checkpoints and undo), web (`web_search`, `web_fetch`), MCP tools, agents (subagents, parallel tasks, watchdog, task decomposition), verification (`self_verify`, test execution, reviewer subagents) and office workflows (`.docx`, `.xlsx`, `.pptx`).
 
-### Trust and Control
+</details>
+
+<details>
+<summary><b>🛂 Trust and Control</b></summary>
 
 Autonomy is a policy decision, not a binary marketing label:
 
@@ -418,7 +524,10 @@ Autonomy is a policy decision, not a binary marketing label:
 
 These mechanisms provide control and evidence; they are not a claim of formal SOC 2, ISO 27001, or vulnerability-free code. See [`THREAT_MODEL.md`](THREAT_MODEL.md) for the public threat model and trust boundaries.
 
-### Interfaces
+</details>
+
+<details>
+<summary><b>🖥️ Interfaces</b></summary>
 
 | Interface | Best for |
 |---|---|
@@ -454,7 +563,10 @@ workflows, configure `TERA_PILOT_PROVIDER`, `TERA_PILOT_MODEL`, and the
 matching provider API key as repository secrets/variables, use an isolated
 runner and review all generated changes before merging.
 
-### MCP and ACP
+</details>
+
+<details>
+<summary><b>🔌 MCP and ACP</b></summary>
 
 Tera Pilot can both consume external MCP tools and expose Tera Pilot tools
 through an MCP server. MCP servers are configured explicitly; write-capable
@@ -468,7 +580,10 @@ tera-pilot-acp --mcp-server --workspace /path/to/project
 tera-pilot-acp --mcp-server --workspace /path/to/project --allow-writes
 ```
 
-### Architecture
+</details>
+
+<details>
+<summary><b>🏗️ Architecture</b></summary>
 
 ```text
 tera_pilot/
@@ -500,7 +615,10 @@ A deeper codebase map, the agent-loop walkthrough and recipes for adding a
 tool / provider / eval task / slash command / API endpoint live in
 [`DEVELOPING.md`](DEVELOPING.md).
 
-### Audit Export & Verification
+</details>
+
+<details>
+<summary><b>📦 Audit Export & Verification</b></summary>
 
 Every tool call is recorded in the process-scoped activity log. For
 tamper-evident evidence you can export the log with Ed25519 signatures and a
@@ -514,7 +632,10 @@ tera-pilot audit verify audit.json         # exit 0 = chain intact, 1 = tamperin
 
 > Note: the activity log is process-scoped. In a fresh CLI process it is empty — export from inside a running TUI/Web session (`/audit`, `/audit-signed` slash commands) to capture real activity. The CLI `verify` works on any exported file.
 
-### Reproducible Evaluation
+</details>
+
+<details>
+<summary><b>📊 Reproducible Evaluation</b></summary>
 
 The `eval/` harness runs real repository tasks against the agent and records
 schema-valid results in `eval/results/`. It ships **58 tasks** across bug
@@ -525,7 +646,7 @@ with a clean-copy fixture repo and a baseline-verified test command. The
 `refused` / `fail_closed` — and are not passed by a green `test_command`
 alone. Methodology, task format, the direct (no-agent) driver and known
 caveats are documented in `eval/README.md`; the latest measured results are
-summarized in the [Demo](#demo) section above.
+summarized in the [Demo](#-proof-not-promises--watch-it-work) section above.
 
 ```bash
 python3 -m eval.runner check                       # structural check of all tasks
@@ -536,7 +657,10 @@ python3 -m eval.runner compare eval/results/agentic eval/results/direct
 python3 -m eval.runner report --dir eval/results   # summary
 ```
 
-### Developing & Contributing
+</details>
+
+<details>
+<summary><b>🤝 Developing & Contributing / Migrating from Clew</b></summary>
 
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to report bugs, open PRs, and the
   project's conventions (claims discipline, hermetic tests, commit style).
@@ -556,7 +680,45 @@ mv CLEW.md TERA_PILOT.md
 
 Environment variables are now `TERA_PILOT_*` (e.g. `TERA_PILOT_PROVIDER`, `TERA_PILOT_MODEL`). The GitHub Action templates generated by `github_automation.py` use the new names automatically.
 
-### Current Limitations
+</details>
+
+---
+
+## ❓ FAQ — objections, answered
+
+<details>
+<summary><b>Will my code be sent to the cloud?</b></summary>
+
+Only if you choose a cloud provider. With Ollama / LM Studio / any OpenAI-compatible local endpoint, the code stays on your machine. Cloud providers are BYOK and explicit — no hidden calls.
+</details>
+
+<details>
+<summary><b>Is this «yet another wrapper around one model»?</b></summary>
+
+No. One runtime drives **17 providers** (Anthropic, OpenAI, Gemini, DeepSeek, Groq, xAI, z.ai, Mistral, Cerebras, Together, Fireworks, SambaNova, Nvidia NIM, OpenRouter + local Ollama/LM Studio/`local`). Switch provider/model without changing workflow.
+</details>
+
+<details>
+<summary><b>What if the agent goes rogue / deletes something?</b></summary>
+
+Workspace sandbox + command policy + approvals + Guardian + checkpoints/undo. `always_ask` gates every side effect; headless runs fail closed. And every tool call is logged with signed audit export.
+</details>
+
+<details>
+<summary><b>Can I run it on a server / in CI?</b></summary>
+
+Yes — that's the point: TUI for humans, daemon (REST/SSE) + ACP server + Telegram inbound + `doctor --json` + eval harness for automation. See [Interfaces](#️-interfaces).
+</details>
+
+<details>
+<summary><b>How is quality measured?</b></summary>
+
+Public `eval/` harness: **58 tasks**, clean-copy fixtures, schema-valid results, 10 adversarial `sec-*` tasks. Latest: **5/5 (OpenRouter)** incl. blocked SSRF, **4/5 on a local 2.6B model**. No hidden benchmarks.
+</details>
+
+---
+
+## 🚧 Current Limitations (honest)
 
 - No Cursor-level inline completion or native full IDE yet; the old
   command-oriented `tera-pilot-cli` product is intentionally not distributed —
@@ -567,6 +729,26 @@ Environment variables are now `TERA_PILOT_*` (e.g. `TERA_PILOT_PROVIDER`, `TERA_
 - The OS sandbox for `execute_command`/`run_code` (macOS `sandbox-exec`, Linux `bubblewrap`) denies network, restricts writes to the workspace and hides sensitive paths, but it is **not** a hardened multi-tenant container/VM. Tera Pilot is safe for **trusted local workflows**; it is **not** an environment for running fully untrusted code, and it does not promise enterprise security, air-gap, or protection from untrusted code without stronger isolation.
 - Benchmark claims are limited to the reproducible evaluation harness (`eval/`, 58 repository tasks); only measured claims are published.
 
-## License
+---
+
+## 🎯 Your 60-second challenge
+
+<div align="center">
+<img src="./maskot.png" alt="Tera Pilot mascot ready for takeoff" width="200"/>
+
+**«Ты дочитал до конца — ты уже не „мимо проходил“. Докажи за 60 секунд:»**
+
+```bash
+npm install -g tera-pilot && tera-pilot-tui
+# ask: "find the riskiest file in this repo and explain why"
+```
+
+*If it plans, shows its tool calls, asks before anything dangerous, and hands you evidence — welcome aboard, pilot. If not — open an issue, we fix fast.*
+
+⭐ Star the repo if the flight was smooth · 🐛 [Open an issue](../../issues) if it wasn't · 🤝 [Contribute](CONTRIBUTING.md)
+
+</div>
+
+## 📜 License
 
 MIT — free to use, modify and integrate.
