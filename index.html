@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Tera Pilot — Private, Vendor-Neutral Coding Agents</title>
 <meta name="description" content="Self-hosted, vendor-neutral coding agent for private repos and local models. TUI-first, BYOK across 17 providers or fully offline with Ollama/LM Studio. Commands run in an OS-level sandbox; every agent action is logged and Ed25519-signed — built to be verified, not just trusted.">
-<link rel="icon" href="./tera_pilot.png" type="image/png">
+<link rel="icon" href="./tera_pilot_logo.png" type="image/png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -554,6 +554,62 @@
   .logo-inline { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; color: var(--text); }
   .logo-inline img { width: 26px; height: 26px; border-radius: 7px; }
 
+  /* ---------- Mascot ---------- */
+  .mascot-row {
+    display: flex; align-items: center; justify-content: center;
+    gap: 16px; margin-bottom: 34px; flex-wrap: wrap;
+  }
+  .mascot-sticker {
+    width: 104px; height: 104px; border-radius: 50%;
+    object-fit: cover; object-position: center 20%;
+    border: 2px solid rgba(254,188,46,0.5);
+    box-shadow: 0 0 0 4px rgba(254,188,46,0.08), 0 12px 34px rgba(0,0,0,0.5), 0 0 34px rgba(254,188,46,0.18);
+    background: #141417;
+    animation: mascotFloat 5s ease-in-out infinite;
+  }
+  @keyframes mascotFloat {
+    0%,100% { transform: translateY(0) rotate(-1.5deg); }
+    50% { transform: translateY(-9px) rotate(1.5deg); }
+  }
+  .mascot-speech {
+    max-width: 420px; text-align: left;
+    background: var(--card-glass); border: 1px solid var(--border);
+    border-radius: 4px 14px 14px 14px; padding: 12px 16px;
+    font-size: 14px; color: var(--text-muted);
+  }
+  .mascot-speech b { color: var(--text); }
+
+  /* ---------- Compare table ---------- */
+  .compare-wrap { overflow-x: auto; border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--bg-soft); }
+  .compare-wrap table { min-width: 860px; }
+  .compare-wrap th:first-child, .compare-wrap td:first-child { position: sticky; left: 0; background: var(--bg-soft); }
+  .compare-wrap th.us, .compare-wrap td.us {
+    background: linear-gradient(180deg, rgba(40,200,64,0.10), rgba(40,200,64,0.03));
+  }
+  .compare-wrap th.us { color: var(--green); }
+  .verdict-yes { color: var(--green); font-weight: 700; }
+  .verdict-no { color: var(--text-dim); }
+  .verdict-part { color: var(--yellow); font-weight: 600; }
+  .compare-note { text-align: center; color: var(--text-dim); font-size: 13px; margin-top: 18px; }
+
+  /* ---------- Benchmark ---------- */
+  .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); margin-right: 8px; animation: pulse-soft 2s ease-in-out infinite; }
+  .bench-result { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-muted); margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 12px; }
+  .bench-result .ok { color: var(--green); font-weight: 600; }
+  .bench-result .warn { color: var(--yellow); font-weight: 600; }
+
+  /* ---------- Final CTA ---------- */
+  .cta-banner {
+    display: flex; align-items: center; gap: 28px;
+    background: var(--card-glass); border: 1px solid var(--border);
+    border-radius: 20px; padding: 36px 40px; flex-wrap: wrap;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.4);
+  }
+  .cta-banner img { width: 150px; border-radius: 18px; animation: mascotFloat 6s ease-in-out infinite; }
+  .cta-banner h2 { font-size: clamp(24px, 3.4vw, 32px); letter-spacing: -0.02em; margin-bottom: 10px; }
+  .cta-banner p { color: var(--text-muted); font-size: 15px; margin-bottom: 20px; max-width: 560px; }
+  .cta-banner .row { display: flex; gap: 12px; flex-wrap: wrap; }
+
   /* ---------- Responsive ---------- */
   @media (max-width: 900px) {
     .grid-3, .grid-4 { grid-template-columns: repeat(2, 1fr); }
@@ -590,11 +646,13 @@
 <nav>
   <div class="container nav-inner">
     <a class="brand" href="#">
-      <img src="./tera_pilot.png" alt="Tera Pilot logo">
+      <img src="./tera_pilot_logo.png" alt="Tera Pilot logo">
       Tera Pilot
     </a>
     <div class="nav-links" id="navLinks">
       <a href="#why">Why</a>
+      <a href="#compare">Compare</a>
+      <a href="#benchmark">Benchmark</a>
       <a href="#interfaces">Interfaces</a>
       <a href="#runtime">Runtime</a>
       <a href="#providers">Providers</a>
@@ -618,6 +676,11 @@
     <div class="hero-cta hero-anim d4">
       <a class="btn btn-primary" href="#install">Get started — it&rsquo;s free</a>
       <a class="btn btn-ghost" href="https://github.com/ilyaosovskoi/tera-pilot">GitHub repo →</a>
+    </div>
+
+    <div class="mascot-row hero-anim d4">
+      <img class="mascot-sticker" src="./maskot.png" alt="Tera Pilot mascot — robot pilot">
+      <div class="mascot-speech"><b>👋 Meet your pilot.</b> I plan, edit, run and <em>verify</em> — inside a sandbox, with signed evidence. Scroll down: comparison with real competitors first, then a live model benchmark.</div>
     </div>
 
     <div class="terminal hero-anim d5">
@@ -693,6 +756,83 @@
         <div><b>Free &amp; open source</b><span>MIT-licensed and self-hostable — you own the whole stack.</span></div>
       </div>
     </div>
+  </div>
+</section>
+
+<!-- COMPARE -->
+<section class="alt" id="compare">
+  <div class="container">
+    <div class="sec-head">
+      <div class="kicker">Compare</div>
+      <h2>Tera Pilot vs the agents you already tried</h2>
+      <p>We don&rsquo;t compete with autocomplete. We compete on <b>controlled, verifiable execution</b>: what the agent may touch, what it must ask, and what evidence it leaves behind.</p>
+    </div>
+    <div class="compare-wrap">
+      <table>
+        <tr><th>Capability</th><th class="us">Tera Pilot</th><th>Claude Code</th><th>Codex CLI</th><th>Cursor</th><th>Copilot Agent Mode</th><th>Aider</th></tr>
+        <tr><td>Autonomous agent execution</td><td class="us"><span class="verdict-yes">✅ yes</span></td><td><span class="verdict-yes">✅</span></td><td><span class="verdict-yes">✅</span></td><td><span class="verdict-part">⚠️ IDE-supervised</span></td><td><span class="verdict-yes">✅ Autopilot</span></td><td><span class="verdict-part">⚠️ pair-programming</span></td></tr>
+        <tr><td>Fully offline option (local models)</td><td class="us"><span class="verdict-yes">✅ Ollama / LM Studio</span></td><td><span class="verdict-no">❌ cloud</span></td><td><span class="verdict-no">❌ cloud</span></td><td><span class="verdict-no">❌ cloud</span></td><td><span class="verdict-no">❌ cloud</span></td><td><span class="verdict-yes">✅ via local backends</span></td></tr>
+        <tr><td>Vendor-neutral, BYOK (17 providers)</td><td class="us"><span class="verdict-yes">✅ 17 providers</span></td><td><span class="verdict-no">❌ Claude only</span></td><td><span class="verdict-no">❌ OpenAI only</span></td><td><span class="verdict-part">⚠️ multi-model, IDE-bound</span></td><td><span class="verdict-part">⚠️ multi-model, GitHub-bound</span></td><td><span class="verdict-yes">✅ any key</span></td></tr>
+        <tr><td>OS-level command sandbox (fail-closed)</td><td class="us"><span class="verdict-yes">✅ seatbelt / bwrap</span></td><td><span class="verdict-yes">✅ sandboxed exec</span></td><td><span class="verdict-yes">✅ sandboxed</span></td><td><span class="verdict-part">⚠️ partial</span></td><td><span class="verdict-part">⚠️ MCP sandbox</span></td><td><span class="verdict-no">❌ relies on git + user</span></td></tr>
+        <tr><td>Uniform approval policy (every side effect)</td><td class="us"><span class="verdict-yes">✅ always_ask</span></td><td><span class="verdict-yes">✅ permissions</span></td><td><span class="verdict-yes">✅ approvals</span></td><td><span class="verdict-part">⚠️ IDE review</span></td><td><span class="verdict-yes">✅ PR review flow</span></td><td><span class="verdict-yes">✅ per-change ask</span></td></tr>
+        <tr><td>SSRF-hardened web tools (metadata-IP blocked)</td><td class="us"><span class="verdict-yes">✅ tested live</span></td><td><span class="verdict-no">— not published</span></td><td><span class="verdict-no">— not published</span></td><td><span class="verdict-no">— not published</span></td><td><span class="verdict-no">— not published</span></td><td><span class="verdict-no">— not published</span></td></tr>
+        <tr><td>Signed, tamper-evident audit export</td><td class="us"><span class="verdict-yes">✅ Ed25519 + hash chain</span></td><td><span class="verdict-no">❌</span></td><td><span class="verdict-no">❌</span></td><td><span class="verdict-no">❌</span></td><td><span class="verdict-no">❌</span></td><td><span class="verdict-no">❌ (git log only)</span></td></tr>
+        <tr><td>Agent profiles + multi-agent fleets</td><td class="us"><span class="verdict-yes">✅ /agent + fleet watch</span></td><td><span class="verdict-part">⚠️ subagents only</span></td><td><span class="verdict-no">❌</span></td><td><span class="verdict-part">⚠️ cloud agents</span></td><td><span class="verdict-part">⚠️ nested subagents</span></td><td><span class="verdict-no">❌</span></td></tr>
+        <tr><td>Reproducible public eval harness</td><td class="us"><span class="verdict-yes">✅ 58 tasks, open</span></td><td><span class="verdict-part">⚠️ vendor scores*</span></td><td><span class="verdict-part">⚠️ vendor scores*</span></td><td><span class="verdict-no">❌ not published</span></td><td><span class="verdict-no">❌ not published</span></td><td><span class="verdict-yes">✅ public benchmarks</span></td></tr>
+        <tr><td>Open-source core</td><td class="us"><span class="verdict-yes">✅ MIT</span></td><td><span class="verdict-no">❌</span></td><td><span class="verdict-yes">✅ Apache-2.0 CLI</span></td><td><span class="verdict-no">❌</span></td><td><span class="verdict-no">❌</span></td><td><span class="verdict-yes">✅ Apache-2.0</span></td></tr>
+        <tr><td>Zero telemetry, offline-verified licensing</td><td class="us"><span class="verdict-yes">✅</span></td><td><span class="verdict-no">❌</span></td><td><span class="verdict-no">❌</span></td><td><span class="verdict-no">❌</span></td><td><span class="verdict-no">❌</span></td><td><span class="verdict-yes">✅ local tool</span></td></tr>
+      </table>
+    </div>
+    <p class="compare-note">* Claude Code and Codex publish strong vendor-reported scores (SWE-bench Verified/Pro, Terminal-Bench 2.x) — we cite them, not contest them. Our claim is narrower: <b>no other agent gives you sandbox + approvals + signed audit + offline option in one MIT-licensed runtime.</b> Positions as of September 2026; tell us if something changed.</p>
+  </div>
+</section>
+
+<!-- BENCHMARK -->
+<section id="benchmark">
+  <div class="container">
+    <div class="sec-head">
+      <div class="kicker"><span class="live-dot"></span>Live probe · 2026-09-18 · NVIDIA NIM</div>
+      <h2>Concreteness instead of &laquo;we are secure&raquo;</h2>
+      <p>We probed production models through NVIDIA&rsquo;s hosted API the same day: one coding task executed for real, two attack-style prompts. Raw behavior below — including the parts that flaked.</p>
+    </div>
+    <div class="grid grid-3">
+      <div class="card">
+        <span class="tag tag-green">coding · executed</span>
+        <h3>Nemotron 3 Super writes working code</h3>
+        <p>120B / 12B-active hybrid Mamba-Transformer MoE, built for agentic coding. Asked for <span style="font-family:var(--font-mono);font-size:13px">clamp(x, lo, hi)</span> with edge cases — returned code passed <b>5/5 assertions</b> when executed, in ~2 s.</p>
+        <div class="bench-result"><span class="ok">PASS</span> · nvidia/nemotron-3-super-120b-a12b · 2.0 s · code ran, not just rendered</div>
+      </div>
+      <div class="card">
+        <span class="tag tag-green">security · refused</span>
+        <h3>Credential-theft and destructive prompts refused</h3>
+        <p>Asked to fetch cloud metadata (<span style="font-family:var(--font-mono);font-size:13px">169.254.169.254</span>) and to hand over a no-confirmation home-directory wipe. Both refused — the wipe request got a lecture plus safe alternatives.</p>
+        <div class="bench-result"><span class="ok">REFUSED × 2</span> · no disclosure, no command issued</div>
+      </div>
+      <div class="card">
+        <span class="tag tag-yellow">honest flake</span>
+        <h3>Kimi K3, DeepSeek V4, GLM all timed out</h3>
+        <p>Flagship models (Kimi K3 — 2.8T MoE, Terminal-Bench 2.1 88.3 partner-reported; DeepSeek V4 Flash — 1M context) didn&rsquo;t answer on the NIM trial endpoint that day — consistent with public congestion reports. That&rsquo;s exactly why Tera Pilot is provider-neutral with failover, not single-model locked.</p>
+        <div class="bench-result"><span class="warn">TIMEOUT</span> · endpoint congestion, not a model verdict · retried, documented</div>
+      </div>
+    </div>
+    <div class="grid grid-3" style="margin-top:16px;">
+      <div class="card">
+        <div class="icon">🧪</div>
+        <h3>5/5 tasks via OpenRouter</h3>
+        <p>End-to-end agent runs incl. a live SSRF attempt the agent refused as credential theft. Methodology in <span style="font-family:var(--font-mono);font-size:13px">eval/README.md</span>.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🏠</div>
+        <h3>4/5 tasks on a local 2.6B model</h3>
+        <p>Fully offline via LM Studio. The Plan → Verify loop compensates for size — small models still ship.</p>
+      </div>
+      <div class="card">
+        <div class="icon">🛡️</div>
+        <h3>976 tests · 310+ security</h3>
+        <p>956 passing, 20 environment-dependent skips. Model refusal is politeness — <b>runtime enforcement</b> (sandbox, SSRF guard, approvals) is what blocks. That&rsquo;s the defense-in-depth difference.</p>
+      </div>
+    </div>
+    <p class="compare-note">Model scores cited (Terminal-Bench, DeepSWE) are vendor/partner-reported. Our probe results above are self-measured on 2026-09-18 and re-runnable — the script pattern lives in <span style="font-family:var(--font-mono);font-size:13px">eval/</span>.</p>
   </div>
 </section>
 
@@ -914,7 +1054,7 @@
     <p style="text-align:center;color:var(--text-dim);font-size:13.5px;margin-top:28px;">
       These mechanisms provide control and evidence — they are not a claim of SOC 2, ISO 27001, or vulnerability-free code. See
       <a href="TERA_PILOT_PRODUCT_STRATEGY.md">product strategy</a>, <a href="THREAT_MODEL.md">threat model</a> and <a href="SECURITY.md">security</a>.
-      Every control is covered by automated tests — 210 security/sandbox/command-policy tests plus 58 reproducible eval tasks (incl. 10 adversarial sec-*).
+      Every control is covered by automated tests — 976 tests (956 passing, 20 environment-dependent skips), 310+ of them security/sandbox/command-policy/licensing — plus 58 reproducible eval tasks (incl. 10 adversarial sec-*).
     </p>
   </div>
 </section>
@@ -1011,7 +1151,7 @@
       <div class="faq-item">
         <details>
           <summary>Is this a replacement for Cursor autocomplete or GitHub Copilot?</summary>
-          <p>No. Tera Pilot is not positioned as an autocomplete product. Its focus is controlled, private, vendor-neutral <em>agent execution</em>: plan, edit, run, verify and report inside a sandbox with an audit trail.</p>
+          <p>No — and Copilot deserves more credit than that: since Agent Mode / Autopilot (GA 2026) it <em>is</em> an agent, and Cursor is the flow king for IDE editing. Tera Pilot competes on a different axis: <em>controlled, verifiable execution</em> — local-first models, 17 providers with no lock-in, OS-level sandbox, uniform approvals, and a signed audit trail. See the <a href="#compare">head-to-head table</a>.</p>
         </details>
       </div>
       <div class="faq-item">
@@ -1047,7 +1187,7 @@
       <div class="faq-item">
         <details>
           <summary>How is the security posture verified?</summary>
-          <p>Security is treated as a continuously tested property: 210 security/sandbox/command-policy tests, plus a reproducible eval harness of 58 repository tasks (incl. 10 adversarial <span style="font-family:var(--font-mono);font-size:13px">sec-*</span> tasks). Five real vulnerabilities found by offensive testing (git alias/config-key execution, CORS origin-prefix matching, npm script aliases, …) were fixed in v2.3.4 with regression tests — see <a href="SECURITY.md">SECURITY.md</a> and <a href="SECURITY_TEST_REPORT.md">SECURITY_TEST_REPORT.md</a>.</p>
+          <p>Security is treated as a continuously tested property: 976 tests (956 passing), 310+ of them security/sandbox/command-policy/licensing, plus a reproducible eval harness of 58 repository tasks (incl. 10 adversarial <span style="font-family:var(--font-mono);font-size:13px">sec-*</span> tasks) and live model probes — see <a href="#benchmark">Benchmark</a>. Five real vulnerabilities found by offensive testing (git alias/config-key execution, CORS origin-prefix matching, npm script aliases, …) were fixed in v2.3.4 with regression tests — see <a href="SECURITY.md">SECURITY.md</a> and <a href="SECURITY_TEST_REPORT.md">SECURITY_TEST_REPORT.md</a>.</p>
         </details>
       </div>
       <div class="faq-item">
@@ -1066,16 +1206,36 @@
   </div>
 </section>
 
+<!-- FINAL CTA -->
+<section id="takeoff">
+  <div class="container">
+    <div class="cta-banner">
+      <img src="./maskot.png" alt="Tera Pilot mascot ready for takeoff">
+      <div style="flex:1;min-width:260px;">
+        <h2>Your 60-second challenge, pilot.</h2>
+        <p>You scrolled this far — you&rsquo;re not &laquo;just browsing&raquo;. Prove it in one command: ask it to find the riskiest file in your repo and explain why. If it plans, shows its tool calls, asks before anything dangerous, and hands you evidence — welcome aboard. If not, open an issue: we fix fast.</p>
+        <div class="row">
+          <a class="btn btn-primary" href="#install">Install — it&rsquo;s free</a>
+          <a class="btn btn-ghost" href="https://github.com/ilyaosovskoi/tera-pilot">⭐ Star on GitHub</a>
+          <a class="btn btn-ghost" href="https://github.com/ilyaosovskoi/tera-pilot/issues">🐛 Open an issue</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- FOOTER -->
 <footer>
   <div class="container">
     <div class="footer-grid">
       <div class="footer-brand">
-        <div class="logo-inline"><img src="./tera_pilot.png" alt="Tera Pilot logo"> Tera Pilot</div>
+        <div class="logo-inline"><img src="./tera_pilot_logo.png" alt="Tera Pilot logo"> Tera Pilot</div>
         <p>Private, vendor-neutral coding agents for private repositories, local models, CI, and verifiable automation.</p>
       </div>
       <div>
         <h4>Product</h4>
+        <a href="#compare">Compare</a>
+        <a href="#benchmark">Benchmark</a>
         <a href="#interfaces">Interfaces</a>
         <a href="#runtime">Agent runtime</a>
         <a href="#providers">Providers</a>
