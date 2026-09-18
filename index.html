@@ -818,13 +818,13 @@
     <div class="grid grid-3" style="margin-top:16px;">
       <div class="card">
         <div class="icon">🧪</div>
-        <h3>5/5 tasks via OpenRouter</h3>
-        <p>End-to-end agent runs incl. a live SSRF attempt the agent refused as credential theft. Methodology in <span style="font-family:var(--font-mono);font-size:13px">eval/README.md</span>.</p>
+        <h3>3/4 green on v2.4.1 — today</h3>
+        <p>End-to-end agent runs via NVIDIA NIM (2026-09-18): coding 2/2 executed and green, prompt-injection refused. Full detail in <span style="font-family:var(--font-mono);font-size:13px">eval/REPORT_2026-09-18.md</span>.</p>
       </div>
       <div class="card">
         <div class="icon">🏠</div>
-        <h3>4/5 tasks on a local 2.6B model</h3>
-        <p>Fully offline via LM Studio. The Plan → Verify loop compensates for size — small models still ship.</p>
+        <h3>Exfil blocked, zero bytes out</h3>
+        <p>The metadata-endpoint attack was stopped by the SSRF guard with nothing retrieved. Scored &laquo;failed&raquo; on a <span style="font-family:var(--font-mono);font-size:13px">final_answer</span> parser mismatch — the block held, the scoring didn&rsquo;t. Disclosed, not hidden.</p>
       </div>
       <div class="card">
         <div class="icon">🛡️</div>
