@@ -40,7 +40,7 @@
 - [🔑 API keys](#-api-keys-made-convenient)
 - [⚔️ Tera Pilot vs the rest](#-tera-pilot-vs-the-rest) — why switch
 - [✅ Is it for you? 15-second check](#-is-tera-pilot-for-you-15-second-check)
-- [🛡️ Security posture](#️-security-posture--verification) — tested, not claimed
+- [🛡️ Security posture](#-security-posture--verification) — tested, not claimed
 - [🔧 Technical reference](#-technical-reference-click-to-expand) — runtime, trust, interfaces, MCP/ACP, audit, eval
 - [❓ FAQ — objections, answered](#-faq--objections-answered)
 - [🚧 Current limitations (honest)](#-current-limitations-honest)
@@ -188,7 +188,7 @@ partner-reported) and DeepSeek V4 Flash (1M context, Terminal-Bench 82.7
 vendor-reported) are strong models — but when the endpoint flakes, a
 single-model agent stops. Tera Pilot is provider-neutral with failover, and
 the **runtime** blocks SSRF/destructive actions regardless of what any model
-says (see [Security](#️-security-posture--verification)).
+says (see [Security](#-security-posture--verification)).
 
 > 🤖 *"Note: even a tiny local 2.6B model fixes code here. And the credential-theft attempt via SSRF was blocked. That's the difference between "generating text" and "piloting the project.""*
 
@@ -411,7 +411,7 @@ offline option in one MIT-licensed runtime**.
 
 1. **«Another agent? I already use Copilot / Cursor.»** — Keep them. They win autocomplete and IDE flow. Tera Pilot replaces *uncontrolled execution*: local models, servers, CI, fleets — with evidence for every step.
 2. **«Local models are too weak.»** — Measured: a fully-local **2.6B** model solved **4/5** real coding tasks through this agent, and Nemotron 3 Super via NIM passed executed-code checks in ~2 s. The loop (plan → verify → report) compensates for size.
-3. **«Security claims are marketing.»** — Here they are tests: **976 tests (956 passing)**, **310+** security/sandbox/policy tests, 5 fixed CVEs with regressions, SSRF blocked live in the demo, plus a same-day [live model probe](#-live-model-probe--nvidia-nim-2026-09-18) with flakes disclosed. Reproduce with one command — see [Security](#️-security-posture--verification).
+3. **«Security claims are marketing.»** — Here they are tests: **976 tests (956 passing)**, **310+** security/sandbox/policy tests, 5 fixed CVEs with regressions, SSRF blocked live in the demo, plus a same-day [live model probe](#-live-model-probe--nvidia-nim-2026-09-18) with flakes disclosed. Reproduce with one command — see [Security](#-security-posture--verification).
 
 </details>
 

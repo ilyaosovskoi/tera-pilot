@@ -1,4 +1,4 @@
-"""Version-consistency test (v2.3.4).
+"""Version-consistency test (v2.4.1).
 
 The version must stay in sync everywhere: npm (package.json), pip
 (pyproject.toml), the Python package (tera_pilot/__init__.py), the

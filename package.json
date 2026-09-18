@@ -32,6 +32,7 @@
     "requirements.txt",
     "LICENSE",
     "README.md",
-    "tera_pilot.png"
+    "tera_pilot_logo.png",
+    "maskot.png"
   ]
 }
