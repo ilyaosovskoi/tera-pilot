@@ -50,3 +50,7 @@ tera_pilot/BUGFIXES_*.md
 
 # Local eval report drafts (published summaries stay in README).
 eval/REPORT_*.md
+
+# Outreach tooling and prospect base (may contain personal contacts) —
+# machine-local by design, never committed.
+outreach/
