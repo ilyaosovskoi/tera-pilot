@@ -6,6 +6,68 @@ summary); this file keeps the per-version history. Every release keeps the
 version in sync everywhere: npm, pip, the Web UI, the TUI, the auto-updater
 and the tests.
 
+## [2.5.0] — Workflow update
+
+Agent-side workflow tools, review commands, permissions, memory and plugins:
+
+1. **New agent tools** — `ask_user` (clarifying questions with options),
+   `todo_write`/`todo_list`, `enter/exit_plan_mode` (read-only gate while
+   planning), `worktree_add/list/remove` (git-worktree isolation under
+   `.worktrees/`), `repl_run/reset` (persistent Python REPL sessions),
+   `task_spawn/list/output/stop` (background commands under the same
+   policy/sandbox), `team_send/list` (teammate message bus),
+   `cron_add/list/remove` (persistent `schedule.json`), `sleep`
+   (bounded, interruptible) and `code_symbols` (regex symbol index).
+   Section-gated (isolation tools stay out of Office) and role-gated
+   (read-only roles keep read-only tools); plan mode blocks writes.
+2. **Review & delivery commands** — `/review`, `/security-review`,
+   `/advisor`, `/bughunter`, `/commit`, `/commit-push-pr`, `/pr-comments`
+   run as focused agent turns (approvals/sandbox/audit unchanged).
+3. **Session commands** — `/compact` (LLM summarisation, keeps recent),
+   `/export` (JSON) / `/share` (Markdown), `/rename`, `/tag`,
+   `/stats`, `/schedule`.
+4. **Output control** — `/effort`, `/fast`, `/brief`, `/output-style`
+   (`agent_verbosity` config, prompt suffix; `normal` is byte-identical).
+5. **Permissions** — `~/.tera_pilot/permission-rules.json` with
+   `allow/deny` wildcard rules (`execute_command(git *)`) and modes
+   `default/plan/auto/bypass`; explicit deny wins over everything
+   (`/permissions show|mode|allow|deny|rm`).
+6. **Memory** — `MEMORY.md` (project + global), heuristic extraction,
+   `/remember`, `/init` scaffold, `/onboarding` checklist.
+7. **Plugins** — file/URL install, enable/disable, remove
+   (`/plugin`); disabled plugins are skipped at load.
+8. **Built-in skills** — debug_detective, code_simplifier,
+   stuck_unblocker, batch_operator, change_remember, config_updater,
+   skill_forge (user/project skills still override).
+9. **Startup** — background prewarm of the provider registry/skills so
+   the first turn skips the cold-import pause.
+
+Follow-ups (same release):
+10. **Language-server navigation** — `lsp_definition`, `lsp_references`,
+    `lsp_symbols` via a bundled synchronous JSON-RPC client over
+    `python-lsp-server` (read-only, all sections and read roles; the
+    regex `code_symbols` stays as the cheap fallback).
+11. **Interactive `ask_user`** — the TUI now pops a question modal with
+    the suggested options as buttons (1-8) plus free text; skip/timeout
+    falls back to the stated-assumption path, so a question can never
+    wedge a run.
+12. **Live background tasks** — terminal states stream into the Activity
+    panel; `/tasks` lists the run's tasks and `/tasks <id>` shows output.
+13. **Daemon schedule runner** — `schedule.json` entries due by cron are
+    submitted to the daemon task queue (once per minute, disabled
+    entries skipped, same headless-confirm policy).
+14. **Telegram remote approvals** — pending confirmations are announced
+    to allow-listed chats and resolved with `ALLOW <N>` / `DENY <N>`;
+    unanswered approvals time out to deny.
+15. **Pre-risk auto-checkpoints** — `delete_file`, `apply_diff` and forced
+    `worktree_remove` snapshot first (respects the auto-checkpoint
+    toggle), so `/rewind` always has somewhere to go.
+16. **Eval coverage** — `tool-repl-persist`, `tool-plan-gate`,
+    `tool-worktree-isolate` (git-bundle fixture); `eval/runner.py check`
+    passes on all 61 tasks.
+17. **`/share-signed`** — conversation export as Ed25519-signed,
+    hash-chained JSON, verifiable with `tera-pilot audit verify`.
+
 ## [Unreleased]
 
 1. **Closing-message parser gaps fixed** — models that finish with a

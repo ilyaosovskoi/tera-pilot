@@ -86,6 +86,7 @@ class TeraPilotBridge:
         self._event_sink: Optional[EventSink] = None
         self._confirm_handler: Optional[ConfirmHandler] = None
         self._guardian_handler: Optional[Callable[[Dict[str, Any]], None]] = None
+        self._ask_handler: Optional[Callable[[str, List[str]], Optional[str]]] = None
 
         self._agent: Any = None
         self._registry: Any = None
@@ -103,6 +104,31 @@ class TeraPilotBridge:
 
     def set_guardian_handler(self, handler: Optional[Callable[[Dict[str, Any]], None]]) -> None:
         self._guardian_handler = handler
+
+    def set_ask_handler(self, handler: Optional[Callable[[str, List[str]], Optional[str]]] = None) -> None:
+        """Wire the interactive answer provider for the ask_user tool.
+
+        The handler runs on the agent worker thread and must block until
+        the user answers (or return None to let the agent proceed with a
+        stated assumption). Cleared with None.
+        """
+        self._ask_handler = handler
+        try:
+            if self._agent is not None:
+                self._agent.tools.set_ask_user_callback(
+                    self._on_ask_user if handler is not None else None)
+        except Exception:
+            pass
+
+    def _on_ask_user(self, question: str, options: List[str]) -> Optional[str]:
+        handler = getattr(self, "_ask_handler", None)
+        if handler is None:
+            return None
+        try:
+            answer = handler(question, options or [])
+            return str(answer)[:1000] if answer else None
+        except Exception:
+            return None
 
     def _build_registry(self):
         from tera_pilot.providers import get_registry, ProviderConfig
@@ -197,7 +223,11 @@ class TeraPilotBridge:
         from tera_pilot.agent_runtime import AgentRuntime
         from tera_pilot.token_tracker import get_token_tracker
 
-        self._registry = self._build_registry()
+        # v2.5.0: reuse the prewarmed registry when present (prewarm()
+        # runs in a background worker at startup so the first turn
+        # doesn't pay the cold-import cost of every provider adapter).
+        if self._registry is None:
+            self._registry = self._build_registry()
         self._tracker = get_token_tracker()
 
         # v2.3.6: effective iteration budget. Precedence:
@@ -232,10 +262,18 @@ class TeraPilotBridge:
             token_tracker=self._tracker,
             section=self.section,
             on_token_delta=self._on_token_delta_event,
+            verbosity=self.get_verbosity(),
         )
         agent.set_autonomy("always_ask")
         agent.set_confirm_callback(self._on_confirm_request)
         agent.set_cancel_check(lambda: self._stop.is_set())
+        # v2.5.0: keep a previously wired ask_user provider across
+        # ensure_agent() calls (the TUI sets it once at startup).
+        try:
+            if getattr(self, "_ask_handler", None) is not None:
+                agent.tools.set_ask_user_callback(self._on_ask_user)
+        except Exception:
+            pass
         self._agent = agent
 
         # v2.0.0 fix: restore the saved Guardian level so the user does
@@ -2834,3 +2872,343 @@ class TeraPilotBridge:
             return {"ok": True, "message": "TUI launched in new terminal window"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
+    # ── v2.5.0: workflow update — verbosity, compact, export, sessions,
+    # │  memory, schedule, plugins, permissions ─────────────────────────
+
+    def prewarm(self) -> None:
+        """Warm the cold agent stack in a background worker at startup.
+
+        Builds the provider registry (imports every provider adapter),
+        restores the saved Guardian level and verbosity, and loads the
+        skill catalog — the imports a first turn would otherwise pay
+        while the user waits. Idempotent; failures are swallowed (the
+        normal lazy path retries on first use).
+        """
+        try:
+            self._build_registry()
+        except Exception:
+            pass
+        try:
+            self._load_guardian_config()
+        except Exception:
+            pass
+        try:
+            from tera_pilot.skill_loader import load_all_skills_with_builtins
+            load_all_skills_with_builtins(self.workspace)
+        except Exception:
+            pass
+        try:
+            self._registry = self._build_registry()
+        except Exception:
+            pass
+
+    def get_verbosity(self) -> str:
+        try:
+            from tera_pilot.utils import load_config
+            level = str((load_config() or {}).get("agent_verbosity", "normal"))
+            from tera_pilot.agent_runtime.prompts import _VALID_VERBOSITIES
+            return level if level in _VALID_VERBOSITIES else "normal"
+        except Exception:
+            return "normal"
+
+    def set_verbosity(self, level: str) -> Dict[str, Any]:
+        try:
+            from tera_pilot.agent_runtime.prompts import _VALID_VERBOSITIES
+        except Exception:
+            return {"ok": False, "error": "prompt module unavailable"}
+        level = (level or "").strip().lower()
+        if level not in _VALID_VERBOSITIES:
+            return {"ok": False,
+                    "error": f"unknown verbosity {level!r} (normal/brief/detailed/fast)"}
+        try:
+            from tera_pilot.utils import load_config, save_config
+            cfg = load_config() or {}
+            cfg["agent_verbosity"] = level
+            save_config(cfg)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        try:
+            if self._agent is not None:
+                self._agent.verbosity = level
+        except Exception:
+            pass
+        return {"ok": True, "verbosity": level}
+
+    def run_compact(self) -> Dict[str, Any]:
+        """Summarise old conversation into one memory block (/compact)."""
+        try:
+            agent = self.ensure_agent()
+            return dict(agent.compact_context())
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def export_conversation(self, max_messages: int = 200) -> Dict[str, Any]:
+        """Current run's messages as plain dicts (for /export, /share)."""
+        try:
+            agent = self.ensure_agent()
+            msgs = list(getattr(agent.memory, "messages", []) or [])
+            out = []
+            for m in msgs[-max(1, max_messages):]:
+                try:
+                    out.append(m.to_dict() if hasattr(m, "to_dict")
+                               else {"role": m.role, "content": m.content})
+                except Exception:
+                    continue
+            return {"ok": True, "messages": out}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def share_signed_conversation(self, max_messages: int = 200) -> Dict[str, Any]:
+        """Export the current run as Ed25519-signed, hash-chained JSON (/share-signed).
+
+        Same evidence format as /audit-signed: each message is a chained
+        entry verifiable on another machine with ~/.tera_pilot/audit_key.pub
+        (``tera-pilot audit verify <file>``). Falls back to an unsigned
+        export when no cryptography backend is available.
+        """
+        import datetime as _dt
+        conv = self.export_conversation(max_messages=max_messages)
+        if not conv.get("ok"):
+            return conv
+        messages = conv.get("messages", [])
+        outdir = Path.home() / ".tera_pilot" / "exports"
+        outdir.mkdir(parents=True, exist_ok=True)
+        stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        try:
+            from tera_pilot.audit_signing import export_signed_json
+            entries = [{"role": m.get("role", "?"), "content": m.get("content", ""),
+                        "workspace": self.workspace} for m in messages]
+            payload = export_signed_json(entries)
+            dest = outdir / f"chat-{stamp}.signed.json"
+            dest.write_text(payload, encoding="utf-8")
+            return {"ok": True, "path": str(dest), "signed": True,
+                    "messages": len(messages)}
+        except Exception as exc:
+            from tera_pilot.audit_signing import AuditSigningError
+            if not isinstance(exc, AuditSigningError):
+                return {"ok": False, "error": str(exc)}
+            import json as _json
+            dest = outdir / f"chat-{stamp}.json"
+            dest.write_text(_json.dumps(
+                {"exported_at": _dt.datetime.now().isoformat(),
+                 "workspace": self.workspace, "messages": messages,
+                 "signed": False,
+                 "note": "cryptography backend unavailable — unsigned fallback"},
+                indent=2), encoding="utf-8")
+            return {"ok": True, "path": str(dest), "signed": False,
+                    "messages": len(messages)}
+
+    def rename_chat(self, session_id: str, title: str) -> Dict[str, Any]:
+        """Rename a saved chat (JSON store first, SQLite sessions fallback)."""
+        title = (title or "").strip()[:120]
+        sid = (session_id or "").strip()
+        if not title or not sid:
+            return {"ok": False, "error": "session id and a non-empty title are required"}
+        chats_dir = Path.home() / ".tera_pilot" / "chats"
+        chat_path = chats_dir / f"{sid}.json"
+        if chat_path.exists():
+            try:
+                raw = json.loads(chat_path.read_text(encoding="utf-8"))
+                raw["title"] = title
+                chat_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+                return {"ok": True, "title": title}
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+        import sqlite3
+        db_path = Path.home() / ".tera_pilot" / "chats.sqlite3"
+        if not db_path.exists():
+            return {"ok": False, "error": f"no saved chat {sid!r}"}
+        try:
+            conn = sqlite3.connect(str(db_path))
+            cur = conn.execute("UPDATE sessions SET title=? WHERE id=?", (title, sid))
+            conn.commit()
+            changed = cur.rowcount
+            conn.close()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        if not changed:
+            return {"ok": False, "error": f"no saved chat {sid!r}"}
+        return {"ok": True, "title": title}
+
+    def _chat_tags_path(self) -> Path:
+        return Path.home() / ".tera_pilot" / "chat-tags.json"
+
+    def get_chat_tags(self, session_id: str) -> List[str]:
+        try:
+            raw = json.loads(self._chat_tags_path().read_text(encoding="utf-8")) \
+                if self._chat_tags_path().exists() else {}
+            tags = raw.get(session_id, [])
+            return [str(t) for t in tags] if isinstance(tags, list) else []
+        except Exception:
+            return []
+
+    def set_chat_tags(self, session_id: str, tags: List[str]) -> Dict[str, Any]:
+        clean = sorted({str(t).strip().lower()[:32] for t in (tags or []) if str(t).strip()})
+        try:
+            path = self._chat_tags_path()
+            raw = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            if not isinstance(raw, dict):
+                raw = {}
+            raw[session_id] = clean[:12]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "tags": clean}
+
+    def remember_fact(self, fact: str, scope: str = "project") -> Dict[str, Any]:
+        try:
+            from tera_pilot.memory_extract import remember_fact
+            return dict(remember_fact(fact, self.workspace, scope))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def forget_fact(self, index: int, scope: str = "project") -> Dict[str, Any]:
+        try:
+            from tera_pilot.memory_extract import forget_fact
+            return dict(forget_fact(index, self.workspace, scope))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def list_facts(self, scope: str = "all") -> Dict[str, Any]:
+        try:
+            from tera_pilot.memory_extract import (
+                read_facts, project_memory_path, global_memory_path)
+            out: Dict[str, Any] = {}
+            if scope in ("all", "project"):
+                out["project"] = read_facts(project_memory_path(self.workspace))
+                out["project_path"] = str(project_memory_path(self.workspace))
+            if scope in ("all", "global"):
+                out["global"] = read_facts(global_memory_path())
+                out["global_path"] = str(global_memory_path())
+            return {"ok": True, **out}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def suggest_facts(self, transcript: str) -> Dict[str, Any]:
+        try:
+            from tera_pilot.memory_extract import extract_facts
+            return {"ok": True, "facts": extract_facts(transcript or "")}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def init_memory_file(self) -> Dict[str, Any]:
+        """Scaffold <workspace>/.tera_pilot/MEMORY.md (/init)."""
+        template = (
+            "# Project memory (Tera Pilot)\n\n"
+            "Facts the agent should remember about this project.\n"
+            "One per line as `- fact`. Hand-editable; `/remember` appends.\n\n"
+            "- \n"
+        )
+        try:
+            from tera_pilot.memory_extract import project_memory_path
+            path = project_memory_path(self.workspace)
+            if path.exists():
+                return {"ok": True, "path": str(path), "exists": True}
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(template, encoding="utf-8")
+            return {"ok": True, "path": str(path), "exists": False}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_schedule(self) -> Dict[str, Any]:
+        try:
+            path = Path.home() / ".tera_pilot" / "schedule.json"
+            if not path.exists():
+                return {"ok": True, "entries": []}
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            return {"ok": True, "entries": raw if isinstance(raw, list) else []}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_bg_tasks(self) -> Dict[str, Any]:
+        """Live background-task states of the current run (/tasks)."""
+        try:
+            agent = self._agent
+            if agent is None:
+                return {"ok": True, "tasks": []}
+            with agent.tools._workflow_lock:
+                tasks = sorted(agent.tools._bg_tasks.values(),
+                               key=lambda t: int(t.get("id", 0)))
+            return {"ok": True, "tasks": [
+                {"id": t.get("id"), "label": t.get("label"),
+                 "command": str(t.get("command", ""))[:120],
+                 "status": t.get("status"),
+                 "output_chars": len(t.get("output") or "")} for t in tasks]}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_bg_task_output(self, task_id: str, max_chars: int = 4000) -> Dict[str, Any]:
+        try:
+            agent = self._agent
+            if agent is None:
+                return {"ok": False, "error": "agent not started"}
+            out = agent.tools._task_output(task_id, max_chars)
+            if out.startswith("[TASK ERROR]"):
+                return {"ok": False, "error": out}
+            return {"ok": True, "output": out}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def plugin_list(self) -> Dict[str, Any]:
+        try:
+            from tera_pilot.plugins import list_marketplace
+            return {"ok": True, "plugins": list_marketplace()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def plugin_install(self, source: str) -> Dict[str, Any]:
+        try:
+            from tera_pilot.plugins import install_plugin
+            return dict(install_plugin(source))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def plugin_remove(self, name: str) -> Dict[str, Any]:
+        try:
+            from tera_pilot.plugins import remove_plugin
+            return dict(remove_plugin((name or "").strip()))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def plugin_enable(self, name: str, enabled: bool = True) -> Dict[str, Any]:
+        try:
+            from tera_pilot.plugins import set_plugin_enabled
+            return dict(set_plugin_enabled((name or "").strip(), enabled))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_permission_state(self) -> Dict[str, Any]:
+        try:
+            from tera_pilot import permission_rules as _pr
+            return {"ok": True, "mode": _pr.get_mode(), "rules": _pr.list_rules()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def set_permission_mode(self, mode: str) -> Dict[str, Any]:
+        try:
+            from tera_pilot import permission_rules as _pr
+            return {"ok": True, **_pr.set_mode((mode or "").strip().lower())}
+        except (ValueError, IndexError) as exc:
+            return {"ok": False, "error": str(exc)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def add_permission_rule(self, pattern: str, effect: str = "allow") -> Dict[str, Any]:
+        try:
+            from tera_pilot import permission_rules as _pr
+            return {"ok": True, **_pr.add_rule(pattern, effect)}
+        except (ValueError, IndexError) as exc:
+            return {"ok": False, "error": str(exc)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def remove_permission_rule(self, index: int) -> Dict[str, Any]:
+        try:
+            from tera_pilot import permission_rules as _pr
+            return {"ok": True, **_pr.remove_rule(int(index))}
+        except (ValueError, IndexError) as exc:
+            return {"ok": False, "error": str(exc)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}

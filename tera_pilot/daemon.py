@@ -316,6 +316,26 @@ class TaskQueue:
         # the daemon was started with --no-confirm (explicit opt-in).
         if self.allow_headless_confirm:
             agent.tools.headless_confirm = "allow"
+        # v2.5.0: remote approvals — when an approval broker is wired
+        # (daemon + inbound telegram), confirmation prompts go to the
+        # allow-listed chats instead of failing closed immediately.
+        # Permission rules/modes still apply first inside the engine;
+        # unanswered approvals time out to DENY.
+        broker = getattr(self.task_queue, "approval_broker", None)
+        if broker is not None:
+            def _remote_confirm(info: Dict[str, Any]) -> None:
+                try:
+                    decision = broker.request_approval(
+                        task.id, str(info.get("action", "")),
+                        str(info.get("summary", "")))
+                except Exception:
+                    decision = None
+                try:
+                    agent.tools.respond_confirmation(bool(decision))
+                except Exception:
+                    pass
+
+            agent.set_confirm_callback(_remote_confirm)
 
         # Event callback — streams to SSE subscribers
         def on_event(kind: str, data: Dict[str, Any]) -> None:
@@ -714,6 +734,8 @@ class TeraPilotDaemon:
         # Remote task mode: accept tasks from a messenger backend (telegram).
         self._inbound = inbound
         self._inbound_listener: Any = None
+        self._approval_broker: Any = None
+        self._scheduler: Any = None
         self._server: Optional[ThreadingHTTPServer] = None
 
     def start(self) -> None:
@@ -745,6 +767,11 @@ class TeraPilotDaemon:
         # Remote task mode: accept tasks from a messenger if requested
         if self._inbound:
             self._enable_inbound(self._inbound)
+
+        # v2.5.0: run cron entries from schedule.json (stored via the
+        # agent's cron_add tool). Fires into the same task queue, so the
+        # headless-confirm policy and notifications apply unchanged.
+        self._enable_scheduler()
 
         # Configure handler
         DaemonHandler.task_queue = self.task_queue
@@ -781,11 +808,34 @@ class TeraPilotDaemon:
             print("\nShutting down...")
             self.task_queue.shutdown()
             self._server.shutdown()
+            if self._scheduler is not None:
+                try:
+                    self._scheduler.stop()
+                except Exception:
+                    pass
             if self._inbound_listener is not None:
                 try:
                     self._inbound_listener.stop()
                 except Exception:
                     pass
+
+    def _enable_scheduler(self) -> None:
+        """Start the cron runner when schedule.json holds enabled entries."""
+        try:
+            from .scheduler import ScheduleRunner, load_entries
+            entries = load_entries()
+            if not entries:
+                return
+
+            def _submit(prompt: str, workspace: str = "") -> None:
+                self.task_queue.submit(prompt, workspace=workspace or os.getcwd())
+
+            runner = ScheduleRunner(_submit)
+            runner.start()
+            self._scheduler = runner
+            print(f"[schedule] {len(entries)} enabled entr(ies) — runner started.")
+        except Exception as e:
+            print(f"[schedule] failed to start runner: {e}")
 
     def _enable_inbound(self, backend_name: str) -> None:
         """Start the remote-task-mode inbound listener (tasks via messenger).
@@ -817,11 +867,54 @@ class TeraPilotDaemon:
                 workspace=cfg.get("workspace", ""),
                 stop_keyword=cfg.get("stop_keyword", "STOP"),
             )
-            listener = make_inbound_listener(
-                config,
-                make_daemon_callback(self.task_queue, workspace=config.workspace),
-                on_stop=make_daemon_stop_callback(self.task_queue),
-            )
+            listener = None
+            base_callback = make_daemon_callback(self.task_queue, workspace=config.workspace)
+            # v2.5.0: remote approvals for the telegram backend — wire a
+            # broker so headless confirmation prompts reach the
+            # allow-listed chats (ALLOW <N> / DENY <N>), timing out to DENY.
+            broker = None
+            if (config.backend or backend_name) == "telegram" and cfg.get("telegram_token"):
+                try:
+                    from .remote_approval import RemoteApprovalBroker, send_telegram_message
+                    token = cfg.get("telegram_token", "")
+                    chats = sorted(config.allowed_chat_ids)
+
+                    def _sender(text: str, _token: str = token,
+                                _chats: list = chats) -> None:
+                        for chat_id in _chats:
+                            send_telegram_message(_token, chat_id, text)
+
+                    broker = RemoteApprovalBroker(sender=_sender)
+                    self.task_queue.approval_broker = broker
+
+                    def _on_message_with_approvals(msg, _base=base_callback,
+                                                   _broker=broker, _send=_sender) -> None:
+                        try:
+                            ack = _broker.resolve(msg.text)
+                        except Exception:
+                            ack = None
+                        if ack is not None:
+                            try:
+                                _send(ack)
+                            except Exception:
+                                pass
+                            return
+                        _base(msg)
+
+                    listener = make_inbound_listener(
+                        config,
+                        _on_message_with_approvals,
+                        on_stop=make_daemon_stop_callback(self.task_queue),
+                    )
+                    print(f"[approval] remote approvals enabled for {len(chats)} chat(s).")
+                except Exception as e:
+                    print(f"[approval] failed to enable remote approvals: {e}")
+            if listener is None:
+                listener = make_inbound_listener(
+                    config,
+                    base_callback,
+                    on_stop=make_daemon_stop_callback(self.task_queue),
+                )
             listener.start()
             self._inbound_listener = listener
             print(f"[inbound] remote task mode enabled: {config.backend} (chats: {sorted(config.allowed_chat_ids)})")

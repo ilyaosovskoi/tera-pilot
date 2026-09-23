@@ -97,6 +97,32 @@ class OutputParser:
         # being a known, callable tool).
         "web_search":             ["query", "num_results"],
         "web_fetch":              ["url", "max_chars"],
+        # v2.5.0: workflow update — interactive + planning + isolation.
+        "ask_user":               ["question", "options"],
+        "todo_write":             ["todos"],
+        "todo_list":              [],
+        "enter_plan_mode":        ["goal"],
+        "exit_plan_mode":         ["summary"],
+        "worktree_add":           ["name", "branch"],
+        "worktree_list":          [],
+        "worktree_remove":        ["name", "force"],
+        "repl_run":               ["session", "code", "language"],
+        "repl_reset":             ["session"],
+        "task_spawn":             ["label", "command", "timeout"],
+        "task_list":              [],
+        "task_output":            ["id", "max_chars"],
+        "task_stop":              ["id"],
+        "team_send":              ["target", "message"],
+        "team_list":              [],
+        "cron_add":               ["schedule", "task"],
+        "cron_list":              [],
+        "cron_remove":            ["id"],
+        "sleep":                  ["seconds"],
+        "code_symbols":           ["path"],
+        # v2.5.0: language-server navigation (lines are 1-based).
+        "lsp_definition":         ["path", "line", "character"],
+        "lsp_references":         ["path", "line", "character"],
+        "lsp_symbols":            ["path"],
     }
 
     @classmethod
@@ -139,7 +165,7 @@ class OutputParser:
     def native_final_answer_text(cls, native_calls) -> Optional[str]:
         """Extract the closing message from a native ``final_answer`` call.
 
-        v2.4.2-fix: when the model answers ONLY via a native
+        v2.5.0-fix: when the model answers ONLY via a native
         ``final_answer`` function call (no text body),
         ``tool_calls_from_native`` drops it as "not a real tool" and the
         runtime burns an iteration on an empty turn instead of finalizing.
@@ -922,7 +948,7 @@ class OutputParser:
         lfm_text = cls._lfm_final_answer(text)
         if lfm_text is not None:
             return lfm_text
-        # v2.4.2-fix: the ``{"tool": "final_answer", "args": {...}}``
+        # v2.5.0-fix: the ``{"tool": "final_answer", "args": {...}}``
         # envelope. Models (e.g. Nemotron via NIM, 2026-09-18 eval) close
         # the run with the tool/args envelope instead of a bare
         # ``{"final_answer": ...}`` key — the old code saw ``is_final``

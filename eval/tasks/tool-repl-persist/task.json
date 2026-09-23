@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "tool-repl-persist",
+  "name": "Compute an order total in a persistent REPL session",
+  "category": "feature",
+  "prompt": "Open a persistent REPL session named 'calc'. In it, import rates.py (RATES, TAX, ORDERS), compute the total for order-7 (3 widgets + 10 gadgets) including TAX, rounded to 2 decimals. Reuse the SAME session to double-check the number (recompute a different way, e.g. per-line subtotals), then write just the number into result.txt in the workspace. Do not hardcode the answer — it must come out of the REPL session.",
+  "repo": "repo",
+  "test_command": ["python3", "-c", "v=float(open('result.txt').read().strip()); assert abs(v-125.96)<0.005, v"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "tool-plan-gate",
+  "name": "Plan first, then write the plan down",
+  "category": "feature",
+  "prompt": "Use enter_plan_mode with the goal 'add input validation to signup() in app.py'. While planning mode is active, research signup() (read app.py), record at least 2 todos with todo_write, then call exit_plan_mode with a one-paragraph summary. Only AFTER exiting planning mode, write the plan into PLAN.md (validation rules for username and password, plus which tests to add). Do not modify app.py.",
+  "repo": "repo",
+  "test_command": ["python3", "-c", "t=open('PLAN.md').read().lower(); assert 'signup' in t and 'valid' in t, 'PLAN.md must describe signup validation'"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

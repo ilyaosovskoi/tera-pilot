@@ -31,9 +31,10 @@ from .widgets.model_selector_modal import ModelSelectorModal
 from .widgets.verification_modal import VerificationModal
 from .widgets.task_canvas_view import TaskCanvasView
 from .widgets.settings_modal import QuickSettingsModal
+from .workflow_mixin import WorkflowCommandsMixin
 
 
-class TeraPilotTUIApp(App):
+class TeraPilotTUIApp(WorkflowCommandsMixin, App):
     CSS_PATH = "styles_dark.tcss"
     TITLE = "tera_pilot"
 
@@ -65,6 +66,8 @@ class TeraPilotTUIApp(App):
         # the modal stayed on screen forever once the agent moved on
         # (stale dialog over an idle app).
         self._approval_modal = None
+        # v2.5.0: same stale-dialog tracking for the ask_user modal.
+        self._ask_modal = None
         # v2.3.5-fix: last error already rendered via the agent's ERROR
         # event. The runtime emits an ERROR event AND returns
         # success=False for the same terminal failure, so without this
@@ -85,16 +88,16 @@ class TeraPilotTUIApp(App):
     def compose(self) -> ComposeResult:
         yield InfoBox(id="info")
         yield ChatLog(id="chat")
-        # v2.4.2: live task-graph strip — visible only while the canvas
+        # v2.5.0: live task-graph strip — visible only while the canvas
         # holds nodes (plan → subtasks with running/done/pending/failed).
         yield TaskCanvasView(id="canvas")
-        # v2.4.2: ephemeral thinking strip — visible only while a turn
+        # v2.5.0: ephemeral thinking strip — visible only while a turn
         # runs (whimsical verb + spinner). Answers "is it reasoning or
         # did it die?" at a glance.
         yield ThinkingIndicator(id="thinking")
         yield CommandSuggestions(id="suggestions")
         yield InputBox(id="input")
-        # v2.4.2: bottom statusline (tokens/cost, section + guardian
+        # v2.5.0: bottom statusline (tokens/cost, section + guardian
         # badges, spinner state). Composed last so it docks at the very
         # bottom edge, below the input box.
         yield StatusBar(id="statusbar")
@@ -103,11 +106,13 @@ class TeraPilotTUIApp(App):
         self.bridge.set_event_sink(self._sink)
         self.bridge.set_confirm_handler(self._confirm)
         self.bridge.set_guardian_handler(self._confirm)
+        # v2.5.0: interactive answers for the ask_user tool.
+        self.bridge.set_ask_handler(self._ask_user_blocking)
 
         try:
             from tera_pilot import __version__ as _tera_pilot_version
         except Exception:
-            _tera_pilot_version = "2.4.1"
+            _tera_pilot_version = "2.5.0"
 
         # Initialize InfoBox with current state + the active theme palette.
         info = self.query_one(InfoBox)
@@ -120,7 +125,7 @@ class TeraPilotTUIApp(App):
             version=_tera_pilot_version,
         )
 
-        # v2.4.2: paint the newly-mounted statusline + thinking strip
+        # v2.5.0: paint the newly-mounted statusline + thinking strip
         # with the active theme and seed the statusline once.
         try:
             thinking = self.query_one(ThinkingIndicator)
@@ -159,7 +164,21 @@ class TeraPilotTUIApp(App):
         # v2.3.6: drive the animated "thinking…" status line.
         self.set_interval(0.15, self._tick_status_animation)
 
+        # v2.5.0: warm the agent stack in the background while the user
+        # reads the welcome screen — first turn starts without the
+        # cold-import pause. Fire-and-forget; prewarm() never raises.
+        try:
+            self.run_worker(self._prewarm_bridge, exclusive=False)
+        except Exception:
+            pass
+
         self.query_one(InputBox).focus()
+
+    async def _prewarm_bridge(self) -> None:
+        try:
+            self.bridge.prewarm()
+        except Exception:
+            pass
 
     # --------------------------------------------------------- suggestions
     def _show_suggestions(self, query: str = "") -> None:
@@ -463,6 +482,58 @@ class TeraPilotTUIApp(App):
         # v2.4.0: API key management
         elif cmd == "/key":
             self._exec_key(arg)
+        # v2.5.0: workflow update — review & delivery (agent turns)
+        elif cmd == "/review":
+            self._exec_review(arg)
+        elif cmd == "/security-review":
+            self._exec_security_review(arg)
+        elif cmd == "/advisor":
+            self._exec_advisor(arg)
+        elif cmd == "/bughunter":
+            self._exec_bughunter(arg)
+        elif cmd == "/commit":
+            self._exec_commit(arg)
+        elif cmd == "/commit-push-pr":
+            self._exec_commit_push_pr(arg)
+        elif cmd == "/pr-comments":
+            self._exec_pr_comments(arg)
+        # v2.5.0: workflow update — local commands (no turn spent)
+        elif cmd == "/compact":
+            self._exec_compact(arg)
+        elif cmd == "/export":
+            self._exec_export(arg)
+        elif cmd == "/share":
+            self._exec_share(arg)
+        elif cmd == "/share-signed":
+            self._exec_share_signed(arg)
+        elif cmd == "/rename":
+            self._exec_rename(arg)
+        elif cmd == "/tag":
+            self._exec_tag(arg)
+        elif cmd == "/stats":
+            self._exec_stats(arg)
+        elif cmd == "/effort":
+            self._exec_effort(arg)
+        elif cmd == "/fast":
+            self._exec_fast(arg)
+        elif cmd == "/brief":
+            self._exec_brief(arg)
+        elif cmd == "/output-style":
+            self._exec_output_style(arg)
+        elif cmd == "/permissions":
+            self._exec_permissions(arg)
+        elif cmd == "/init":
+            self._exec_init(arg)
+        elif cmd == "/onboarding":
+            self._exec_onboarding(arg)
+        elif cmd == "/remember":
+            self._exec_remember(arg)
+        elif cmd == "/plugin":
+            self._exec_plugin(arg)
+        elif cmd == "/schedule":
+            self._exec_schedule(arg)
+        elif cmd == "/tasks":
+            self._exec_tasks(arg)
         else:
             self.query_one(ChatLog).add_system(
                 f"Unknown command: {cmd}. Type /help for available commands."
@@ -2672,7 +2743,7 @@ class TeraPilotTUIApp(App):
     def _apply_theme(self) -> None:
         """v2.4.1: reload the theme stylesheet and re-paint the InfoBox
         with the palette that matches the new theme.
-        v2.4.2: also swap the ChatLog body palette — Rich inline styles
+        v2.5.0: also swap the ChatLog body palette — Rich inline styles
         are not repainted by reload_css()."""
         self.CSS_PATH = "styles_dark.tcss" if self._dark_theme else "styles_light.tcss"
         try:
@@ -2684,7 +2755,7 @@ class TeraPilotTUIApp(App):
             info.set_theme(self._dark_theme)
             chat = self.query_one(ChatLog)
             chat.set_theme(self._dark_theme)
-            # v2.4.2: repaint the statusline + thinking strip palettes.
+            # v2.5.0: repaint the statusline + thinking strip palettes.
             try:
                 self.query_one(StatusBar).set_theme(self._dark_theme)
             except Exception:
@@ -2756,12 +2827,12 @@ class TeraPilotTUIApp(App):
             chat.add_error(self._last_event_error)
         elif kind == "done":
             pass
-        # v2.4.2: pull the live task graph after every agent event and
+        # v2.5.0: pull the live task graph after every agent event and
         # show the strip only while the canvas holds nodes.
         self._refresh_canvas()
 
     def _refresh_canvas(self) -> None:
-        """v2.4.2: re-render the task-graph strip and toggle its
+        """v2.5.0: re-render the task-graph strip and toggle its
         visibility. Never let widget wiring break event handling."""
         try:
             canvas = self.query_one(TaskCanvasView)
@@ -2814,12 +2885,52 @@ class TeraPilotTUIApp(App):
         modal = self._approval_modal
         self._approval_modal = None
         if modal is None:
-            return
+            # v2.5.0: also close a stale ask_user modal the same way.
+            modal = self._ask_modal
+            self._ask_modal = None
+            if modal is None:
+                return
         try:
             if modal in self.screen_stack:
                 self.pop_screen()
         except Exception:
             pass
+
+    # ── v2.5.0: interactive ask_user ──────────────────────────────
+
+    def _ask_user_blocking(self, question: str, options: List[str]) -> Optional[str]:
+        """Answer provider for the ask_user tool (runs on the agent thread).
+
+        Shows AskUserModal on the UI thread and blocks up to 300s. Skip,
+        timeout or a dead UI all resolve to None — the engine then falls
+        back to "proceed with a stated assumption", so a question can
+        never wedge the run.
+        """
+        import threading as _threading
+        done = _threading.Event()
+        answer: List[Optional[str]] = [None]
+
+        def _finish(result: Optional[str]) -> None:
+            self._ask_modal = None
+            answer[0] = result
+            done.set()
+
+        try:
+            self.call_from_thread(self._show_ask_modal, question, options or [], _finish)
+        except Exception:
+            return None
+        if not done.wait(timeout=300):
+            try:
+                self.call_from_thread(self._close_stale_approval)
+            except Exception:
+                pass
+            return None
+        return answer[0]
+
+    def _show_ask_modal(self, question: str, options: List[str], finish: Any) -> None:
+        from .widgets.ask_modal import AskUserModal
+        self._ask_modal = AskUserModal(question, options)
+        self.push_screen(self._ask_modal, finish)
 
     # --------------------------------------------------------------- lifecycle
     def _on_turn_done(self, result: Any) -> None:
@@ -2940,7 +3051,7 @@ class TeraPilotTUIApp(App):
             )
             if state not in ("thinking", "running"):
                 info.clear_status()
-            # v2.4.2: push the same turn state into the bottom
+            # v2.5.0: push the same turn state into the bottom
             # statusline (tokens/cost, section + guardian badges,
             # spinner). Never let widget wiring break a status update.
             try:
@@ -2959,7 +3070,7 @@ class TeraPilotTUIApp(App):
                 pass
         except Exception:
             pass
-        # v2.4.2: show the thinking strip (whimsical verb + spinner)
+        # v2.5.0: show the thinking strip (whimsical verb + spinner)
         # while the agent works; hide it the moment the turn ends so
         # "no strip" unambiguously means idle/dead, not "still busy".
         try:

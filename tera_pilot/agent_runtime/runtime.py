@@ -100,6 +100,7 @@ class AgentRuntime:
         on_token_delta: Optional[Callable[[str], None]] = None,
         compact_prompt: Optional[bool] = None,
         endurance: Optional[EnduranceLimits] = None,
+        verbosity: str = "normal",
     ):
         self._registry = registry
         self.memory = ContextMemory(persist_path=memory_persist_path)
@@ -175,6 +176,13 @@ class AgentRuntime:
         # auto-detect from the active model's size (<= ~8B → compact);
         # True/False forces it. Config knob: agent_compact_prompt.
         self._compact_override = compact_prompt
+        # v2.5.0: output verbosity (normal | brief | detailed | fast).
+        # Appended as a short suffix by PromptBuilder.system(); "normal"
+        # is byte-identical to previous prompts. Set via the
+        # ``agent_verbosity`` config key (/effort, /fast, /brief,
+        # /output-style) and passed in by the bridge.
+        from .prompts import _VALID_VERBOSITIES
+        self.verbosity = verbosity if verbosity in _VALID_VERBOSITIES else "normal"
         # Agent Profile (v2.4.0): optional system-prompt override (see
         # set_system_prompt_fragment). None = stock section prompt only.
         self._profile_prompt_fragment: Optional[str] = None
@@ -687,8 +695,12 @@ class AgentRuntime:
         return False
 
     def _system_prompt(self, section: str = "general") -> str:
-        """System prompt for *section*, honoring compact mode."""
-        return PromptBuilder.system(section=section, compact=self._use_compact_prompt())
+        """System prompt for *section*, honoring compact mode + verbosity."""
+        return PromptBuilder.system(
+            section=section,
+            compact=self._use_compact_prompt(),
+            verbosity=getattr(self, "verbosity", "normal"),
+        )
 
     def _native_tools(self) -> Optional[List[dict]]:
         """Return the OpenAI-function-format tool schemas for this run,
@@ -2009,7 +2021,7 @@ class AgentRuntime:
             if native_calls_this:
                 self._native_history_active = True
                 parsed_calls = OutputParser.tool_calls_from_native(native_calls_this)
-                # v2.4.2-fix: a native `final_answer` call carries the run's
+                # v2.5.0-fix: a native `final_answer` call carries the run's
                 # closing message with no text body — the parser drops it as
                 # "not a real tool", so detect it here and finalize below
                 # instead of burning an iteration on an empty turn.

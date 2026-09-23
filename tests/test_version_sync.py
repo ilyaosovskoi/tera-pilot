@@ -1,4 +1,4 @@
-"""Version-consistency test (v2.4.1).
+"""Version-consistency test (v2.5.0).
 
 The version must stay in sync everywhere: npm (package.json), pip
 (pyproject.toml), the Python package (tera_pilot/__init__.py), the
@@ -64,9 +64,10 @@ def test_all_version_strings_match_package_json():
 
 
 def test_no_stale_major_labels():
-    """v2.5.x / v2.5.0 were speculative labels for changes that shipped
-    as 2.4.0 (agent profiles, fleets, /key) — none may remain in the
-    tree. v2.4.0 itself is now the real in-progress major."""
+    """v2.6.x is the speculative label for the next major (nothing planned
+    under it yet) — none may remain in the tree. v2.5.0 is the real
+    in-progress major (workflow update: agent tools, review commands,
+    permissions, memory, plugin marketplace)."""
     for rel in (
         "tera_pilot",
         "tera_pilot_tui",
@@ -76,7 +77,7 @@ def test_no_stale_major_labels():
             if p.name == "test_version_sync.py":
                 continue  # this file's own docstring describes the labels
             text = p.read_text(encoding="utf-8", errors="replace")
-            assert "v2.5" not in text, f"{p}: stale v2.5 label"
+            assert "v2.6" not in text, f"{p}: stale v2.6 label"
     # The web assets too (a few labels referenced v2.4)
     for rel in ("index.html", "app.js", "style.css", "design-polish.css"):
-        assert "v2.5" not in (ROOT / "tera_pilot" / "web" / rel).read_text(encoding="utf-8")
+        assert "v2.6" not in (ROOT / "tera_pilot" / "web" / rel).read_text(encoding="utf-8")

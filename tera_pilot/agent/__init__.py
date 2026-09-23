@@ -58,7 +58,7 @@ from .subagent_v2 import (
 from .encrypted_prompt import EncryptedPromptStore, EncryptedPromptError
 from .acp_server import ACPServer
 
-__version__ = "2.4.1"
+__version__ = "2.5.0"
 
 def get_circuit_breaker_registry():
     """Return a new CircuitBreakerRegistry instance."""

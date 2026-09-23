@@ -48,6 +48,10 @@ payment.html
 # Local bugfix/working notes inside the package.
 tera_pilot/BUGFIXES_*.md
 
+# Local reference snapshot for studying update ideas — never committed
+# (kept out of the tree on purpose; implementations are original work).
+reference-workflows/
+
 # Local eval report drafts (published summaries stay in README).
 eval/REPORT_*.md
 

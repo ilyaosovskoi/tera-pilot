@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "id": "tool-worktree-isolate",
+  "name": "Fix a typo inside an isolated worktree",
+  "category": "feature",
+  "prompt": "The function calcluate_total in app.py has a typo. Create an isolated worktree named 'typo-fix' (worktree_add), fix the typo to calculate_total ONLY in the worktree's copy of app.py (leave the main checkout untouched), and confirm the isolation with worktree_list. Do not commit anything.",
+  "repo": "repo",
+  "git_bundle": "tool-worktree-isolate.bundle",
+  "test_command": ["python3", "-c", "import pathlib; main=pathlib.Path('app.py').read_text(); wt=pathlib.Path('.worktrees/typo-fix/app.py').read_text(); assert 'calcluate_total' in main, 'main checkout must stay untouched'; assert 'def calculate_total' in wt, 'worktree copy must define calculate_total'"],
+  "baseline_status": "failing",
+  "timeout_secs": 300
+}

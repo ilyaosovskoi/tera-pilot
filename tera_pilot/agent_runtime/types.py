@@ -130,6 +130,33 @@ class ToolName(Enum):
     # and explicitly includes web_search/web_fetch.
     WEB_SEARCH = "web_search"
     WEB_FETCH = "web_fetch"
+    # v2.5.0: workflow update — interactive + planning + isolation tools.
+    # All original implementations; see ToolEngine section "workflow update".
+    ASK_USER = "ask_user"
+    TODO_WRITE = "todo_write"
+    TODO_LIST = "todo_list"
+    ENTER_PLAN_MODE = "enter_plan_mode"
+    EXIT_PLAN_MODE = "exit_plan_mode"
+    WORKTREE_ADD = "worktree_add"
+    WORKTREE_LIST = "worktree_list"
+    WORKTREE_REMOVE = "worktree_remove"
+    REPL_RUN = "repl_run"
+    REPL_RESET = "repl_reset"
+    TASK_SPAWN = "task_spawn"
+    TASK_LIST = "task_list"
+    TASK_OUTPUT = "task_output"
+    TASK_STOP = "task_stop"
+    TEAM_SEND = "team_send"
+    TEAM_LIST = "team_list"
+    CRON_ADD = "cron_add"
+    CRON_LIST = "cron_list"
+    CRON_REMOVE = "cron_remove"
+    SLEEP = "sleep"
+    CODE_SYMBOLS = "code_symbols"
+    # v2.5.0: precise navigation via a language server (pylsp).
+    LSP_DEFINITION = "lsp_definition"
+    LSP_REFERENCES = "lsp_references"
+    LSP_SYMBOLS = "lsp_symbols"
 
 
 class AgentEvent(Enum):

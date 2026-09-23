@@ -669,6 +669,120 @@ _BUILTIN_SKILLS: List[Skill] = [
             "\"I also ran X because Y\" is correct. Hiding it is wrong.\n"
         ),
     ),
+    # ── v2.5.0: workflow-update skills ──────────────────────────────
+    Skill(
+        id="debug_detective",
+        name="Debug Detective",
+        description="Systematic debugging: reproduce first, bisect, form one hypothesis at a time. Use when chasing a bug or a failing test.",
+        tag="general",
+        body=(
+            "# SKILL: Debug Detective\n\n"
+            "You debug like a detective, not by guessing.\n"
+            "Rules:\n"
+            "- Reproduce FIRST: write the smallest failing case before touching code.\n"
+            "- Bisect: narrow the suspect area (half the code, re-run) until one spot remains.\n"
+            "- One hypothesis at a time; state what would disprove it.\n"
+            "- Check the boring causes first: off-by-one, None/empty, stale cache, wrong branch.\n"
+            "- After the fix, explain the root cause in one paragraph so it stays fixed.\n"
+        ),
+    ),
+    Skill(
+        id="code_simplifier",
+        name="Code Simplifier",
+        description="Shrinks complex code without changing behaviour. Use when refactoring tangled logic.",
+        tag="general",
+        body=(
+            "# SKILL: Code Simplifier\n\n"
+            "You make code smaller while keeping behaviour identical.\n"
+            "Rules:\n"
+            "- Delete dead code instead of commenting it out.\n"
+            "- Collapse nested conditionals with guard clauses.\n"
+            "- Extract a helper only when a block needs a name to be understood.\n"
+            "- Prefer the standard library over a new dependency.\n"
+            "- After every simplification, re-run the relevant tests.\n"
+        ),
+    ),
+    Skill(
+        id="stuck_unblocker",
+        name="Stuck Unblocker",
+        description="Gets an agent unstuck: restate, shrink, sidestep. Use when a task loops or stalls.",
+        tag="general",
+        body=(
+            "# SKILL: Stuck Unblocker\n\n"
+            "You unstick stalled work.\n"
+            "Rules:\n"
+            "- Restate the goal in ONE sentence; drop everything not serving it.\n"
+            "- Shrink the task: solve the smallest slice that proves progress.\n"
+            "- Sidestep: if a tool keeps failing, do the same thing another way.\n"
+            "- Ask the user (ask_user) when two readings of the request are plausible.\n"
+            "- Never repeat an identical failing call — change something first.\n"
+        ),
+    ),
+    Skill(
+        id="batch_operator",
+        name="Batch Operator",
+        description="Applies one change across many files safely. Use for renames, codemods, bulk edits.",
+        tag="general",
+        body=(
+            "# SKILL: Batch Operator\n\n"
+            "You apply one change across many files without breaking them.\n"
+            "Rules:\n"
+            "- Find all targets with grep/glob FIRST and list them.\n"
+            "- Dry-run on ONE file, verify, then roll out to the rest.\n"
+            "- Prefer str_replace over full rewrites for surgical edits.\n"
+            "- Re-run the affected test files at the end, not after each file.\n"
+            "- Report: files touched, files skipped (and why).\n"
+        ),
+    ),
+    Skill(
+        id="change_remember",
+        name="Change Remember",
+        description="Persists durable facts to project memory. Use when the user states a preference or project truth.",
+        tag="general",
+        body=(
+            "# SKILL: Change Remember\n\n"
+            "You persist what should outlive this session.\n"
+            "Rules:\n"
+            "- Store preferences ('always', 'never', 'prefer') and project truths\n"
+            "  (stack, conventions, deployment) — not one-off task details.\n"
+            "- Confirm before storing anything the user did not clearly state.\n"
+            "- Keep each fact to one line; one fact per line.\n"
+            "- Suggest /remember scan output back to the user instead of\n"
+            "  silently writing memory files.\n"
+        ),
+    ),
+    Skill(
+        id="config_updater",
+        name="Config Updater",
+        description="Edits configuration through the supported knobs. Use when changing settings, budgets, permissions.",
+        tag="general",
+        body=(
+            "# SKILL: Config Updater\n\n"
+            "You change configuration the supported way.\n"
+            "Rules:\n"
+            "- Prefer the product's own commands (/budget, /permissions,\n"
+            "  /effort, /output-style, /key, /endurance) over hand-editing files.\n"
+            "- Show the before/after value for every change.\n"
+            "- Never print secrets; confirm the key is masked after saving.\n"
+            "- If a change needs a restart to take effect, say so explicitly.\n"
+        ),
+    ),
+    Skill(
+        id="skill_forge",
+        name="Skill Forge",
+        description="Turns a repeated workflow into a reusable skill file. Use when the user does the same thing twice.",
+        tag="general",
+        body=(
+            "# SKILL: Skill Forge\n\n"
+            "You turn repeated workflows into reusable skills.\n"
+            "Rules:\n"
+            "- A skill has: id, when-to-use (one line), steps, and an example.\n"
+            "- Keep the body under 40 lines — skills are injected into context.\n"
+            "- Project skills live in <project>/.tera_pilot/skills/, global ones\n"
+            "  in ~/.tera_pilot/skills/ (SKILL.md with frontmatter).\n"
+            "- After drafting, ask the user where to save it.\n"
+        ),
+    ),
 ]
 
 

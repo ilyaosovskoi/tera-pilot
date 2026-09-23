@@ -385,6 +385,32 @@ the key on the input line. Keys are stored in `~/.tera_pilot/config.json`
 
 ---
 
+## 🆕 What's new in 2.5.0 — the workflow update
+
+Agent tools: `ask_user` (now with an interactive TUI dialog),
+`todo_write`/`todo_list`, `enter/exit_plan_mode`, `worktree_add/list/remove`,
+`repl_run/reset`, `task_spawn/list/output/stop`, `team_send/list`,
+`cron_add/list/remove` (executed by the daemon's schedule runner), `sleep`,
+`code_symbols` plus precise `lsp_definition`/`lsp_references`/`lsp_symbols`
+(python-lsp-server, read-only, every section).
+
+TUI commands: `/review`, `/security-review`, `/advisor`, `/bughunter`,
+`/commit`, `/commit-push-pr`, `/pr-comments`, `/compact`, `/export`,
+`/share`, `/share-signed` (Ed25519, verifiable with `tera-pilot audit verify`),
+`/rename`, `/tag`, `/stats`, `/tasks` (live background tasks), `/schedule`,
+`/effort`, `/fast`, `/brief`, `/output-style`, `/permissions`
+(allow/deny rules + `default/plan/auto/bypass` modes), `/init`,
+`/onboarding`, `/remember`, `/plugin`.
+
+Also: project memory (`MEMORY.md`), plugin marketplace
+(install/enable/disable), Telegram remote approvals (`ALLOW <N>` /
+`DENY <N>`, timeout to deny), auto-checkpoint before risky operations,
+background startup prewarm, 7 new built-in skills, and 3 new eval tasks
+(`tool-repl-persist`, `tool-plan-gate`, `tool-worktree-isolate`).
+Details per version: [CHANGELOG](CHANGELOG.md).
+
+---
+
 ## ⚔️ Tera Pilot vs the rest
 
 > We don't compete with autocomplete — Copilot's inline suggestions are fast,

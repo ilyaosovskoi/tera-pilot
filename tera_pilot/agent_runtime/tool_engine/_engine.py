@@ -101,9 +101,39 @@ def _collect_pipe_drain(stdout_buf, stderr_buf, t_out, t_err) -> Tuple[bytes, by
     return b"".join(stdout_buf), b"".join(stderr_buf)
 
 
+# v2.5.0: workflow-update gate sets (module-level so both the prompt
+# builder and the dispatch gate share one source of truth).
+_PLAN_ISOLATION_TOOL_NAMES = frozenset({
+    "enter_plan_mode", "exit_plan_mode",
+    "worktree_add", "worktree_list", "worktree_remove",
+    "repl_run", "repl_reset",
+    "task_spawn", "task_list", "task_output", "task_stop",
+    "team_send", "team_list",
+    "cron_add", "cron_list", "cron_remove",
+})
+# Tools disabled while plan mode is active (everything that changes
+# files, repo state, processes or the outside world).
+_PLAN_MODE_BLOCKED = frozenset({
+    "write_file", "str_replace", "apply_diff", "delete_file",
+    "rename_file", "mkdir", "write_binary_file",
+    "execute_command", "run_code",
+    "git_stage", "git_commit",
+    "call_mcp_tool",
+    "spawn_subagent", "spawn_multi_agents",
+    "worktree_add", "worktree_remove",
+    "repl_run", "repl_reset",
+    "task_spawn", "task_stop",
+    "cron_add", "cron_remove",
+    "enter_plan_mode",
+}) | {f"office_{s}" for s in (
+    "create", "add_paragraph", "add_heading", "add_table", "fill_table",
+    "add_sheet", "set_cell", "set_cell_format", "add_chart", "fill_sheet",
+    "add_slide", "add_text", "add_shape", "find_replace", "save_as",
+)}
+
+
 class ToolEngine:
     """Executes agent tool calls in a sandboxed environment."""
-
     # v2.1.0 (Loop 2): default timeout raised from 15s to 180s.
     # 15s was too short for npm install, pytest, cargo build, docker build.
     # The constant is kept for backward compatibility but the actual
@@ -191,6 +221,25 @@ class ToolEngine:
         # here so _dispatch can reject section-gated tools (spawn_subagent,
         # spawn_multi_agents) even if the model hallucinates a call.
         self.section: str = "general"
+        # v2.5.0: workflow-update state. All in-memory, per-engine
+        # (per run): todos, plan-mode gate, persistent REPL sessions,
+        # background tasks, team message bus. Cron entries are the only
+        # part persisted to disk (~/.tera_pilot/schedule.json) so the
+        # daemon can pick them up across restarts.
+        self._todos: List[Dict[str, str]] = []
+        self._plan_mode: bool = False
+        self._plan_goal: str = ""
+        self._plan_approved_kinds: set = set()
+        self._ask_user_callback: Optional[Callable[[str, List[str]], Optional[str]]] = None
+        self._repl_sessions: Dict[str, Any] = {}
+        self._bg_tasks: Dict[str, Dict[str, Any]] = {}
+        self._bg_task_counter: int = 0
+        self._team_bus: List[Dict[str, Any]] = []
+        self._team_counter: int = 0
+        self._workflow_lock = threading.Lock()
+        # v2.5.0: cached synchronous LSP client (language server process
+        # is reused across calls; restarted automatically when dead).
+        self._lsp: Optional[Any] = None
         # v1.1.3-fix (bug 1.4): role-based tool whitelist. When set (via
         # set_role_whitelist), _dispatch rejects any tool NOT in the set
         # with a "[TOOL DENIED]" message — even if the model ignores the
@@ -248,26 +297,49 @@ class ToolEngine:
             "read_file", "list_files", "search_project",
             "get_project_structure", "git_status", "git_diff", "get_skill",
             "file_info", "read_binary_file",
+            # v2.5.0: planning aids (read-only + questions + todos).
+            "ask_user", "todo_write", "todo_list", "code_symbols",
+            "lsp_definition", "lsp_references", "lsp_symbols", "sleep",
         },
         "reviewer": {
             "read_file", "list_files", "search_project",
             "git_diff", "get_skill", "file_info", "read_binary_file",
+            # v2.5.0: questions + symbol navigation for reviews.
+            "ask_user", "todo_list", "code_symbols",
+            "lsp_definition", "lsp_references", "lsp_symbols",
         },
         "tester": {
             "read_file", "write_file", "run_code",
             "git_status", "get_skill", "list_files", "search_project",
             "file_info",
+            # v2.5.0: persistent REPL + background test runs.
+            "ask_user", "todo_write", "todo_list", "repl_run", "repl_reset",
+            "task_spawn", "task_list", "task_output", "task_stop",
+            "sleep", "code_symbols",
+            "lsp_definition", "lsp_references", "lsp_symbols",
         },
         "implementer": {
             "read_file", "write_file", "str_replace", "mkdir",
             "run_code", "git_status", "git_diff", "git_stage", "git_commit",
             "get_skill", "list_files", "search_project",
             "get_project_structure", "file_info", "undo_write",
+            # v2.5.0: plan gate, worktree isolation, REPL, bg tasks, team bus.
+            "ask_user", "todo_write", "todo_list",
+            "enter_plan_mode", "exit_plan_mode",
+            "worktree_add", "worktree_list", "worktree_remove",
+            "repl_run", "repl_reset",
+            "task_spawn", "task_list", "task_output", "task_stop",
+            "team_send", "team_list", "sleep", "code_symbols",
+            "lsp_definition", "lsp_references", "lsp_symbols",
         },
         "generalist": {
             "read_file", "list_files", "search_project",
             "get_skill", "file_info", "get_project_structure",
             "read_binary_file", "git_status", "git_diff",
+            # v2.5.0: questions, todos, symbols, team notes.
+            "ask_user", "todo_write", "todo_list", "code_symbols",
+            "lsp_definition", "lsp_references", "lsp_symbols",
+            "sleep", "team_send", "team_list",
         },
         # v2.0.0 subagent roles - read-only by toolset construction
         "explore": {
@@ -275,12 +347,18 @@ class ToolEngine:
             "grep", "glob", "list_files", "get_project_structure",
             "file_info", "git_status", "git_diff",
             "list_mcp_tools", "get_skill", "select_tools",
+            # v2.5.0: planning aids only (no isolation tools).
+            "ask_user", "todo_write", "todo_list", "code_symbols",
+            "lsp_definition", "lsp_references", "lsp_symbols", "sleep",
         },
         "plan": {
             "read_file", "read_binary_file", "search_project",
             "grep", "glob", "list_files", "get_project_structure",
             "file_info", "git_status", "git_diff",
             "list_mcp_tools", "get_skill", "select_tools",
+            # v2.5.0: planning aids only (no isolation tools).
+            "ask_user", "todo_write", "todo_list", "code_symbols",
+            "lsp_definition", "lsp_references", "lsp_symbols", "sleep",
         },
         "general-purpose": {
             "read_file", "read_binary_file", "search_project",
@@ -292,6 +370,16 @@ class ToolEngine:
             "execute_command", "git_stage", "git_commit",
             "call_mcp_tool", "spawn_subagent", "watchdog_check",
             "self_verify", "undo_write",
+            # v2.5.0: full workflow-update set.
+            "ask_user", "todo_write", "todo_list",
+            "enter_plan_mode", "exit_plan_mode",
+            "worktree_add", "worktree_list", "worktree_remove",
+            "repl_run", "repl_reset",
+            "task_spawn", "task_list", "task_output", "task_stop",
+            "team_send", "team_list",
+            "cron_add", "cron_list", "cron_remove",
+            "sleep", "code_symbols",
+            "lsp_definition", "lsp_references", "lsp_symbols",
         },
         # v2.1.0 (G18): read-only research role. Has web_search/web_fetch
         # but NO write/execute/git-write/mcp-call tools — so even if a
@@ -305,6 +393,9 @@ class ToolEngine:
             "read_file", "read_binary_file",
             "search_project", "grep", "glob", "list_files",
             "get_project_structure", "file_info", "get_skill",
+            # v2.5.0: read-only planning aids.
+            "ask_user", "todo_list", "code_symbols",
+            "lsp_definition", "lsp_references", "lsp_symbols",
         },
     }
 
@@ -384,6 +475,28 @@ class ToolEngine:
         path (e.g. writing a file that doesn't exist yet) — those are
         auto-approved under the 'new_files_only' autonomy level.
         """
+        # v2.5.0: user permission rules + modes (additive layer over
+        # autonomy; explicit DENY always wins, even under never_ask).
+        perm_mode = "default"
+        try:
+            from tera_pilot import permission_rules as _pr
+            verdict = _pr.check(action, summary)
+            if verdict is False:
+                logger.warning("[permissions] denied by rule: %s %s", action, summary[:120])
+                return False
+            if verdict is True:
+                return True
+            perm_mode = _pr.get_mode()
+            if perm_mode == "bypass":
+                logger.warning("[permissions] bypass mode auto-approve: %s", action)
+                return True
+            if perm_mode == "auto" and _pr.auto_allows(action):
+                return True
+            if perm_mode == "plan" and action in self._plan_approved_kinds:
+                return True
+        except Exception as exc:
+            logger.debug("[permissions] rule check failed (fail-closed to prompt): %s", exc)
+            perm_mode = "default"
         if self.autonomy == "never_ask":
             return True
         if self.autonomy == "new_files_only" and is_new:
@@ -401,6 +514,8 @@ class ToolEngine:
                     "[agent] confirmation requested but no UI callback wired — "
                     "headless auto-approve enabled (--no-confirm): %s", action,
                 )
+                if perm_mode == "plan":
+                    self._plan_approved_kinds.add(action)
                 return True
             logger.error(
                 "[agent] confirmation requested but no UI callback wired — "
@@ -414,7 +529,11 @@ class ToolEngine:
         ok = self._wait_interruptible(self._confirm_event, timeout=300)
         if not ok:
             return False
-        return bool(self._confirm_accepted)
+        approved = bool(self._confirm_accepted)
+        if approved and perm_mode == "plan":
+            # "Ask once": remember this action kind for the session.
+            self._plan_approved_kinds.add(action)
+        return approved
 
     def _sandboxed_args(self, args: List[str]) -> Optional[List[str]]:
         """Wrap argv in the OS-level sandbox (P1.10) when enabled.
@@ -812,6 +931,27 @@ class ToolEngine:
                     f"create or edit .docx / .xlsx / .pptx files."
                 )
 
+        # v2.5.0: plan-mode gate — while the agent (or user) has entered
+        # planning mode via enter_plan_mode, every state-changing tool is
+        # rejected with guidance. Reads, questions, todos and exit stay
+        # open so the plan can still be researched and recorded.
+        if self._plan_mode and _name_value in _PLAN_MODE_BLOCKED:
+            return (
+                f"[PLAN MODE] '{_name_value}' is disabled while planning "
+                f"mode is active (goal: {self._plan_goal[:120]}). "
+                f"Research with read-only tools, record with todo_write, "
+                f"then call exit_plan_mode with a summary to resume."
+            )
+        # v2.5.0: section gate for planning + isolation tools — office
+        # section work must stay in documents; these tools are not
+        # advertised there and are rejected here as defense in depth.
+        if _name_value in _PLAN_ISOLATION_TOOL_NAMES:
+            if getattr(self, "section", "general") == "office":
+                return (
+                    f"[TOOL REJECTED] {_name_value} is not available in "
+                    f"Office Worker mode. Switch to General or Heavy Code."
+                )
+
         dispatch_map = {
             ToolName.READ_FILE: lambda: self._read_file(args.get("path", "")),
             ToolName.WRITE_FILE: lambda: self._write_file(args.get("path", ""), args.get("content", "")),
@@ -1040,6 +1180,60 @@ class ToolEngine:
                 args.get("url", ""),
                 max_chars=int(args.get("max_chars", 8000) or 8000),
             ),
+            # v2.5.0: workflow update — interactive + planning + isolation.
+            ToolName.ASK_USER: lambda: self._ask_user(
+                args.get("question", ""),
+                args.get("options") or [],
+            ),
+            ToolName.TODO_WRITE: lambda: self._todo_write(args.get("todos") or []),
+            ToolName.TODO_LIST: lambda: self._todo_list(),
+            ToolName.ENTER_PLAN_MODE: lambda: self._enter_plan_mode(args.get("goal", "")),
+            ToolName.EXIT_PLAN_MODE: lambda: self._exit_plan_mode(args.get("summary", "") or ""),
+            ToolName.WORKTREE_ADD: lambda: self._worktree_add(
+                args.get("name", ""), args.get("branch", "") or "",
+            ),
+            ToolName.WORKTREE_LIST: lambda: self._worktree_list(),
+            ToolName.WORKTREE_REMOVE: lambda: self._worktree_remove(
+                args.get("name", ""), bool(args.get("force", False)),
+            ),
+            ToolName.REPL_RUN: lambda: self._repl_run(
+                args.get("session", "") or "default",
+                args.get("code", ""),
+                args.get("language", "") or "python",
+            ),
+            ToolName.REPL_RESET: lambda: self._repl_reset(args.get("session", "") or "default"),
+            ToolName.TASK_SPAWN: lambda: self._task_spawn(
+                args.get("label", "") or "task",
+                args.get("command", ""),
+                int(args.get("timeout", 600) or 600),
+            ),
+            ToolName.TASK_LIST: lambda: self._task_list(),
+            ToolName.TASK_OUTPUT: lambda: self._task_output(
+                str(args.get("id", "")),
+                int(args.get("max_chars", 4000) or 4000),
+            ),
+            ToolName.TASK_STOP: lambda: self._task_stop(str(args.get("id", ""))),
+            ToolName.TEAM_SEND: lambda: self._team_send(
+                args.get("target", ""), args.get("message", ""),
+            ),
+            ToolName.TEAM_LIST: lambda: self._team_list(),
+            ToolName.CRON_ADD: lambda: self._cron_add(
+                args.get("schedule", ""), args.get("task", ""),
+            ),
+            ToolName.CRON_LIST: lambda: self._cron_list(),
+            ToolName.CRON_REMOVE: lambda: self._cron_remove(str(args.get("id", ""))),
+            ToolName.SLEEP: lambda: self._sleep_tool(args.get("seconds", 10)),
+            ToolName.CODE_SYMBOLS: lambda: self._code_symbols(args.get("path", "")),
+            # v2.5.0: language-server navigation (read-only).
+            ToolName.LSP_DEFINITION: lambda: self._lsp_definition(
+                args.get("path", ""), args.get("line", 0),
+                args.get("character", None),
+            ),
+            ToolName.LSP_REFERENCES: lambda: self._lsp_references(
+                args.get("path", ""), args.get("line", 0),
+                args.get("character", None),
+            ),
+            ToolName.LSP_SYMBOLS: lambda: self._lsp_symbols(args.get("path", "")),
         }
 
         if name not in dispatch_map:
@@ -1324,6 +1518,24 @@ class ToolEngine:
         backup_path.write_bytes(p.read_bytes())
         return backup_path
 
+    def _auto_checkpoint(self, reason: str, paths: List[str]) -> None:
+        """v2.5.0: snapshot before risky operations (delete, multi-file
+        diffs, forced worktree removal) so /rewind always has somewhere
+        to go. Respects the user's auto-checkpoint toggle (on by
+        default); never raises — a failed snapshot must not block the
+        operation itself."""
+        try:
+            from tera_pilot.checkpoint import get_checkpoint_manager
+            mgr = get_checkpoint_manager(session_id="default")
+            try:
+                mgr.set_workspace(str(self.workspace))
+            except Exception:
+                pass
+            mgr.auto_checkpoint(touched_files=[str(p) for p in paths or []])
+            logger.debug("[checkpoint] pre-risk snapshot (%s)", reason)
+        except Exception as exc:
+            logger.debug("[checkpoint] pre-risk snapshot failed: %s", exc)
+
     def _delete_file(self, path: str) -> str:
         p = self._resolve_path(path)
         # v1.1.1: never allow deleting the workspace root itself — a path
@@ -1338,6 +1550,7 @@ class ToolEngine:
         kind = "directory" if p.is_dir() else "file"
         if not self._request_confirmation("delete_file", f"Delete {kind}: {path}"):
             return f"[REJECTED BY USER] {path} — delete cancelled"
+        self._auto_checkpoint("delete_file", [path])
         if p.is_dir():
             shutil.rmtree(p)
             return f"[DELETED DIR] {path}"
@@ -1603,6 +1816,768 @@ class ToolEngine:
             f"[SKILL ERROR] no skill with id {skill_id!r}. "
             f"Available: {', '.join(s.id for s in self._skills) or 'none'}"
         )
+
+    # ── v2.5.0: workflow update ────────────────────────────────────
+    # Interactive + planning + isolation tools. All original
+    # implementations built on the engine's own sandbox, command
+    # policy and confirmation gate — no external code.
+
+    # — ask_user / todos —
+
+    def set_ask_user_callback(self, cb) -> None:
+        """Wire an interactive answer provider for ask_user.
+
+        ``cb(question, options) -> str | None``. When set (a future UI
+        or a test), ask_user blocks briefly for a real answer; when
+        unset or silent, the tool returns the question in-band and the
+        model proceeds with a stated assumption. Never raises.
+        """
+        self._ask_user_callback = cb
+
+    def _ask_user(self, question: str, options) -> str:
+        question = (question or "").strip()
+        if not question:
+            return "[ASK_USER ERROR] 'question' is required."
+        opts = [str(o)[:120] for o in (options or [])][:8]
+        answer = None
+        if self._ask_user_callback is not None:
+            try:
+                answer = self._ask_user_callback(question, opts)
+            except Exception as exc:
+                logger.debug("[ask_user] callback failed: %s", exc)
+                answer = None
+        if answer:
+            return f"[USER ANSWER] {str(answer)[:1000]}"
+        lines = [f"[ASK_USER — no interactive UI wired] {question}"]
+        if opts:
+            lines.append("Suggested options: " + " | ".join(opts))
+        lines.append(
+            "Proceed with your best judgment, state the assumption in "
+            "one line, and continue. The question is logged for the user."
+        )
+        return "\n".join(lines)
+
+    def _todo_write(self, todos) -> str:
+        if not isinstance(todos, list):
+            return "[TODO ERROR] 'todos' must be a list of {text, status}."
+        valid = {"pending", "in_progress", "done"}
+        cleaned = []
+        for i, item in enumerate(todos[:30], start=1):
+            if not isinstance(item, dict):
+                return f"[TODO ERROR] item #{i} must be an object."
+            text = str(item.get("text", ""))[:200].strip()
+            if not text:
+                return f"[TODO ERROR] item #{i} needs non-empty 'text'."
+            status = str(item.get("status", "pending"))
+            if status not in valid:
+                return f"[TODO ERROR] item #{i} status must be one of {sorted(valid)}."
+            cleaned.append({
+                "id": str(item.get("id", i)),
+                "text": text,
+                "status": status,
+            })
+        with self._workflow_lock:
+            self._todos = cleaned
+        open_n = sum(1 for t in cleaned if t["status"] != "done")
+        return f"[TODO] {len(cleaned)} item(s), {open_n} open."
+
+    def _todo_list(self) -> str:
+        with self._workflow_lock:
+            todos = list(self._todos)
+        if not todos:
+            return "[TODO] list is empty."
+        return "[TODO]\n" + "\n".join(
+            f"  [{t['id']}] ({t['status']}) {t['text']}" for t in todos
+        )
+
+    # — plan mode —
+
+    def _enter_plan_mode(self, goal: str) -> str:
+        goal = (goal or "").strip()[:300]
+        if not goal:
+            return "[PLAN ERROR] 'goal' is required."
+        if self._plan_mode:
+            return f"[PLAN MODE] already active (goal: {self._plan_goal[:120]})."
+        self._plan_mode = True
+        self._plan_goal = goal
+        return (
+            f"[PLAN MODE ON] goal: {goal}\n"
+            "Writes, commands, worktrees, REPL runs, background tasks and "
+            "schedule changes are now blocked. Research freely, record with "
+            "todo_write, then exit_plan_mode with a summary."
+        )
+
+    def _exit_plan_mode(self, summary: str) -> str:
+        if not self._plan_mode:
+            return "[PLAN MODE] not active — nothing to exit."
+        self._plan_mode = False
+        goal, self._plan_goal = self._plan_goal, ""
+        with self._workflow_lock:
+            todos = list(self._todos)
+        out = [f"[PLAN MODE OFF] goal was: {goal}"]
+        out.append(f"Summary: {(summary or '').strip()[:1000] or '(no summary given)'}")
+        if todos:
+            open_n = sum(1 for t in todos if t["status"] != "done")
+            out.append(f"Carried over: {len(todos)} todo(s), {open_n} open.")
+        return "\n".join(out)
+
+    # — worktrees —
+
+    def _git_base_argv(self) -> Optional[List[str]]:
+        try:
+            from tera_pilot.git_service import git_neutralization_args
+            neutral = git_neutralization_args(self.workspace)
+        except Exception:
+            neutral = []
+        return ["git"] + list(neutral or [])
+
+    def _run_git(self, args: List[str], timeout: int = 120) -> Tuple[int, str, str]:
+        argv = self._git_base_argv() + list(args)
+        wrapped = self._sandboxed_args(argv)
+        if wrapped is None:
+            return 1, "", "OS sandbox required but unavailable"
+        try:
+            proc = subprocess.run(
+                wrapped, shell=False, capture_output=True, text=True,
+                cwd=str(self.workspace), timeout=timeout,
+            )
+            return proc.returncode, proc.stdout, proc.stderr
+        except subprocess.TimeoutExpired:
+            return 1, "", f"timed out after {timeout}s"
+        except FileNotFoundError:
+            return 1, "", "git binary not found"
+        except Exception as exc:
+            return 1, "", str(exc)[:300]
+
+    def _worktrees_root(self) -> Path:
+        return Path(str(self.workspace)) / ".worktrees"
+
+    def _worktree_path(self, name: str) -> Optional[Path]:
+        name = (name or "").strip().strip("/")
+        if not name or ".." in name or name.startswith(("/", "~")):
+            return None
+        if not re.fullmatch(r"[A-Za-z0-9_.\-/]+", name):
+            return None
+        return self._worktrees_root() / name
+
+    def _worktree_guard(self) -> Optional[str]:
+        code, out, _ = self._run_git(["rev-parse", "--is-inside-work-tree"])
+        if code != 0 or out.strip() != "true":
+            return "[WORKTREE ERROR] workspace is not inside a git work tree."
+        return None
+
+    def _worktree_add(self, name: str, branch: str = "") -> str:
+        err = self._worktree_guard()
+        if err:
+            return err
+        path = self._worktree_path(name)
+        if path is None:
+            return "[WORKTREE ERROR] bad 'name' (use letters/digits/._-/)."
+        if path.exists():
+            return f"[WORKTREE ERROR] {path} already exists."
+        label = f"worktree {name}" + (f" on new branch {branch}" if branch else "")
+        if not self._request_confirmation("worktree_add", f"Create {label}"):
+            return "[REJECTED BY USER] worktree creation cancelled."
+        argv: List[str] = ["worktree", "add", str(path)]
+        if (branch or "").strip():
+            if not re.fullmatch(r"[A-Za-z0-9_.\-/]+", branch.strip()):
+                return "[WORKTREE ERROR] bad 'branch' name."
+            argv += ["-b", branch.strip()]
+        code, out, err_text = self._run_git(argv)
+        if code != 0:
+            return f"[WORKTREE ERROR] {(err_text or out).strip()[:500]}"
+        try:
+            exclude = Path(str(self.workspace)) / ".git" / "info" / "exclude"
+            if exclude.exists():
+                content = exclude.read_text(encoding="utf-8")
+                if ".worktrees/" not in content:
+                    with open(exclude, "a", encoding="utf-8") as fh:
+                        fh.write("\n# Tera Pilot task worktrees\n.worktrees/\n")
+        except Exception:
+            pass
+        return f"[WORKTREE] created at {path} — read/edit via that path."
+
+    def _worktree_list(self) -> str:
+        err = self._worktree_guard()
+        if err:
+            return err
+        code, out, err_text = self._run_git(["worktree", "list"])
+        if code != 0:
+            return f"[WORKTREE ERROR] {(err_text or out).strip()[:300]}"
+        return "[WORKTREES]\n" + (out.strip() or "(none)")
+
+    def _worktree_remove(self, name: str, force: bool = False) -> str:
+        err = self._worktree_guard()
+        if err:
+            return err
+        path = self._worktree_path(name)
+        if path is None:
+            return "[WORKTREE ERROR] bad 'name'."
+        root = self._worktrees_root().resolve()
+        try:
+            if not path.resolve().is_relative_to(root):
+                return "[WORKTREE ERROR] refusing path outside .worktrees/."
+        except AttributeError:
+            if root not in path.resolve().parents:
+                return "[WORKTREE ERROR] refusing path outside .worktrees/."
+        if not path.exists():
+            return f"[WORKTREE ERROR] no worktree at {path}."
+        if not self._request_confirmation(
+            "worktree_remove", f"Remove worktree {name}{' (force)' if force else ''}"
+        ):
+            return "[REJECTED BY USER] worktree removal cancelled."
+        if force:
+            self._auto_checkpoint("worktree_remove --force", [])
+        argv = ["worktree", "remove"] + (["--force"] if force else []) + [str(path)]
+        code, out, err_text = self._run_git(argv)
+        if code != 0:
+            return f"[WORKTREE ERROR] {(err_text or out).strip()[:500]}"
+        return f"[WORKTREE] removed {name}."
+
+    # — persistent REPL —
+
+    def _repl_ensure(self, session: str) -> Tuple[Optional[Dict[str, Any]], str]:
+        import queue as _queue
+        import sys as _sys
+        with self._workflow_lock:
+            entry = self._repl_sessions.get(session)
+            if entry is not None and entry["proc"].poll() is None:
+                return entry, ""
+            try:
+                proc = subprocess.Popen(
+                    [_sys.executable, "-u", "-i"],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, cwd=str(self.workspace),
+                    text=True, bufsize=1,
+                )
+            except Exception as exc:
+                return None, f"[REPL ERROR] cannot start python: {exc}"
+            q: Any = _queue.Queue()
+            def _reader() -> None:
+                try:
+                    for line in proc.stdout:  # type: ignore[union-attr]
+                        q.put(line)
+                except Exception:
+                    pass
+                finally:
+                    q.put(None)
+            threading.Thread(target=_reader, daemon=True).start()
+            entry = {"proc": proc, "queue": q, "lock": threading.Lock()}
+            self._repl_sessions[session] = entry
+        # Discard the interpreter banner.
+        try:
+            while True:
+                try:
+                    line = q.get(timeout=0.5)
+                except Exception:
+                    break
+                if line is None:
+                    break
+                if "__TERA_REPL_READY__" in line:
+                    break
+        except Exception:
+            pass
+        return entry, ""
+
+    def _repl_drain(self, q: Any, sentinel: str, timeout: float = 60.0) -> Tuple[str, bool]:
+        buf: List[str] = []
+        deadline = time.monotonic() + max(1.0, timeout)
+        while time.monotonic() < deadline:
+            if self.is_cancelled():
+                return "".join(buf), False
+            try:
+                line = q.get(timeout=0.25)
+            except Exception:
+                continue
+            if line is None:
+                return "".join(buf), False
+            if sentinel in line:
+                return "".join(buf), True
+            buf.append(line)
+        return "".join(buf), False
+
+    def _repl_run(self, session: str, code: str, language: str = "python") -> str:
+        session = (session or "default").strip()[:64] or "default"
+        language = (language or "python").strip().lower()
+        if language not in ("python", "python3", "py"):
+            return "[REPL ERROR] only python REPL sessions are supported."
+        if not (code or "").strip():
+            return "[REPL ERROR] 'code' is empty."
+        if len(code) > 20000:
+            return "[REPL ERROR] code too long (20k char cap)."
+        if not self._request_confirmation("repl_run", f"REPL[{session}]: {code[:120]}"):
+            return "[REJECTED BY USER] REPL run cancelled."
+        entry, err = self._repl_ensure(session)
+        if entry is None:
+            return err
+        sentinel = "__TERA_REPL_SYNC__"
+        payload = code.rstrip("\n") + "\n\nprint(\"" + sentinel + "\")\n"
+        with entry["lock"]:
+            try:
+                entry["proc"].stdin.write(payload)  # type: ignore[union-attr]
+                entry["proc"].stdin.flush()  # type: ignore[union-attr]
+            except Exception as exc:
+                return f"[REPL ERROR] session broken ({exc}); call repl_reset."
+            out, done = self._repl_drain(entry["queue"], sentinel)
+        out = out.strip()
+        if not done:
+            return (
+                "[REPL TIMEOUT/PARTIAL] no sync within 60s — the snippet may "
+                "be an incomplete block (add a trailing blank line) or an "
+                "infinite loop. Partial output:\n" + out[-2000:]
+            )
+        # Strip interactive prompts: with a piped stdin the interpreter
+        # still prints `>>> `/`... ` prefixes, glued onto the same line
+        # as real output (">>> 84"). Strip leading prompt runs only —
+        # never touch the line interior ("..." may be real output).
+        kept = []
+        for ln in out.splitlines():
+            ln = re.sub(r"^((>>>|\.\.\.)\s*)+", "", ln).rstrip()
+            if ln.strip():
+                kept.append(ln)
+        return "[REPL]\n" + ("\n".join(kept).strip() or "(no output)")[:4000]
+
+    def _repl_reset(self, session: str) -> str:
+        session = (session or "default").strip()[:64] or "default"
+        with self._workflow_lock:
+            entry = self._repl_sessions.pop(session, None)
+        if entry is None:
+            return f"[REPL] no session {session!r} — nothing to reset."
+        try:
+            entry["proc"].kill()
+        except Exception:
+            pass
+        return f"[REPL] session {session!r} reset."
+
+    # — background tasks —
+
+    def _task_spawn(self, label: str, command: str, timeout: int = 600) -> str:
+        from .._helpers import _sanitize_command, _command_blocked_reason
+        label = (label or "task")[:80]
+        command = (command or "").strip()
+        if not command:
+            return "[TASK ERROR] 'command' is required."
+        args, is_safe = _sanitize_command(
+            command, project_root=str(self.workspace) if self.workspace else None)
+        if not is_safe:
+            reason = _command_blocked_reason(
+                command, project_root=str(self.workspace) if self.workspace else None)
+            return (f"[SECURITY ERROR] Command blocked: {command} — "
+                    f"{reason or 'not allowed by the security policy'}.")
+        path_error = self._validate_command_paths(args)
+        if path_error:
+            return str(path_error)
+        if not self._request_confirmation("task_spawn", f"Background '{label}': {command}"):
+            return "[REJECTED BY USER] background task cancelled."
+        timeout = max(self.MIN_TIMEOUT, min(int(timeout or 600), self.MAX_TIMEOUT))
+        exec_args = list(args)
+        try:
+            base_cmd = os.path.basename(str(args[0])).lower() if args else ""
+            if base_cmd == "git":
+                from tera_pilot.git_service import git_neutralization_args
+                exec_args = [args[0]] + git_neutralization_args(self.workspace) + list(args[1:])
+        except Exception:
+            pass
+        sandboxed = self._sandboxed_args(exec_args)
+        if sandboxed is None:
+            return ("[SECURITY ERROR] OS sandbox requested (mode=on) but no "
+                    "backend available — refusing to run unsandboxed.")
+        with self._workflow_lock:
+            self._bg_task_counter += 1
+            task_id = str(self._bg_task_counter)
+            self._bg_tasks[task_id] = {
+                "id": task_id, "label": label, "command": command,
+                "status": "running", "started": time.time(),
+                "output": "", "returncode": None,
+            }
+
+        def _runner() -> None:
+            def _record_terminal(status: str, output: str) -> None:
+                # v2.5.0: stream terminal state into the Activity panel so
+                # a finished background task is visible without polling.
+                try:
+                    self._activity_log.record(
+                        category=CATEGORY_INFO,
+                        kind="background_task_finished",
+                        tool="task_spawn",
+                        title=f"Background task '{label}' {status}",
+                        summary=(output or "(no output)")[-500:],
+                        status=STATUS_OK if status == "done" else STATUS_ERROR,
+                        section=self.section,
+                        chat_id=self._current_chat_id,
+                        meta={"task_id": task_id, "label": label, "status": status},
+                    )
+                except Exception:
+                    pass
+
+            try:
+                proc = subprocess.Popen(
+                    sandboxed, shell=False, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, cwd=str(self.workspace),
+                )
+                try:
+                    raw, _ = proc.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    raw, _ = proc.communicate()
+                    with self._workflow_lock:
+                        t = self._bg_tasks.get(task_id)
+                        if t is not None:
+                            t["status"] = "timeout"
+                            t["output"] = (raw or b"").decode("utf-8", errors="replace")[-8000:]
+                    _record_terminal("timeout", (raw or b"").decode("utf-8", errors="replace"))
+                    return
+                with self._workflow_lock:
+                    t = self._bg_tasks.get(task_id)
+                    if t is not None:
+                        t["status"] = "done" if proc.returncode == 0 else f"exit-{proc.returncode}"
+                        t["returncode"] = proc.returncode
+                        t["output"] = (raw or b"").decode("utf-8", errors="replace")[-8000:]
+                        t["finished"] = time.time()
+                _record_terminal(t["status"] if t is not None else "done",
+                                 (raw or b"").decode("utf-8", errors="replace"))
+            except Exception as exc:
+                with self._workflow_lock:
+                    t = self._bg_tasks.get(task_id)
+                    if t is not None:
+                        t["status"] = f"error: {exc}"[:120]
+                        t["output"] = ""
+                _record_terminal("error", str(exc)[:500])
+
+        threading.Thread(target=_runner, daemon=True,
+                         name=f"tera-task-{task_id}").start()
+        return (f"[TASK {task_id}] '{label}' started in the background. "
+                f"Poll with task_output, list with task_list.")
+
+    def _task_list(self) -> str:
+        with self._workflow_lock:
+            tasks = sorted(self._bg_tasks.values(), key=lambda t: int(t["id"]))
+        if not tasks:
+            return "[TASKS] none."
+        return "[TASKS]\n" + "\n".join(
+            f"  [{t['id']}] ({t['status']}) {t['label']}: {t['command'][:100]}"
+            for t in tasks
+        )
+
+    def _task_output(self, task_id: str, max_chars: int = 4000) -> str:
+        with self._workflow_lock:
+            task = self._bg_tasks.get((task_id or "").strip())
+        if task is None:
+            return f"[TASK ERROR] no task {task_id!r}."
+        out = (task.get("output") or "")[-max(100, min(max_chars, 8000)):]
+        return (f"[TASK {task['id']}] {task['label']} — {task['status']}\n"
+                + (out or "(no output yet)"))
+
+    def _task_stop(self, task_id: str) -> str:
+        # v2.5.0: best-effort stop — the worker thread owns the Popen
+        # handle, so we mark the task; runaway processes still hit their
+        # timeout. The marker keeps agents from polling forever.
+        with self._workflow_lock:
+            task = self._bg_tasks.get((task_id or "").strip())
+            if task is None:
+                return f"[TASK ERROR] no task {task_id!r}."
+            if task["status"] not in ("running",):
+                return f"[TASK {task['id']}] already {task['status']}."
+            task["status"] = "stop-requested"
+        return (f"[TASK {task['id']}] stop requested — it will not be "
+                f"re-polled; the process exits on its timeout.")
+
+    # — team bus —
+
+    def _team_bus_path(self) -> Path:
+        return Path(os.path.expanduser("~/.tera_pilot")) / "team-bus.jsonl"
+
+    def _team_send(self, target: str, message: str) -> str:
+        target = (target or "").strip()[:64]
+        message = (message or "").strip()
+        if not target or not message:
+            return "[TEAM ERROR] 'target' and 'message' are required."
+        if len(message) > 2000:
+            return "[TEAM ERROR] message too long (2k cap)."
+        with self._workflow_lock:
+            self._team_counter += 1
+            entry = {"id": self._team_counter, "target": target,
+                     "message": message[:2000], "ts": time.time()}
+            self._team_bus.append(entry)
+        try:
+            path = self._team_bus_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry) + "\n")
+            # Cap the shared outbox so it can't grow forever.
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+                if len(lines) > 200:
+                    path.write_text("\n".join(lines[-200:]) + "\n", encoding="utf-8")
+            except OSError:
+                pass
+        except OSError as exc:
+            logger.debug("[team] outbox write failed: %s", exc)
+        return f"[TEAM] note #{entry['id']} queued for '{target}'."
+
+    def _team_list(self) -> str:
+        with self._workflow_lock:
+            entries = list(self._team_bus)[-20:]
+        if not entries:
+            return "[TEAM] no messages this run."
+        return "[TEAM]\n" + "\n".join(
+            f"  #{e['id']} → {e['target']}: {e['message'][:160]}" for e in entries
+        )
+
+    # — schedule —
+
+    def _schedule_path(self) -> Path:
+        return Path(os.path.expanduser("~/.tera_pilot")) / "schedule.json"
+
+    def _schedule_load(self) -> List[Dict[str, Any]]:
+        try:
+            raw = json.loads(self._schedule_path().read_text(encoding="utf-8"))
+            return raw if isinstance(raw, list) else []
+        except (OSError, ValueError):
+            return []
+
+    def _schedule_save(self, entries: List[Dict[str, Any]]) -> None:
+        path = self._schedule_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+
+    def _cron_add(self, schedule: str, task: str) -> str:
+        schedule = (schedule or "").strip()
+        task = (task or "").strip()
+        if not schedule or not task:
+            return "[CRON ERROR] 'schedule' (cron, 5 fields) and 'task' are required."
+        parts = schedule.split()
+        if len(parts) != 5 or not all(
+                re.fullmatch(r"[\d*,/\-]+", p) for p in parts):
+            return ("[CRON ERROR] bad schedule — use 5 cron fields "
+                    "(e.g. '0 9 * * 1').")
+        if len(task) > 1000:
+            return "[CRON ERROR] task too long (1k cap)."
+        if not self._request_confirmation("cron_add", f"Schedule '{schedule}': {task[:120]}"):
+            return "[REJECTED BY USER] schedule creation cancelled."
+        entries = self._schedule_load()
+        new_id = str(max([int(e.get("id", 0)) for e in entries] + [0]) + 1)
+        entries.append({"id": new_id, "schedule": schedule, "task": task,
+                        "created": time.time(), "enabled": True})
+        try:
+            self._schedule_save(entries)
+        except OSError as exc:
+            return f"[CRON ERROR] cannot persist schedule: {exc}"
+        return (f"[CRON {new_id}] stored '{schedule}'. Entries persist in "
+                f"schedule.json; a scheduler host (daemon or OS cron driving "
+                f"the headless runner) executes them.")
+
+    def _cron_list(self) -> str:
+        entries = self._schedule_load()
+        if not entries:
+            return "[CRON] no scheduled tasks."
+        return "[CRON]\n" + "\n".join(
+            f"  [{e.get('id')}] {'on' if e.get('enabled') else 'off'} "
+            f"{e.get('schedule')} — {str(e.get('task'))[:120]}"
+            for e in entries
+        )
+
+    def _cron_remove(self, entry_id: str) -> str:
+        entries = self._schedule_load()
+        kept = [e for e in entries if str(e.get("id")) != (entry_id or "").strip()]
+        if len(kept) == len(entries):
+            return f"[CRON ERROR] no entry {entry_id!r}."
+        try:
+            self._schedule_save(kept)
+        except OSError as exc:
+            return f"[CRON ERROR] cannot persist schedule: {exc}"
+        return f"[CRON] entry {entry_id} removed."
+
+    # — sleep / symbols —
+
+    def _sleep_tool(self, seconds: Any) -> str:
+        try:
+            seconds = int(seconds)
+        except (TypeError, ValueError):
+            return "[SLEEP ERROR] 'seconds' must be an integer."
+        if seconds < 1:
+            return "[SLEEP ERROR] minimum 1 second."
+        if seconds > 300:
+            return ("[SLEEP ERROR] capped at 300s — use task_spawn + "
+                    "task_output for longer waits.")
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if self.is_cancelled():
+                return "[SLEEP] cancelled."
+            time.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
+        return f"[SLEEP] waited {seconds}s."
+
+    def _code_symbols(self, path: str) -> str:
+        if not (path or "").strip():
+            return "[SYMBOLS ERROR] 'path' is required."
+        try:
+            resolved = self._resolve_path(path)
+        except PermissionError as exc:
+            return f"[SECURITY ERROR] {exc}"
+        if not resolved.is_file():
+            return f"[SYMBOLS ERROR] not a file: {path}"
+        try:
+            text = resolved.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return f"[SYMBOLS ERROR] cannot read: {exc}"
+        suffix = resolved.suffix.lower()
+        patterns: List[Tuple[Any, str]] = []
+        if suffix == ".py":
+            patterns = [
+                (re.compile(r"^\s*class\s+(\w+)"), "class"),
+                (re.compile(r"^\s*async\s+def\s+(\w+)"), "async def"),
+                (re.compile(r"^\s*def\s+(\w+)"), "def"),
+            ]
+        elif suffix in (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"):
+            patterns = [
+                (re.compile(r"^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)"), "function"),
+                (re.compile(r"^\s*(?:export\s+)?class\s+(\w+)"), "class"),
+                (re.compile(r"^\s*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\("), "const"),
+                (re.compile(r"^\s*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\w*\s*=>"), "arrow"),
+            ]
+        elif suffix == ".go":
+            patterns = [
+                (re.compile(r"^func\s+(?:\(\w+\s+[\w*]+\)\s*)?(\w+)"), "func"),
+                (re.compile(r"^type\s+(\w+)\s+(struct|interface)"), "type"),
+            ]
+        elif suffix == ".rs":
+            patterns = [
+                (re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?(fn|struct|enum|trait)\s+(\w+)"), "item"),
+                (re.compile(r"^impl\s+([\w<>]+)"), "impl"),
+            ]
+        else:
+            return (f"[SYMBOLS] no symbol patterns for '{suffix}' files — "
+                    f"use grep instead.")
+        out: List[str] = []
+        for i, line in enumerate(text.splitlines(), start=1):
+            for rx, kind in patterns:
+                m = rx.match(line)
+                if m:
+                    name = m.group(2) if (kind == "item" and m.lastindex == 2) else m.group(1)
+                    out.append(f"  {i}: {kind} {name}")
+                    break
+            if len(out) >= 200:
+                break
+        if not out:
+            return f"[SYMBOLS] no symbols found in {path}."
+        return f"[SYMBOLS] {path} ({len(out)}):\n" + "\n".join(out)
+
+    # — language server (v2.5.0) —
+
+    def _lsp_client(self) -> Tuple[Optional[Any], str]:
+        """Cached LspSyncClient, or (None, error). Never raises."""
+        with self._workflow_lock:
+            client = self._lsp
+            alive = client is not None and client._proc.poll() is None
+            if alive:
+                return client, ""
+        try:
+            from tera_pilot.lsp_sync import LspSyncClient
+            client = LspSyncClient(str(self.workspace))
+        except Exception as exc:
+            return None, f"[LSP ERROR] {exc}"
+        with self._workflow_lock:
+            self._lsp = client
+        return client, ""
+
+    def _lsp_position(self, resolved: Path, line: Any,
+                      character: Any) -> Tuple[int, int, str]:
+        """Validate 1-based line / optional character → 0-based pair."""
+        try:
+            text = resolved.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return 0, 0, f"[LSP ERROR] cannot read: {exc}"
+        lines = text.splitlines()
+        try:
+            line_no = int(line)
+        except (TypeError, ValueError):
+            return 0, 0, "[LSP ERROR] 'line' must be an integer (1-based)."
+        if not (1 <= line_no <= max(1, len(lines))):
+            return 0, 0, f"[LSP ERROR] line {line_no} out of range (1..{len(lines)})."
+        content = lines[line_no - 1] if lines else ""
+        if character is None or character == "":
+            char_no = len(content) - len(content.lstrip())
+        else:
+            try:
+                char_no = max(0, int(character))
+            except (TypeError, ValueError):
+                return 0, 0, "[LSP ERROR] 'character' must be an integer."
+        return line_no - 1, char_no, ""
+
+    def _lsp_format_locations(self, locations: List[Dict[str, Any]]) -> str:
+        if not locations:
+            return "[LSP] no results."
+        ws = str(self.workspace)
+        out = []
+        for loc in locations[:50]:
+            uri = loc.get("uri", "")
+            disp = uri[7:] if uri.startswith("file://") else uri
+            try:
+                disp = str(Path(disp).relative_to(ws))
+            except Exception:
+                pass
+            out.append(f"  {disp}:{loc.get('line', '?')}:{loc.get('character', 0)}")
+        extra = f" (+{len(locations) - 50} more)" if len(locations) > 50 else ""
+        return "[LSP]\n" + "\n".join(out) + extra
+
+    def _lsp_definition(self, path: str, line: Any, character: Any) -> str:
+        if not (path or "").strip():
+            return "[LSP ERROR] 'path' and 'line' are required."
+        try:
+            resolved = self._resolve_path(path)
+        except PermissionError as exc:
+            return f"[SECURITY ERROR] {exc}"
+        line0, char0, err = self._lsp_position(resolved, line, character)
+        if err:
+            return err
+        client, cerr = self._lsp_client()
+        if client is None:
+            return cerr
+        try:
+            return self._lsp_format_locations(client.definition(resolved, line0, char0))
+        except Exception as exc:
+            return f"[LSP ERROR] {exc}"[:500]
+
+    def _lsp_references(self, path: str, line: Any, character: Any) -> str:
+        if not (path or "").strip():
+            return "[LSP ERROR] 'path' and 'line' are required."
+        try:
+            resolved = self._resolve_path(path)
+        except PermissionError as exc:
+            return f"[SECURITY ERROR] {exc}"
+        line0, char0, err = self._lsp_position(resolved, line, character)
+        if err:
+            return err
+        client, cerr = self._lsp_client()
+        if client is None:
+            return cerr
+        try:
+            return self._lsp_format_locations(client.references(resolved, line0, char0))
+        except Exception as exc:
+            return f"[LSP ERROR] {exc}"[:500]
+
+    def _lsp_symbols(self, path: str) -> str:
+        if not (path or "").strip():
+            return "[LSP ERROR] 'path' is required."
+        try:
+            resolved = self._resolve_path(path)
+        except PermissionError as exc:
+            return f"[SECURITY ERROR] {exc}"
+        if not resolved.is_file():
+            return f"[LSP ERROR] not a file: {path}"
+        client, cerr = self._lsp_client()
+        if client is None:
+            return cerr
+        try:
+            symbols = client.document_symbols(resolved)
+        except Exception as exc:
+            return f"[LSP ERROR] {exc}"[:500]
+        if not symbols:
+            return f"[LSP] no symbols in {path}."
+        return (f"[LSP SYMBOLS] {path} ({len(symbols)}):\n" + "\n".join(
+            f"  {s['line']}: {s['kind']} {s['name']}" for s in symbols[:200]))
 
     # ── v1.1.0: MCP + multi-agent tools ────────────────────────────
 
@@ -3011,6 +3986,8 @@ class ToolEngine:
                 summary = f"Patch: {path}"
             if not self._request_confirmation("apply_diff", summary):
                 return f"[REJECTED BY USER] {path} — apply_diff cancelled"
+            self._auto_checkpoint(
+                "apply_diff", [path] + [f for f, _ in files_diffs if f != path])
             if len(files_diffs) == 1:
                 # Single-file diff (or no file headers at all)
                 original = p.read_text(encoding="utf-8")

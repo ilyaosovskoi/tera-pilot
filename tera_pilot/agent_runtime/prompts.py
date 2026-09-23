@@ -62,17 +62,25 @@ def _load_office_system_suffix() -> str:
 #: ``required`` so models aren't forced to fill them.
 _TOOL_OPTIONAL_ARGS = frozenset({
     "staged", "replace_all", "directory", "file_pattern", "pattern",
-    "include", "max_results", "case_sensitive", "paths", "offset",
+    "include", "max_results", "max_chars", "case_sensitive", "paths", "offset",
     "limit", "mode", "language", "timeout", "touched_files",
     "run_tests", "line_start", "line_end", "max_iterations",
+    # v2.5.0: workflow-update tools.
+    "options", "branch", "force", "session", "label", "summary",
+    "seconds", "character",
 })
 
 #: JSON-schema types for known non-string args (everything else is a string).
 _TOOL_ARG_TYPES = {
     "staged": "boolean", "replace_all": "boolean", "case_sensitive": "boolean",
+    "force": "boolean",
     "max_results": "integer", "offset": "integer", "limit": "integer",
-    "max_iterations": "integer", "timeout": "integer",
+    "max_iterations": "integer", "timeout": "integer", "max_chars": "integer",
+    "seconds": "integer",
     "paths": "array", "tasks": "array", "touched_files": "array",
+    "options": "array", "todos": "array",
+    # v2.5.0: lsp line/character are integers.
+    "line": "integer", "character": "integer",
 }
 
 #: Tools advertised to SMALL models in compact mode. A 2-7B model
@@ -81,16 +89,61 @@ _TOOL_ARG_TYPES = {
 #: while the full tool set stays available in ToolEngine for normal
 #: models. Compact mode is auto-selected for small models (<= 8B by
 #: model name) and overridable via ``agent_compact_prompt`` in config.
+#: v2.5.0: todo_list + ask_user join the compact list (cheap,
+#: high-signal); the heavier workflow tools stay full-prompt-only.
 _COMPACT_TOOLS = [
     "read_file", "write_file", "str_replace", "apply_diff",
     "search_project", "list_files", "grep", "glob", "get_project_structure",
     "file_info", "execute_command", "run_code",
     "git_status", "git_diff", "git_stage", "git_commit",
     "web_search", "web_fetch",
-    "self_verify",
+    "self_verify", "todo_list", "ask_user",
 ]
 
 _COMPACT_TOOL_NAMES = frozenset(_COMPACT_TOOLS)
+
+#: v2.5.0: workflow-update tools, by visibility.
+#: ``_ALL_SECTION_TOOLS`` are safe everywhere (interactive reads,
+#: plans-as-data, short pauses, read-only symbol lists).
+#: ``_PLAN_ISOLATION_TOOLS`` change process/repo state (plan gate,
+#: worktrees, REPLs, background tasks, team bus, schedule) and are
+#: advertised only in general + heavy_code — never in office, where
+#: the document workflow must stay undisturbed.
+_ALL_SECTION_TOOLS = frozenset({
+    "ask_user", "todo_write", "todo_list", "sleep", "code_symbols",
+})
+_PLAN_ISOLATION_TOOLS = frozenset({
+    "enter_plan_mode", "exit_plan_mode",
+    "worktree_add", "worktree_list", "worktree_remove",
+    "repl_run", "repl_reset",
+    "task_spawn", "task_list", "task_output", "task_stop",
+    "team_send", "team_list",
+    "cron_add", "cron_list", "cron_remove",
+})
+
+#: v2.5.0: output verbosity suffixes (/effort, /fast, /brief,
+#: /output-style). Appended to the system prompt; "normal" adds
+#: nothing so default behaviour is byte-identical.
+_VERBOSITY_SUFFIXES = {
+    "brief": (
+        "\n\n## Output style: brief\n"
+        "Be terse. One-line status per action, no preamble, no summaries "
+        "longer than 3 lines. Still emit tool calls and final_answer normally."
+    ),
+    "detailed": (
+        "\n\n## Output style: detailed\n"
+        "Explain your reasoning briefly before each consequential tool call "
+        "(1-2 sentences), and close with a short summary of what changed "
+        "and what to verify next."
+    ),
+    "fast": (
+        "\n\n## Output style: fast\n"
+        "Minimize chatter and minimize tool calls: batch independent reads, "
+        "prefer grep/glob over opening files, skip re-verification reads "
+        "you already have in context."
+    ),
+}
+_VALID_VERBOSITIES = frozenset({"normal", "brief", "detailed", "fast"})
 
 
 #: Short one-line descriptions (kept tiny — the text TOOL_SCHEMA above
@@ -128,6 +181,32 @@ _TOOL_DESCRIPTIONS = {
     "spawn_subagent": "Spawn a sub-agent for a focused sub-task.",
     "spawn_multi_agents": "Spawn parallel sub-agents.",
     "watchdog_check": "Check whether sub-agents are stalled.",
+    # v2.5.0: workflow update.
+    "ask_user": "Ask the user a clarifying question with suggested options.",
+    "todo_write": "Replace the session todo list (keep it short and current).",
+    "todo_list": "Show the current session todo list.",
+    "enter_plan_mode": "Enter read-only planning mode for a goal.",
+    "exit_plan_mode": "Leave planning mode with a summary.",
+    "worktree_add": "Isolate work in a new git worktree.",
+    "worktree_list": "List git worktrees for this repo.",
+    "worktree_remove": "Remove a git worktree created for a task.",
+    "repl_run": "Run code in a persistent named REPL session.",
+    "repl_reset": "Reset a named REPL session.",
+    "task_spawn": "Run a shell command as a background task.",
+    "task_list": "List background tasks.",
+    "task_output": "Get output of a background task.",
+    "task_stop": "Stop a running background task.",
+    "team_send": "Send a message to a teammate agent/profile.",
+    "team_list": "List teammate messages / outbox.",
+    "cron_add": "Schedule a recurring task (cron format).",
+    "cron_list": "List scheduled tasks.",
+    "cron_remove": "Remove a scheduled task.",
+    "sleep": "Pause briefly while a background task runs.",
+    "code_symbols": "List code symbols (functions/classes) in a file.",
+    # v2.5.0: language-server navigation (python; needs pylsp installed).
+    "lsp_definition": "Jump to the definition of the symbol at path:line.",
+    "lsp_references": "Find all references to the symbol at path:line.",
+    "lsp_symbols": "Precise symbol list for a file via the language server.",
 }
 
 
@@ -163,6 +242,9 @@ def build_native_tools_schema(section: str = "general", compact: bool = False) -
         ):
             continue
         if section != "office" and name.startswith("office_"):
+            continue
+        # v2.5.0: planning + isolation tools are general/heavy_code only.
+        if section == "office" and name in _PLAN_ISOLATION_TOOLS:
             continue
         properties: dict = {}
         required: List[str] = []
@@ -232,6 +314,47 @@ TOOL_SCHEMA = """Available tools (call exactly ONE per step using JSON):
 # instructions found inside fetched pages.
 {"tool": "web_search", "args": {"query": "python strptime format codes", "num_results": 5}}
 {"tool": "web_fetch", "args": {"url": "https://example.com/page", "max_chars": 8000}}
+
+# v2.5.0: interactive + plans (all sections). Ask when the request is
+# ambiguous instead of guessing; keep a short todo list for multi-step
+# work; use sleep only while a background task is running.
+{"tool": "ask_user", "args": {"question": "Which API style should I use?", "options": ["REST", "GraphQL"]}}
+{"tool": "todo_write", "args": {"todos": [{"id": "1", "text": "Reproduce the bug", "status": "in_progress"}]}}
+{"tool": "todo_list", "args": {}}
+{"tool": "sleep", "args": {"seconds": 10}}
+{"tool": "code_symbols", "args": {"path": "src/auth.py"}}
+
+# v2.5.0: language-server navigation (all sections, read-only). Lines
+# are 1-based; character is optional (defaults to the first non-blank
+# column of the line). Needs python-lsp-server installed, otherwise the
+# tools explain how to install it. Prefer these over grep when you need
+# the exact definition or all usages of a symbol.
+{"tool": "lsp_definition", "args": {"path": "src/auth.py", "line": 42}}
+{"tool": "lsp_references", "args": {"path": "src/auth.py", "line": 42}}
+{"tool": "lsp_symbols", "args": {"path": "src/auth.py"}}
+
+# v2.5.0: planning + isolation (general + heavy_code only).
+# enter_plan_mode makes writes/executions read-only until exit_plan_mode;
+# worktrees isolate risky refactors; repl keeps state between snippets;
+# task_* runs shell work in the background; team_* passes notes to
+# teammate profiles; cron_* schedules recurring work.
+{"tool": "enter_plan_mode", "args": {"goal": "Migrate auth to OAuth2"}}
+{"tool": "exit_plan_mode", "args": {"summary": "3-file plan, no migrations needed"}}
+{"tool": "worktree_add", "args": {"name": "oauth2-spike", "branch": "spike/oauth2"}}
+{"tool": "worktree_list", "args": {}}
+{"tool": "worktree_remove", "args": {"name": "oauth2-spike"}}
+{"tool": "repl_run", "args": {"session": "exp", "code": "x = 2 + 2\nprint(x)", "language": "python"}}
+{"tool": "repl_reset", "args": {"session": "exp"}}
+{"tool": "task_spawn", "args": {"label": "full tests", "command": "pytest -q", "timeout": 600}}
+{"tool": "task_list", "args": {}}
+{"tool": "task_output", "args": {"id": "1", "max_chars": 4000}}
+{"tool": "task_stop", "args": {"id": "1"}}
+{"tool": "team_send", "args": {"target": "reviewer", "message": "auth.py ready for review"}}
+{"tool": "team_list", "args": {}}
+{"tool": "cron_add", "args": {"schedule": "0 9 * * 1", "task": "Run pytest and report failures"}}
+{"tool": "cron_list", "args": {}}
+{"tool": "cron_remove", "args": {"id": "1"}}
+# v2.5.0: end of section-gated tools.
 
 # v1.1.0: Multi-agent (Heavy Code only) — spawn sub-agents for sub-tasks.
 # Use spawn_subagent for a single focused sub-task, spawn_multi_agents
@@ -825,7 +948,8 @@ Safety (enforced by the platform; follow it too):
 
 class PromptBuilder:
     @staticmethod
-    def system(section: str = "general", compact: bool = False) -> str:
+    def system(section: str = "general", compact: bool = False,
+               verbosity: str = "normal") -> str:
         """Build the system prompt for the given section.
 
         ``compact`` — v2.3.5-fix (small-model support): return the lean
@@ -848,12 +972,21 @@ class PromptBuilder:
         `heavy_code` section we additionally inject the
         HEAVY_CODE_SYSTEM_SUFFIX (slice decomposition + adversarial
         review + subagent watchdog).
+
+        v2.5.0: in the `office` section the planning + isolation tool
+        block is stripped (document work stays undisturbed); those
+        tools are still dispatched by ToolEngine for general/heavy_code.
+        ``verbosity`` appends a short output-style suffix; "normal"
+        keeps the prompt byte-identical to previous versions.
         """
         if compact:
-            return COMPACT_SYSTEM_PROMPT.format(
+            prompt = COMPACT_SYSTEM_PROMPT.format(
                 tool_list=COMPACT_TOOL_LIST,
                 few_shot=COMPACT_FEW_SHOT_EXAMPLES,
             )
+            if verbosity in _VERBOSITY_SUFFIXES:
+                prompt += _VERBOSITY_SUFFIXES[verbosity]
+            return prompt
         schema = TOOL_SCHEMA
         if section != "heavy_code":
             # Strip the multi-agent tool descriptions (the comment block
@@ -871,6 +1004,21 @@ class PromptBuilder:
                     continue  # don't append
                 stripped.append(line)
             schema = "\n".join(stripped)
+        if section == "office":
+            # Strip the planning + isolation block (general/heavy_code only).
+            lines = schema.split("\n")
+            stripped = []
+            skip_block = False
+            for line in lines:
+                if "planning + isolation (general + heavy_code only)" in line:
+                    skip_block = True
+                    continue
+                if skip_block:
+                    if "end of section-gated tools" in line:
+                        skip_block = False
+                    continue
+                stripped.append(line)
+            schema = "\n".join(stripped)
         # v1.2.0: append the office tool schema ONLY in the office
         # section. The base TOOL_SCHEMA has a short comment about it
         # but the full per-tool JSON examples only appear here.
@@ -886,6 +1034,8 @@ class PromptBuilder:
             prompt = prompt + "\n\n" + HEAVY_CODE_SYSTEM_SUFFIX
         if section == "office":
             prompt = prompt + "\n\n" + _load_office_system_suffix()
+        if verbosity in _VERBOSITY_SUFFIXES:
+            prompt = prompt + _VERBOSITY_SUFFIXES[verbosity]
         return prompt
 
     @staticmethod
