@@ -765,3 +765,25 @@ class WorkflowCommandsMixin:
                 self._wf_say(f"IDE bridge running on {res['host']}:{res['port']}")
             else:
                 self._wf_say("IDE bridge stopped. Start: /bridge start [port]")
+
+    def _exec_mascot(self, arg: str) -> None:
+        """/mascot — the 8-bit pilot, blinking, with a one-liner."""
+        from .widgets.chat_log import ChatLog
+        from .widgets.mascot import render_mascot, random_quip
+        frame = int(getattr(self, "_mascot_frame", 0)) % 2
+        try:
+            self._mascot_frame = frame + 1
+        except Exception:
+            pass
+        dark = bool(getattr(self, "_dark_theme", True))
+        chat = self.query_one(ChatLog)
+        try:
+            chat.write(render_mascot(dark=dark, frame=frame))
+        except Exception:
+            pass
+        chat.add_system(f"[dim]Pilot: {random_quip()}[/dim]")
+        try:
+            from .widgets.input_box import InputBox
+            self.query_one(InputBox).focus()
+        except Exception:
+            pass

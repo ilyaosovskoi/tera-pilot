@@ -305,3 +305,49 @@ def test_card_button_mapping_without_layout():
     pending.resolve("allow")
     pending.resolve("deny")
     assert calls == ["allow"]
+
+
+# ── Mascot (v2.5.0) ─────────────────────────────────────────────────
+
+
+def test_mascot_frames_valid():
+    from tera_pilot_tui.widgets.mascot import FRAMES, WIDTH
+    assert len(FRAMES) == 2
+    for frame in FRAMES:
+        assert all(len(row) == WIDTH for row in frame)
+        assert all(set(row) <= set(".DKAW") for row in frame)
+    assert FRAMES[0] != FRAMES[1]
+
+
+def test_mascot_render_dims_and_themes():
+    from tera_pilot_tui.widgets.mascot import render_mascot, WIDTH
+    for dark in (True, False):
+        for frame in (0, 1):
+            text = render_mascot(dark=dark, frame=frame)
+            lines = text.plain.split("\n")
+            assert all(len(line) == WIDTH for line in lines)
+            assert 8 <= len(lines) <= 9
+    assert render_mascot(True, 0).plain != render_mascot(True, 1).plain
+    assert render_mascot(False, 0).plain == render_mascot(True, 0).plain
+
+
+def test_mascot_quips():
+    from tera_pilot_tui.widgets.mascot import QUIPS, random_quip
+    assert len(QUIPS) >= 5
+    assert all(q and len(q) < 80 for q in QUIPS)
+    assert random_quip() in QUIPS
+
+
+@pytest.mark.asyncio
+async def test_mascot_command_renders():
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.widgets.chat_log import ChatLog
+
+    app = TeraPilotTUIApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._exec_mascot("")
+        await pilot.pause(0.2)
+        text = "\n".join(str(line) for line in app.query_one(ChatLog).lines)
+        assert "Pilot:" in text
+        assert app._exception is None

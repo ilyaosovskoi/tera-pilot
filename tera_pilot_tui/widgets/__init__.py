@@ -2,6 +2,7 @@
 
 from .approval_card import ApprovalCard, PendingApproval, hint_text, key_decision
 from .approval_modal import ApprovalModal, GuardianModal
+from .mascot import QUIPS, render_mascot, random_quip
 from .chat_log import ChatLog
 from .command_palette import CommandPalette
 from .command_suggestions import CommandSuggestions
@@ -17,6 +18,9 @@ __all__ = [
     "hint_text",
     "key_decision",
     "ApprovalModal",
+    "render_mascot",
+    "random_quip",
+    "QUIPS",
     "ChatLog",
     "CommandPalette",
     "CommandSuggestions",

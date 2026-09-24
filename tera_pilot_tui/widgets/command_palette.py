@@ -144,6 +144,7 @@ BUILTIN_COMMANDS: List[CommandEntry] = [
     CommandEntry("gui", "/gui", "Launch the Tera Pilot GUI window (Ctrl+G)", "actions", False),
     CommandEntry("theme", "/theme", "Switch theme (dark / light)", "actions", False),
     CommandEntry("plugin", "/plugin", "Install / remove / enable plugins", "actions", False),
+    CommandEntry("mascot", "/mascot", "The 8-bit pilot, with a one-liner", "actions", False),
     CommandEntry("help", "/help", "Show available slash commands", "actions", False),
 ]
 

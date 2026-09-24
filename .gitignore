@@ -45,6 +45,11 @@ docs/
 loops/
 payment.html
 
+# Agent working notes (local only — project map, workflows, gotchas).
+# Never committed, never pushed.
+AGENT.md
+AGENT_TUI.md
+
 # Local bugfix/working notes inside the package.
 tera_pilot/BUGFIXES_*.md
 

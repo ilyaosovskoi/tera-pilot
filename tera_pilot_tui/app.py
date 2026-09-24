@@ -148,7 +148,15 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
             pass
 
         # Initialize chat — v2.4.1: styled welcome with brand + key hints.
+        # v2.5.0: 8-bit pilot mascot splash above the welcome text.
         chat = self.query_one(ChatLog)
+        try:
+            from rich.text import Text as _Text
+            from .widgets.mascot import render_mascot
+            chat.write(render_mascot(dark=self._dark_theme, frame=0))
+            chat.write(_Text(""))
+        except Exception:
+            pass
         chat.add_system(
             "[bold #d77757]❯ Tera Pilot[/bold #d77757]  — ask a question or type a "
             "request and press Enter.\n"
@@ -549,6 +557,8 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
             self._exec_chat_import(arg)
         elif cmd == "/bridge":
             self._exec_bridge(arg)
+        elif cmd == "/mascot":
+            self._exec_mascot(arg)
         else:
             self.query_one(ChatLog).add_system(
                 f"Unknown command: {cmd}. Type /help for available commands."
