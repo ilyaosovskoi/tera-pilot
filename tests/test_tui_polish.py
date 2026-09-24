@@ -134,3 +134,174 @@ async def test_ask_modal_skip_returns_none():
         await pilot.pause(0.2)
         assert answers == ["unset", None]
         assert app._exception is None
+
+
+# ── Inline approval card (v2.5.0) ───────────────────────────────────
+
+
+def test_key_decision_map():
+    from tera_pilot_tui.widgets.approval_card import key_decision
+    assert key_decision("y", False) == "allow"
+    assert key_decision("enter", False) == "allow"
+    assert key_decision("n", False) == "deny"
+    assert key_decision("escape", False) == "deny"
+    assert key_decision("a", True) == "approve"
+    assert key_decision("u", True) == "use_fix"
+    assert key_decision("enter", True) == "use_fix"
+    assert key_decision("r", True) == "reject"
+    assert key_decision("escape", True) == "reject"
+    assert key_decision("x", False) is None
+    assert key_decision("y", True) is None
+    assert key_decision("", False) is None
+
+
+def _recording_bridge():
+    from tera_pilot_tui.bridge import TeraPilotBridge
+
+    class RecordingBridge(TeraPilotBridge):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.guardian_verdicts = []
+            self.confirmations = []
+
+        def answer_guardian_verdict(self, verdict):
+            self.guardian_verdicts.append(verdict)
+
+        def answer_confirmation(self, accepted):
+            self.confirmations.append(accepted)
+
+    return RecordingBridge(workspace=".")
+
+
+@pytest.mark.asyncio
+async def test_inline_approve_via_keyboard_y():
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.widgets.chat_log import ChatLog
+
+    bridge = _recording_bridge()
+    app = TeraPilotTUIApp(bridge=bridge)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._show_confirm({"action": "execute_command", "summary": "Run: echo hi"})
+        await pilot.pause(0.2)
+        assert app._inline_approval is not None
+        await pilot.press("y")
+        await pilot.pause(0.2)
+        text = "\n".join(str(line) for line in app.query_one(ChatLog).lines)
+        assert "Allowed" in text
+    assert bridge.confirmations == [True]
+    assert app._exception is None
+
+
+@pytest.mark.asyncio
+async def test_inline_deny_via_keyboard_n_and_escape():
+    from tera_pilot_tui.app import TeraPilotTUIApp
+
+    for key in ("n", "escape"):
+        bridge = _recording_bridge()
+        app = TeraPilotTUIApp(bridge=bridge)
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            app._show_confirm({"action": "execute_command", "summary": "Run: echo hi"})
+            await pilot.pause(0.2)
+            await pilot.press(key)
+            await pilot.pause(0.2)
+        assert bridge.confirmations == [False], key
+        assert app._exception is None
+
+
+@pytest.mark.asyncio
+async def test_inline_guardian_use_fix_via_keyboard_u():
+    from tera_pilot_tui.app import TeraPilotTUIApp
+
+    bridge = _recording_bridge()
+    app = TeraPilotTUIApp(bridge=bridge)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._show_confirm({
+            "action": "execute_command",
+            "summary": "Run: rm -rf /tmp/important",
+            "guardian_verdict": "MODIFY",
+            "suggested_args": {"command": "rm /tmp/important"},
+        })
+        await pilot.pause(0.2)
+        assert app._inline_approval is not None and app._inline_approval.guardian
+        await pilot.press("u")
+        await pilot.pause(0.2)
+    assert bridge.guardian_verdicts == ["use_fix"]
+    assert bridge.confirmations == []
+    assert app._exception is None
+
+
+@pytest.mark.asyncio
+async def test_composer_frozen_while_approval_pending():
+    """Typing keys must not reach the composer while the card is pending;
+    ctrl combos still pass through."""
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.widgets.input_box import InputBox
+
+    app = TeraPilotTUIApp()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        box = app.query_one(InputBox)
+        assert box.value == ""
+        app._show_confirm({"action": "execute_command", "summary": "Run: echo hi"})
+        await pilot.pause(0.2)
+        await pilot.press("x")
+        await pilot.pause(0.1)
+        assert box.value == ""
+        assert app._inline_approval is not None and app._inline_approval.active
+        await pilot.press("n")
+        await pilot.pause(0.2)
+        assert app._inline_approval is None or not app._inline_approval.active
+        await pilot.press("x")
+        await pilot.pause(0.1)
+        assert box.value == "x"
+        assert app._exception is None
+
+
+@pytest.mark.asyncio
+async def test_stale_approval_expires_denied():
+    from tera_pilot_tui.app import TeraPilotTUIApp
+    from tera_pilot_tui.widgets.approval_card import ApprovalCard
+
+    bridge = _recording_bridge()
+    app = TeraPilotTUIApp(bridge=bridge)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        app._show_confirm({"action": "execute_command", "summary": "Run: echo hi"})
+        await pilot.pause(0.2)
+        assert app._inline_approval is not None
+        app._close_stale_approval()
+        await pilot.pause(0.1)
+        card = app.query_one(ApprovalCard)
+        assert not card.has_class("visible")
+    assert bridge.confirmations == [False]
+    assert app._exception is None
+
+
+def test_card_button_mapping_without_layout():
+    """Button ids map to decisions without a running app (pure dispatch)."""
+    from textual.widgets import Button
+    from tera_pilot_tui.widgets.approval_card import ApprovalCard, PendingApproval
+
+    card = ApprovalCard()
+    got = []
+    card._pending = PendingApproval(False, got.append)
+    for bid, want in (("ap-allow", "allow"), ("ap-deny", "deny"),
+                      ("ap-approve", "approve"), ("ap-use-fix", "use_fix"),
+                      ("ap-reject", "reject")):
+        card._pending = PendingApproval("ap-" in bid and bid != "ap-allow" and bid != "ap-deny", got.append)
+        event = Button.Pressed(Button("x", id=bid))
+        card.on_button_pressed(event)
+    assert got == ["allow", "deny", "approve", "use_fix", "reject"]
+    # Unknown button id is ignored.
+    card._pending = PendingApproval(False, got.append)
+    card.on_button_pressed(Button.Pressed(Button("x", id="nope")))
+    assert len(got) == 5
+    # Double resolve fires once.
+    calls = []
+    pending = PendingApproval(False, calls.append)
+    pending.resolve("allow")
+    pending.resolve("deny")
+    assert calls == ["allow"]

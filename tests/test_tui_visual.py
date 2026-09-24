@@ -378,7 +378,7 @@ async def test_canvas_strip_shows_only_with_nodes():
 
 
 def _push_guardian_modify_modal(app) -> None:
-    """Push the Guardian MODIFY modal (the 3-button variant)."""
+    """Show the Guardian MODIFY inline card (the 3-button variant)."""
     app._show_confirm({
         "action": "execute_command",
         "summary": "Run: rm -rf /tmp/important",
@@ -427,6 +427,8 @@ def test_action_button_rules_are_rounded_in_both_themes():
 
 @pytest.mark.asyncio
 async def test_approval_buttons_are_rounded_with_live_states():
+    """v2.5.0: the inline card uses a flat one-row action bar (fits the
+    free zone above the composer) with per-action text colors."""
     from tera_pilot_tui.app import TeraPilotTUIApp
 
     app = TeraPilotTUIApp()
@@ -434,30 +436,29 @@ async def test_approval_buttons_are_rounded_with_live_states():
         await pilot.pause()
         app._show_confirm({"action": "execute_command", "summary": "Run: rm -rf /tmp"})
         await pilot.pause(0.3)
-        modal = app._approval_modal
-        assert modal is not None
-        approve = modal.query_one("#approve")
-        deny = modal.query_one("#deny")
+        assert app._inline_approval is not None and app._inline_approval.active
+        allow = app.query_one("#ap-allow")
+        deny = app.query_one("#ap-deny")
 
-        for btn in (approve, deny):
-            assert btn.styles.border_top[0] == "round", btn.styles.border_top
-            assert btn.region.height == 3
-        # The buttons are content-sized now, not 24-wide blocks.
-        assert deny.region.width < 24, deny.region
+        for btn in (allow, deny):
+            assert btn.region.height == 1
+        # Distinct action colors (green allow / red deny).
+        assert allow.styles.color.hex != deny.styles.color.hex
 
         idle_bg = deny.styles.background.hex
-        assert idle_bg not in ("#8F2D24", "#B03A2F"), idle_bg
-        await pilot.hover("#deny")
+        await pilot.hover("#ap-deny")
         await pilot.pause()
         assert deny.styles.background.hex != idle_bg, "hover state is not styled"
 
         await pilot.press("escape")
         await pilot.pause(0.2)
+        assert app._inline_approval is None or not app._inline_approval.active
         assert app._exception is None
 
 
 @pytest.mark.asyncio
 async def test_guardian_buttons_are_rounded_accent_pills():
+    """v2.5.0: guardian card keeps three distinctly-colored actions."""
     from tera_pilot_tui.app import TeraPilotTUIApp
 
     app = TeraPilotTUIApp()
@@ -465,16 +466,15 @@ async def test_guardian_buttons_are_rounded_accent_pills():
         await pilot.pause()
         _push_guardian_modify_modal(app)
         await pilot.pause(0.3)
-        modal = app._approval_modal
-        assert modal is not None
+        assert app._inline_approval is not None and app._inline_approval.guardian
 
-        accents = {}
-        for bid in ("#approve", "#use_fix", "#reject"):
-            btn = modal.query_one(bid)
-            assert btn.styles.border_top[0] == "round", (bid, btn.styles.border_top)
-            accents[bid] = btn.styles.border_top[1].hex
-        # Each action keeps its own accent colour (green / blue / red).
-        assert len(set(accents.values())) == 3, accents
+        colors = {}
+        for bid in ("#ap-approve", "#ap-use-fix", "#ap-reject"):
+            btn = app.query_one(bid)
+            assert btn.region.height == 1, (bid, btn.region)
+            colors[bid] = btn.styles.color.hex
+        # Each action keeps its own color (green / violet / red).
+        assert len(set(colors.values())) == 3, colors
 
         await pilot.press("escape")
         await pilot.pause(0.2)

@@ -102,6 +102,27 @@ class InputBox(TextArea):
     async def _on_key(self, event: events.Key) -> None:
         key = event.key
 
+        # ---- v2.5.0: inline approval takes over the composer ----
+        # While a confirmation card is pending, decision keys resolve it
+        # (y/n, a/u/r, Enter/Esc per the card hint); every other key is
+        # swallowed so the user can't type a prompt the turn would then
+        # misread. Ctrl-combos (interrupt, quit) always pass through.
+        try:
+            _approval = getattr(getattr(self, "app", None), "_inline_approval", None)
+        except Exception:
+            _approval = None
+        if _approval is not None and getattr(_approval, "active", False):
+            if key.startswith("ctrl"):
+                await super()._on_key(event)
+                return
+            from .approval_card import key_decision
+            decision = key_decision(key, bool(getattr(_approval, "guardian", False)))
+            if decision is not None:
+                _approval.resolve(decision)
+            event.prevent_default()
+            event.stop()
+            return
+
         # ---- Enter: submit the prompt ----
         if key == "enter":
             value = self.value.strip()

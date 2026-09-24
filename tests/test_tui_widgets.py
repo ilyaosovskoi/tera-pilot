@@ -472,8 +472,8 @@ async def test_run_ending_error_rendered_once():
 
 
 @pytest.mark.asyncio
-async def test_guardian_modal_approve_routes_to_guardian_verdict():
-    """Answering a Guardian MODIFY modal with Approve must call
+async def test_guardian_card_approve_routes_to_guardian_verdict():
+    """Answering a Guardian MODIFY card with Approve must call
     bridge.answer_guardian_verdict("approve"), NOT answer_confirmation(True).
 
     Regression: only "use_fix" went through answer_guardian_verdict();
@@ -512,8 +512,8 @@ async def test_guardian_modal_approve_routes_to_guardian_verdict():
             "reasons": ["recursive delete"],
         })
         await pilot.pause(0.3)
-        assert app._approval_modal is not None
-        await pilot.click("#approve")
+        assert app._inline_approval is not None
+        await pilot.press("a")
         await pilot.pause(0.3)
 
     assert bridge.guardian_verdicts == ["approve"], bridge.guardian_verdicts
@@ -521,7 +521,7 @@ async def test_guardian_modal_approve_routes_to_guardian_verdict():
 
 
 @pytest.mark.asyncio
-async def test_guardian_modal_reject_routes_to_guardian_verdict():
+async def test_guardian_card_reject_routes_to_guardian_verdict():
     """Same routing fix for the Reject button (and Escape)."""
     from tera_pilot_tui.app import TeraPilotTUIApp
     from tera_pilot_tui.bridge import TeraPilotBridge
@@ -552,8 +552,8 @@ async def test_guardian_modal_reject_routes_to_guardian_verdict():
             "reasons": ["recursive delete"],
         })
         await pilot.pause(0.3)
-        assert app._approval_modal is not None
-        await pilot.click("#reject")
+        assert app._inline_approval is not None
+        await pilot.press("r")
         await pilot.pause(0.3)
 
     assert bridge.guardian_verdicts == ["reject"], bridge.guardian_verdicts
@@ -561,9 +561,9 @@ async def test_guardian_modal_reject_routes_to_guardian_verdict():
 
 
 @pytest.mark.asyncio
-async def test_legacy_approval_modal_still_uses_answer_confirmation():
-    """The legacy (non-Guardian) approval modal returns True/False and must
-    keep going through answer_confirmation — the fix must not change that."""
+async def test_inline_approval_card_still_uses_answer_confirmation():
+    """The inline (non-Guardian) approval card returns allow/deny and must
+    keep going through answer_confirmation — the flow change must not alter routing."""
     from tera_pilot_tui.app import TeraPilotTUIApp
     from tera_pilot_tui.bridge import TeraPilotBridge
 
@@ -583,11 +583,11 @@ async def test_legacy_approval_modal_still_uses_answer_confirmation():
     app = TeraPilotTUIApp(bridge=bridge)
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
-        # Legacy (non-Guardian) confirm: no guardian verdict fields.
+        # Inline (non-Guardian) confirm: no guardian verdict fields.
         app._show_confirm({"action": "execute_command", "summary": "Run: echo hi"})
         await pilot.pause(0.3)
-        assert app._approval_modal is not None
-        await pilot.click("#approve")
+        assert app._inline_approval is not None
+        await pilot.click("#ap-allow")
         await pilot.pause(0.3)
 
     assert bridge.guardian_verdicts == [], bridge.guardian_verdicts

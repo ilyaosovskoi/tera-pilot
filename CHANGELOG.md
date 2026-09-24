@@ -117,6 +117,12 @@ UI polish (same release):
     themed scrollbars, muted placeholders, disabled states, and a
     `prefers-reduced-motion` guard (CSS-only, in `design-polish.css`).
 
+34. **Inline confirmations** — action approvals render as a strip
+    directly under the chat (clickable actions + one-key answers:
+    y/n, a/u/r) instead of a centered modal overlay; unanswered
+    requests fail closed, decisions are echoed into the scrollback.
+    The plan-approval dialog stays modal.
+
 ## [Unreleased]
 
 1. **Closing-message parser gaps fixed** — models that finish with a

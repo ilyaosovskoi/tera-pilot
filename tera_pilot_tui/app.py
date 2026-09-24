@@ -19,7 +19,8 @@ from textual.binding import Binding
 from textual.widgets import TextArea
 
 from .bridge import TeraPilotBridge
-from .widgets.approval_modal import ApprovalModal, GuardianModal
+from .widgets.approval_card import ApprovalCard, PendingApproval
+from .widgets.approval_modal import ApprovalModal
 from .widgets.chat_log import ChatLog
 from .widgets.command_palette import CommandPalette, CommandEntry, SECTIONS, BUILTIN_COMMANDS
 from .widgets.command_suggestions import CommandSuggestions, SuggestionItem
@@ -61,11 +62,10 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
         self._last_prompt: str = ""
         self._suggestions_active: bool = False
         self._dark_theme: bool = True  # Start with dark theme
-        # v2.3.4-fix: track the open approval/guardian modal so it can be
-        # popped when the turn ends, errors, or is interrupted. Previously
-        # the modal stayed on screen forever once the agent moved on
-        # (stale dialog over an idle app).
-        self._approval_modal = None
+        # v2.5.0: inline confirmations render as a card under the chat
+        # (see ApprovalCard) instead of a modal overlay. At most one
+        # request is outstanding — the engine blocks per confirmation.
+        self._inline_approval = None
         # v2.5.0: same stale-dialog tracking for the ask_user modal.
         self._ask_modal = None
         # v2.3.5-fix: last error already rendered via the agent's ERROR
@@ -96,6 +96,9 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
         # did it die?" at a glance.
         yield ThinkingIndicator(id="thinking")
         yield CommandSuggestions(id="suggestions")
+        # v2.5.0: inline approval card — hidden until a confirmation
+        # arrives; docks directly under the chat, above the composer.
+        yield ApprovalCard(id="approval-card")
         yield InputBox(id="input")
         # v2.5.0: bottom statusline (tokens/cost, section + guardian
         # badges, spinner state). Composed last so it docks at the very
@@ -2857,51 +2860,76 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
         self.call_from_thread(self._show_confirm, dict(info))
 
     def _show_confirm(self, info: Dict[str, Any]) -> None:
-        def _answer(result: bool | str | None) -> None:
-            self._approval_modal = None
-            # Guardian modal returns "approve" | "reject" | "use_fix"
-            # Legacy modal returns True/False
-            if isinstance(result, str):
-                # v2.3.9-fix: route EVERY GuardianModal verdict through
-                # answer_guardian_verdict(). Previously only "use_fix"
-                # did; "approve"/"reject" went to answer_confirmation(),
-                # which pokes the tool engine's *_confirm* wait — but
-                # during a Guardian MODIFY review the engine is blocked
-                # on its *_guardian* wait (_guardian_event /
-                # _guardian_decision). The verdict never arrived, so the
-                # agent hung until the 300s wait timed out and the
-                # default "reject" applied — Approve on a Guardian modal
-                # silently did nothing, and Reject looked like a stall.
-                self.bridge.answer_guardian_verdict(result)
-            elif isinstance(result, bool):
-                self.bridge.answer_confirmation(result)
-            else:
-                self.bridge.answer_confirmation(False)
+        """Show an action confirmation as an inline card under the chat
+        (not a modal overlay): the request stays in context while the
+        user answers with one key or a click."""
+        guardian = (info.get("guardian_verdict") == "MODIFY"
+                    or info.get("suggested_args") is not None)
+        action = str(info.get("action", "action"))
+        # A second request must never strand the first one waiting: the
+        # engine blocks per confirmation, so expire anything still open
+        # as denied before showing the new card.
+        old = self._inline_approval
+        self._inline_approval = None
+        if old is not None and old.active:
+            old.resolve("reject" if guardian else "deny")
 
-        # Check if this is a Guardian review event
-        if info.get("guardian_verdict") == "MODIFY" or info.get("suggested_args") is not None:
-            self._approval_modal = GuardianModal(info)
-            self.push_screen(self._approval_modal, _answer)
-        else:
-            self._approval_modal = ApprovalModal(info)
-            self.push_screen(self._approval_modal, _answer)
+        def _answer(decision: Optional[str]) -> None:
+            self._inline_approval = None
+            try:
+                card = self.query_one(ApprovalCard)
+                card.hide()
+            except Exception:
+                pass
+            chat = self.query_one(ChatLog)
+            if guardian:
+                if decision == "approve":
+                    self.bridge.answer_guardian_verdict("approve")
+                    chat.add_system(f"[dim]✓ Approved: {action}[/dim]")
+                elif decision == "use_fix":
+                    self.bridge.answer_guardian_verdict("use_fix")
+                    chat.add_system(f"[dim]✓ Use fix: {action}[/dim]")
+                else:
+                    self.bridge.answer_guardian_verdict("reject")
+                    chat.add_system(f"[dim]✗ Denied: {action}[/dim]")
+            else:
+                if decision == "allow":
+                    self.bridge.answer_confirmation(True)
+                    chat.add_system(f"[dim]✓ Allowed: {action}[/dim]")
+                else:
+                    self.bridge.answer_confirmation(False)
+                    chat.add_system(f"[dim]✗ Denied: {action}[/dim]")
+            self.query_one(InputBox).focus()
+
+        self._inline_approval = PendingApproval(guardian, _answer)
+        try:
+            card = self.query_one(ApprovalCard)
+            card.show_request(info, guardian, self._inline_approval)
+        except Exception:
+            # If the card cannot render, fail closed (deny) rather than
+            # leave the agent blocked forever.
+            pending, self._inline_approval = self._inline_approval, None
+            if pending is not None:
+                pending.resolve("reject" if guardian else "deny")
 
     def _close_stale_approval(self) -> None:
-        """Pop a confirmation modal that is no longer relevant.
+        """Expire a confirmation card that is no longer relevant.
 
         Called when the turn ends / errors / is interrupted while an
-        approval dialog is still open (the agent already moved on — the
-        dialog would otherwise stay on screen forever, blocking further
-        input). Safe no-op when no modal is tracked.
+        approval card is still open (the agent already moved on — the
+        card would otherwise stay on screen forever, blocking further
+        input). An unanswered request fails closed (deny), exactly like
+        a headless timeout. Safe no-op when nothing is pending.
         """
-        modal = self._approval_modal
-        self._approval_modal = None
+        pending, self._inline_approval = self._inline_approval, None
+        if pending is not None and pending.active:
+            pending.resolve("reject" if pending.guardian else "deny")
+            return
+        # v2.5.0: also close a stale ask_user modal the same way.
+        modal = self._ask_modal
+        self._ask_modal = None
         if modal is None:
-            # v2.5.0: also close a stale ask_user modal the same way.
-            modal = self._ask_modal
-            self._ask_modal = None
-            if modal is None:
-                return
+            return
         try:
             if modal in self.screen_stack:
                 self.pop_screen()

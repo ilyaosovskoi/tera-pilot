@@ -19,6 +19,7 @@ $success-dim: #e9f7ee;
 $warning: #9a6700;
 $error: #d1242f;
 $error-dim: #fdeeee;
+$violet: #6d28d9;
 $primary: #b34d2e;
 
 /* ── Global ─────────────────────────────────────────────────────── */
@@ -640,4 +641,99 @@ AskUserModal {
 
 #ask-skip {
     color: $text-muted;
+}
+
+/* ── Inline approval strip (v2.5.0) ────────────────────────────── */
+/* Confirmation prompt docked directly under the chat, above the
+   composer — no modal overlay, the context stays visible. The free
+   zone above the composer is ~5 rows, so the strip is fixed-height
+   (4 normal / 5 guardian) with truncated single-line rows; anything
+   taller would slide under the composer and eat clicks. */
+#approval-card {
+    dock: bottom;
+    height: 0;
+    margin: 0 2 0 2;
+    padding: 0 2;
+    border-top: solid $accent;
+    background: $surface;
+    display: none;
+    overflow: hidden;
+}
+
+#approval-card.visible {
+    display: block;
+    height: 4;
+}
+
+#approval-card.guardian {
+    border-top: solid $violet;
+}
+
+
+#approval-card-title,
+#approval-card-summary,
+#approval-card-fix {
+    height: 1;
+}
+
+#approval-card.guardian.visible {
+    height: 5;
+}
+
+#approval-card-title {
+    text-style: bold;
+    color: $accent;
+    height: 1;
+}
+
+#approval-card.guardian #approval-card-title {
+    color: $violet;
+}
+
+#approval-card-summary {
+    color: $text-muted;
+    height: 1;
+}
+
+#approval-card-fix {
+    color: $success;
+    height: 1;
+}
+
+#approval-card-buttons {
+    height: 1;
+    layout: horizontal;
+}
+
+#approval-card-buttons Button {
+    height: 1;
+    min-width: 18;
+    margin: 0 2 0 0;
+    padding: 0 1;
+    border: none;
+    background: transparent;
+    text-style: bold;
+}
+
+#approval-card-buttons Button:hover {
+    background: $surface-raised;
+}
+
+#approval-card-buttons Button:focus {
+    background: $surface-raised;
+    text-style: bold underline;
+}
+
+#approval-card-buttons #ap-allow,
+#approval-card-buttons #ap-approve {
+    color: $success;
+}
+
+#approval-card-buttons #ap-deny,
+#approval-card-buttons #ap-reject {
+    color: $error;
+}
+
+#approval-card-buttons #ap-use-fix {
+    color: $violet;
 }

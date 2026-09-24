@@ -1,5 +1,6 @@
 """Widgets for the Tera Pilot TUI."""
 
+from .approval_card import ApprovalCard, PendingApproval, hint_text, key_decision
 from .approval_modal import ApprovalModal, GuardianModal
 from .chat_log import ChatLog
 from .command_palette import CommandPalette
@@ -11,6 +12,10 @@ from .thinking import ThinkingIndicator
 from .tool_block import ToolBlock
 
 __all__ = [
+    "ApprovalCard",
+    "PendingApproval",
+    "hint_text",
+    "key_decision",
     "ApprovalModal",
     "ChatLog",
     "CommandPalette",
