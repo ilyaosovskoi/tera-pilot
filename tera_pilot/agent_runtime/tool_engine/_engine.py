@@ -826,6 +826,24 @@ class ToolEngine:
         start = time.monotonic()
         tool_name = call.name.value if isinstance(call.name, ToolName) else str(call.name)
 
+        # --- v2.5.0: pre_tool_use hooks (user extensions) ---
+        # Run BEFORE Guardian so a MODIFY verdict reviews the final args.
+        # BLOCK rejects the call; MODIFY replaces call.args in place.
+        # Hook failures never break execution (fail-open to the rest of
+        # the pipeline — safety stays with Guardian/policy/sandbox).
+        try:
+            from tera_pilot.hook_system import get_hook_manager, HookAction
+            pre = get_hook_manager().dispatch_pre_tool_use(
+                tool_name, dict(call.args or {}))
+            if pre.action == HookAction.BLOCK:
+                call.error = pre.message or "blocked by hook"
+                call.duration_ms = (time.monotonic() - start) * 1000
+                return f"[HOOK BLOCK] {tool_name} blocked: {pre.message or 'hook policy'}"
+            if pre.action == HookAction.MODIFY and pre.modified_args is not None:
+                call.args = dict(pre.modified_args)
+        except Exception as exc:
+            logger.debug("[hooks] pre_tool_use dispatch failed: %s", exc)
+
         # --- Guardian pre-execution review ---
         try:
             self._guardian_review(tool_name, call.args)
@@ -860,6 +878,12 @@ class ToolEngine:
                 )
             except Exception as log_err:
                 logger.warning("[activity] failed to record tool error: %s", log_err)
+            try:
+                from tera_pilot.hook_system import get_hook_manager
+                get_hook_manager().dispatch_post_tool_use(
+                    tool_name, dict(call.args or {}), err_str)
+            except Exception:
+                pass
             return err_str
         call.result = result[:self.MAX_OUTPUT]
         call.duration_ms = (time.monotonic() - start) * 1000
@@ -880,6 +904,13 @@ class ToolEngine:
         except Exception as log_err:
             # Logging must NEVER break tool execution — swallow errors.
             logger.warning("[activity] failed to record tool call: %s", log_err)
+        # --- v2.5.0: post_tool_use hooks (informational; the call ran) ---
+        try:
+            from tera_pilot.hook_system import get_hook_manager
+            get_hook_manager().dispatch_post_tool_use(
+                tool_name, dict(call.args or {}), call.result or "")
+        except Exception:
+            pass
         return call.result
 
     def _dispatch(self, call: ToolCall) -> str:

@@ -104,6 +104,8 @@ tera-pilot-tui = "tera_pilot_tui.__main__:main"
 tera-pilot-acp = "tera_pilot.agent.acp_server:cli_main"
 # v2.0: Remote agent daemon — run tasks on server with HTTP API + SSE + messengers.
 tera-pilot-daemon = "tera_pilot.daemon:main"
+# v2.5.0: IDE bridge server for editor extensions (localhost, token auth).
+tera-pilot-bridge = "tera_pilot.ide_bridge:main"
 
 [tool.pytest.ini_options]
 # The eval/ directory ships clean-copy fixture repos whose test_*.py

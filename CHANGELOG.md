@@ -68,6 +68,39 @@ Follow-ups (same release):
 17. **`/share-signed`** — conversation export as Ed25519-signed,
     hash-chained JSON, verifiable with `tera-pilot audit verify`.
 
+Second wave (same release):
+18. **LSP navigation** — `lsp_definition`, `lsp_references`,
+    `lsp_symbols` over a bundled synchronous JSON-RPC client
+    (`python-lsp-server`); read-only, all sections and read roles.
+19. **Interactive `ask_user`** — TUI modal with option buttons (1–8)
+    plus free text; skip/timeout falls back to the stated-assumption
+    path so a question can never wedge a run.
+20. **Live background tasks** — terminal states stream into Activity;
+    `/tasks` lists the run's tasks, `/tasks <id>` shows output.
+21. **Daemon schedule runner** — due `schedule.json` entries are
+    submitted to the task queue (once per minute, same
+    headless-confirm policy).
+22. **Tool-use hooks** — the engine now dispatches `pre_tool_use`
+    (BLOCK/MODIFY) and `post_tool_use` through the hook manager;
+    hook failures never break execution.
+23. **File-based output styles** — `~/.tera_pilot/styles/*.md` and
+    project styles with frontmatter; built-ins stay byte-identical;
+    `/output-style` lists and switches.
+24. **Turn suggestions** — heuristic follow-ups after each turn plus a
+    rotating tip (no LLM calls).
+25. **Session resume + transfer** — `/resume` replays a saved chat into
+    live memory; `/chat-export` / `/chat-import` move chats between
+    machines (JSON store and SQLite both readable).
+26. **Python SDK** — `tera_pilot.sdk.TeraPilot` / `run()` for embedding;
+    explicit `autonomy`, `on_confirm`, registry injection for tests.
+27. **IDE bridge** — `tera-pilot-bridge` TCP server (localhost, token
+    auth), context provision, diff/approval proxy via long-poll;
+    `/bridge start|stop|status|context` and an example VS Code
+    extension in `editors/vscode/`.
+28. **`/add-dir` / `/sandbox`** — extra context directories outside the
+    workspace (persisted, applied to every agent) and the OS-sandbox
+    mode switch (off/auto/on).
+
 ## [Unreleased]
 
 1. **Closing-message parser gaps fixed** — models that finish with a

@@ -263,10 +263,27 @@ class TeraPilotBridge:
             section=self.section,
             on_token_delta=self._on_token_delta_event,
             verbosity=self.get_verbosity(),
+            output_style=self.get_output_style(),
         )
         agent.set_autonomy("always_ask")
         agent.set_confirm_callback(self._on_confirm_request)
         agent.set_cancel_check(lambda: self._stop.is_set())
+        # v2.5.0: apply the persisted sandbox mode and extra context
+        # directories (/sandbox, /add-dir) to every fresh agent.
+        try:
+            from tera_pilot.utils import load_config
+            cfg = load_config() or {}
+            mode = str(cfg.get("agent_os_sandbox", "") or "").strip()
+            if mode in ("off", "auto", "on"):
+                agent.tools.os_sandbox = mode
+            for extra in (cfg.get("extra_allowed_dirs") or []):
+                try:
+                    if os.path.isdir(os.path.expanduser(str(extra))):
+                        agent.tools.add_allowed_dir(os.path.expanduser(str(extra)))
+                except Exception:
+                    continue
+        except Exception:
+            pass
         # v2.5.0: keep a previously wired ask_user provider across
         # ensure_agent() calls (the TUI sets it once at startup).
         try:
@@ -2943,6 +2960,39 @@ class TeraPilotBridge:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def get_output_style(self) -> str:
+        try:
+            from tera_pilot.output_styles import active_style_id
+            return active_style_id()
+        except Exception:
+            return "normal"
+
+    def list_output_styles(self) -> Dict[str, Any]:
+        try:
+            from tera_pilot.output_styles import load_all_styles
+            styles = load_all_styles(self.workspace)
+            return {"ok": True, "active": self.get_output_style(),
+                    "styles": [s.to_dict() for s in styles]}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def set_output_style(self, style_id: str) -> Dict[str, Any]:
+        try:
+            from tera_pilot.output_styles import set_active_style, get_style_suffix
+            res = set_active_style(style_id, self.workspace)
+            if not res.get("ok"):
+                return res
+            if self._agent is not None:
+                try:
+                    self._agent.output_style = res["style"]
+                except Exception:
+                    pass
+            suffix = get_style_suffix(res["style"], self.workspace)
+            return {"ok": True, "style": res["style"],
+                    "suffix_chars": len(suffix)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def export_conversation(self, max_messages: int = 200) -> Dict[str, Any]:
         """Current run's messages as plain dicts (for /export, /share)."""
         try:
@@ -3148,6 +3198,247 @@ class TeraPilotBridge:
             if out.startswith("[TASK ERROR]"):
                 return {"ok": False, "error": out}
             return {"ok": True, "output": out}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ── v2.5.0: session resume + device transfer ────────────────────
+
+    def _load_saved_chat(self, chat_id: str) -> Optional[Dict[str, Any]]:
+        """JSON chat store first, SQLite sessions fallback."""
+        sid = (chat_id or "").strip()
+        if not sid:
+            return None
+        path = Path.home() / ".tera_pilot" / "chats" / f"{sid}.json"
+        if path.exists():
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict) and isinstance(raw.get("messages"), list):
+                    return raw
+            except Exception:
+                pass
+        try:
+            from tera_pilot.session.sqlite_persistence import SQLitePersistence
+            db_path = Path.home() / ".tera_pilot" / "chats.sqlite3"
+            if db_path.exists():
+                store = SQLitePersistence(str(db_path))
+                messages, _ = store.load(sid)
+                if messages:
+                    return {"id": sid, "title": sid, "messages": messages}
+        except Exception:
+            pass
+        return None
+
+    def resume_chat(self, chat_id: str, max_messages: int = 100) -> Dict[str, Any]:
+        """Load a saved chat back into the live agent memory (/resume).
+
+        Historic user/assistant messages are appended oldest-first through
+        the normal memory path (trim + persist apply). Returns the plain
+        messages so the UI can re-render them into the chat log.
+        """
+        chat = self._load_saved_chat(chat_id)
+        if chat is None:
+            return {"ok": False, "error": f"no saved chat {chat_id!r}"}
+        raw_messages = [m for m in chat.get("messages", [])
+                        if isinstance(m, dict) and m.get("content")]
+        raw_messages = raw_messages[-max(1, max_messages):]
+        try:
+            agent = self.ensure_agent()
+            for m in raw_messages:
+                role = str(m.get("role", "user"))
+                if role not in ("user", "assistant"):
+                    continue
+                try:
+                    agent.memory.add(role, str(m.get("content", ""))[:8000])
+                except Exception:
+                    continue
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "id": chat.get("id", chat_id),
+                "title": chat.get("title", chat_id),
+                "messages": [{"role": str(m.get("role", "user")),
+                              "content": str(m.get("content", ""))[:8000]}
+                             for m in raw_messages
+                             if str(m.get("role", "")) in ("user", "assistant")]}
+
+    def export_chat_file(self, chat_id: str, dest: str = "") -> Dict[str, Any]:
+        """Write a saved chat to a portable JSON file (/chat-export)."""
+        import datetime as _dt
+        chat = self._load_saved_chat(chat_id)
+        if chat is None:
+            return {"ok": False, "error": f"no saved chat {chat_id!r}"}
+        out = dict(chat)
+        out["exported_at"] = _dt.datetime.now().isoformat()
+        out["exported_from_workspace"] = self.workspace
+        try:
+            path = Path(os.path.expanduser(dest)).expanduser() if dest else (
+                Path.home() / ".tera_pilot" / "exports" /
+                f"chat-{chat.get('id', 'chat')}.json")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(out, indent=2, ensure_ascii=False),
+                            encoding="utf-8")
+            return {"ok": True, "path": str(path), "id": chat.get("id")}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def import_chat_file(self, path: str) -> Dict[str, Any]:
+        """Import a portable chat file into the local store (/chat-import)."""
+        import uuid as _uuid
+        src = Path(os.path.expanduser(path or "")).expanduser()
+        if not src.is_file():
+            return {"ok": False, "error": f"no such file: {path!r}"}
+        try:
+            raw = json.loads(src.read_text(encoding="utf-8"))
+        except Exception as exc:
+            return {"ok": False, "error": f"bad chat file: {exc}"}
+        if not isinstance(raw, dict) or not isinstance(raw.get("messages"), list):
+            return {"ok": False, "error": "not a chat export (need {messages: [...]})"}
+        clean = []
+        for m in raw["messages"]:
+            if isinstance(m, dict) and m.get("role") and m.get("content") is not None:
+                clean.append({"role": str(m["role"])[:16],
+                              "content": str(m["content"])[:20000]})
+        if not clean:
+            return {"ok": False, "error": "chat export has no usable messages"}
+        chats_dir = Path.home() / ".tera_pilot" / "chats"
+        chats_dir.mkdir(parents=True, exist_ok=True)
+        chat_id = str(raw.get("id") or _uuid.uuid4().hex[:12])
+        if (chats_dir / f"{chat_id}.json").exists():
+            chat_id = _uuid.uuid4().hex[:12]
+        doc = {"id": chat_id,
+               "title": str(raw.get("title") or f"Imported {src.name}")[:120],
+               "created_at": str(raw.get("created_at") or ""),
+               "updated_at": str(raw.get("updated_at") or ""),
+               "imported_from": str(src),
+               "messages": clean}
+        try:
+            (chats_dir / f"{chat_id}.json").write_text(
+                json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "id": chat_id, "title": doc["title"],
+                "messages": len(clean)}
+
+    # ── v2.5.0: IDE bridge server (/bridge) ────────────────────────
+
+    def ide_bridge_status(self) -> Dict[str, Any]:
+        server = getattr(self, "_ide_bridge", None)
+        if server is None:
+            return {"ok": True, "running": False}
+        return {"ok": True, "running": True, "host": server.host,
+                "port": server.port}
+
+    def ide_bridge_start(self, port: int = 0) -> Dict[str, Any]:
+        try:
+            from tera_pilot.ide_bridge import IDEBridgeServer
+            server = getattr(self, "_ide_bridge", None)
+            if server is not None:
+                return {"ok": True, "running": True, "host": server.host,
+                        "port": server.port}
+            server = IDEBridgeServer(port=int(port or 0))
+            info = server.start()
+            self._ide_bridge = server
+            return {"ok": True, "running": True, **info}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def ide_bridge_stop(self) -> Dict[str, Any]:
+        try:
+            server = getattr(self, "_ide_bridge", None)
+            self._ide_bridge = None
+            if server is not None:
+                server.stop()
+            return {"ok": True, "running": False}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def ide_bridge_context(self) -> Dict[str, Any]:
+        server = getattr(self, "_ide_bridge", None)
+        if server is None:
+            return {"ok": False, "error": "bridge not running (/bridge start)"}
+        try:
+            return {"ok": True, "context": server._m_get_context({})}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ── v2.5.0: extra context dirs (/add-dir) ───────────────────────
+
+    def list_extra_dirs(self) -> Dict[str, Any]:
+        try:
+            from tera_pilot.utils import load_config
+            dirs = list((load_config() or {}).get("extra_allowed_dirs") or [])
+            return {"ok": True, "dirs": dirs, "workspace": self.workspace}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def add_extra_dir(self, path: str) -> Dict[str, Any]:
+        target = os.path.expanduser((path or "").strip())
+        if not target or not os.path.isdir(target):
+            return {"ok": False, "error": f"not a directory: {path!r}"}
+        resolved = str(Path(target).resolve())
+        try:
+            from tera_pilot.utils import load_config, save_config
+            cfg = load_config() or {}
+            dirs = [str(d) for d in (cfg.get("extra_allowed_dirs") or [])]
+            if resolved not in dirs:
+                dirs.append(resolved)
+                cfg["extra_allowed_dirs"] = dirs
+                save_config(cfg)
+            if self._agent is not None:
+                try:
+                    self._agent.tools.add_allowed_dir(resolved)
+                except Exception:
+                    pass
+            return {"ok": True, "dir": resolved, "dirs": dirs}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def remove_extra_dir(self, path: str) -> Dict[str, Any]:
+        target = (path or "").strip()
+        if not target:
+            return {"ok": False, "error": "usage: /add-dir rm <path>"}
+        try:
+            from tera_pilot.utils import load_config, save_config
+            cfg = load_config() or {}
+            dirs = [str(d) for d in (cfg.get("extra_allowed_dirs") or [])]
+            resolved = str(Path(os.path.expanduser(target)).resolve())
+            kept = [d for d in dirs if d != target and d != resolved]
+            if len(kept) == len(dirs):
+                return {"ok": False, "error": f"not in the list: {target!r}"}
+            cfg["extra_allowed_dirs"] = kept
+            save_config(cfg)
+            return {"ok": True, "dirs": kept}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ── v2.5.0: OS sandbox mode (/sandbox) ──────────────────────────
+
+    def get_sandbox_mode(self) -> Dict[str, Any]:
+        try:
+            live = getattr(getattr(self, "_agent", None), "tools", None)
+            mode = getattr(live, "os_sandbox", None) if live is not None else None
+            if mode is None:
+                from tera_pilot.utils import load_config
+                mode = (load_config() or {}).get("agent_os_sandbox") \
+                    or os.environ.get("TERA_PILOT_OS_SANDBOX", "auto")
+            return {"ok": True, "mode": mode}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def set_sandbox_mode(self, mode: str) -> Dict[str, Any]:
+        mode = (mode or "").strip().lower()
+        if mode not in ("off", "auto", "on"):
+            return {"ok": False, "error": "usage: /sandbox off|auto|on"}
+        try:
+            from tera_pilot.utils import load_config, save_config
+            cfg = load_config() or {}
+            cfg["agent_os_sandbox"] = mode
+            save_config(cfg)
+            if self._agent is not None:
+                try:
+                    self._agent.tools.os_sandbox = mode
+                except Exception:
+                    pass
+            return {"ok": True, "mode": mode}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

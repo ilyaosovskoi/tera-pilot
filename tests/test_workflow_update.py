@@ -469,3 +469,195 @@ def test_share_signed_export(home, tmp_path):
             assert report.ok is True
     except ImportError:
         pass
+
+
+# ── v2.5.0 second wave ──────────────────────────────────────────────
+
+def test_tool_use_hooks_wired(engine):
+    from tera_pilot.hook_system import (
+        get_hook_manager, reset_hook_manager, HookResult, HookAction)
+    reset_hook_manager()
+    mgr = get_hook_manager()
+    seen = []
+    mgr.register("pre_tool_use",
+                 lambda ev: seen.append(ev.tool_name) or HookResult(action=HookAction.ALLOW),
+                 name="w-pre")
+    mgr.register("post_tool_use",
+                 lambda ev: seen.append("post:" + ev.tool_name) or HookResult(action=HookAction.ALLOW),
+                 name="w-post")
+    mgr.register("pre_tool_use",
+                 lambda ev: HookResult(action=HookAction.BLOCK, message="stop")
+                 if ev.tool_name == "delete_file"
+                 else HookResult(action=HookAction.ALLOW),
+                 name="w-block")
+    assert "empty" in call(engine, ToolName.TODO_LIST, {})
+    assert "HOOK BLOCK" in call(engine, ToolName.DELETE_FILE, {"path": "x"})
+    assert seen == ["todo_list", "post:todo_list", "delete_file"]
+    # MODIFY rewrites args in place.
+    reset_hook_manager()
+    get_hook_manager().register(
+        "pre_tool_use",
+        lambda ev: HookResult(action=HookAction.MODIFY,
+                              modified_args={"question": "rewritten?", "options": []}),
+        name="w-mod")
+    out = call(engine, ToolName.ASK_USER, {"question": "original?"})
+    assert "rewritten?" in out
+    reset_hook_manager()
+
+
+def test_add_dir_and_sandbox_bridge(home, tmp_path):
+    from tera_pilot_tui.bridge import TeraPilotBridge
+    bridge = TeraPilotBridge(workspace=str(tmp_path))
+    other = tmp_path / "other"
+    other.mkdir()
+    assert bridge.add_extra_dir(str(tmp_path / "nope"))["ok"] is False
+    res = bridge.add_extra_dir(str(other))
+    assert res["ok"] is True and res["dir"] in res["dirs"]
+    assert bridge.list_extra_dirs()["dirs"] == res["dirs"]
+    assert bridge.remove_extra_dir(str(other))["ok"] is True
+    assert bridge.get_sandbox_mode()["mode"] in ("off", "auto", "on")
+    assert bridge.set_sandbox_mode("bogus")["ok"] is False
+    assert bridge.set_sandbox_mode("on") == {"ok": True, "mode": "on"}
+    assert bridge.get_sandbox_mode()["mode"] == "on"
+    assert bridge.set_sandbox_mode("auto")["ok"] is True
+
+
+def test_output_styles(home, tmp_path):
+    from tera_pilot.output_styles import (
+        load_all_styles, get_style_suffix, set_active_style)
+    from tera_pilot.agent_runtime.prompts import PromptBuilder
+    assert get_style_suffix("normal") == ""
+    assert "terse" in get_style_suffix("brief").lower()
+    assert set_active_style("bogus")["ok"] is False
+    style_file = tmp_path / "report.md"
+    style_file.write_text("---\nname: report\ndescription: Status reports.\n---\n## Report\nBe structured.\n")
+    (tmp_path / "x").mkdir(exist_ok=True)
+    import os as _os
+    home_styles = Path(_os.path.expanduser("~/.tera_pilot")) / "styles"
+    home_styles.mkdir(parents=True, exist_ok=True)
+    (home_styles / "report.md").write_text(style_file.read_text())
+    ids = {s.id for s in load_all_styles()}
+    assert "report" in ids
+    assert "structured" in get_style_suffix("report").lower()
+    assert set_active_style("report")["ok"] is True
+    from tera_pilot.output_styles import get_style_suffix as _suffix
+    full = PromptBuilder.system(style_suffix=_suffix("report"))
+    assert "Be structured." in full
+    assert "Be structured." not in PromptBuilder.system()
+
+
+def test_suggest_follow_ups_and_tips(home):
+    from tera_pilot.suggest import follow_ups, rotating_tip, turn_footer
+    from tera_pilot.agent_runtime.types import ToolCall, ToolName, TaskResult
+
+    def _res(tools, ok=True):
+        return TaskResult(success=ok, output="done", error=None if ok else "boom",
+                          tool_calls=[ToolCall(name=t, args={}) for t in tools])
+
+    assert any("test" in f for f in follow_ups(_res([ToolName.WRITE_FILE])))
+    assert any("commit" in f for f in follow_ups(_res([ToolName.WRITE_FILE, ToolName.EXECUTE_COMMAND])))
+    assert any("error" in f for f in follow_ups(_res([ToolName.READ_FILE], ok=False)))
+    assert follow_ups(_res([])) == []
+    first = rotating_tip()
+    seen = {first}
+    for _ in range(11):
+        seen.add(rotating_tip())
+    assert len(seen) == 12  # full rotation, no repeats
+    assert turn_footer(_res([]), 1) == ""
+    assert "Tip" in turn_footer(_res([ToolName.WRITE_FILE]), 5) or "→" in turn_footer(_res([ToolName.WRITE_FILE]), 5)
+
+
+def test_resume_export_import(home, tmp_path):
+    import json as _json
+    from tera_pilot_tui.bridge import TeraPilotBridge
+    chats = Path(_os_home_chats())
+    chats.mkdir(parents=True, exist_ok=True)
+    doc = {"id": "abc123", "title": "Old chat",
+           "messages": [{"role": "user", "content": "hi"},
+                        {"role": "assistant", "content": "hello"}]}
+    (chats / "abc123.json").write_text(_json.dumps(doc))
+    bridge = TeraPilotBridge(workspace=str(tmp_path))
+    res = bridge.resume_chat("abc123")
+    assert res["ok"] is True and len(res["messages"]) == 2
+    assert bridge.resume_chat("missing")["ok"] is False
+    exp = bridge.export_chat_file("abc123", str(tmp_path / "out.json"))
+    assert exp["ok"] is True
+    (chats / "abc123.json").unlink()
+    imp = bridge.import_chat_file(str(tmp_path / "out.json"))
+    assert imp["ok"] is True and imp["messages"] == 2
+    assert bridge.import_chat_file(str(tmp_path / "out.json"))["ok"] is True  # id clash → new id
+    assert bridge.import_chat_file(str(tmp_path / "nope.json"))["ok"] is False
+
+
+def _os_home_chats():
+    import os as _os
+    return str(Path(_os.path.expanduser("~/.tera_pilot")) / "chats")
+
+
+def test_sdk_run_with_fake(monkeypatch, tmp_path):
+    import sys as _sys
+    _sys.path.insert(0, "tests")
+    from tera_pilot.sdk import TeraPilot, run as sdk_run
+    from tera_pilot.providers import get_registry
+    from tera_pilot.providers.base import ProviderConfig
+    from fake_provider import FakeProvider
+    reg = get_registry()
+    try:
+        reg.register(FakeProvider)
+    except Exception:
+        pass
+    (tmp_path / "a.txt").write_text("hello")
+    script = ["plan: read the file",
+              '{"tool": "read_file", "args": {"path": "a.txt"}}',
+              '{"final_answer": "file says hello"}']
+    fp = FakeProvider(ProviderConfig(provider_id="fake", model="fake-1"), script=list(script))
+    reg._instances["fake"] = fp
+    reg.set_active("fake")
+    with TeraPilot(workspace=str(tmp_path), registry=reg) as pilot:
+        result = pilot.run("read a.txt")
+    assert result.success is True
+    assert "hello" in result.output
+    assert any(c["tool"] == "read_file" for c in result.tool_calls)
+    fp2 = FakeProvider(ProviderConfig(provider_id="fake", model="fake-1"),
+                       script=["plan: say hi", '{"final_answer": "hi there"}'])
+    reg._instances["fake"] = fp2
+    one_shot = sdk_run("say hi", workspace=str(tmp_path), registry=reg)
+    assert one_shot.success is True and "hi there" in one_shot.output
+    with __import__("pytest").raises(ValueError):
+        TeraPilot(workspace=str(tmp_path), autonomy="sometimes")
+    with __import__("pytest").raises(ValueError):
+        TeraPilot(workspace=str(tmp_path), registry=reg).run("  ")
+
+
+def test_ide_bridge_protocol(home):
+    import threading
+    import time
+    from tera_pilot.ide_bridge import IDEBridgeServer, IDEBridgeClient
+    server = IDEBridgeServer()
+    info = server.start()
+    try:
+        client = IDEBridgeClient(port=info["port"], token=server.token)
+        assert client.call("ping")["server"] == "tera-pilot-ide-bridge"
+        try:
+            IDEBridgeClient(port=info["port"], token="wrong").call("ping")
+            raise SystemExit("auth should have failed")
+        except RuntimeError as exc:
+            assert "unauthorized" in str(exc)
+        client.call("provide_context", {"selection": {"path": "a.py", "text": "x"},
+                                        "open_files": ["a.py"]})
+        ctx = client.call("get_context")
+        assert ctx["selection"]["path"] == "a.py"
+        seen = {}
+        thread = threading.Thread(
+            target=lambda: seen.update(v=server.request_approval("rm", "x", timeout=10)))
+        thread.start()
+        time.sleep(0.3)
+        events = client.call("poll_events", {"timeout": 5})["events"]
+        assert events and events[0]["event"] == "request_approval"
+        approval_id = events[0]["payload"]["id"]
+        assert client.call("resolve_approval", {"id": approval_id, "decision": True}) == {"ok": True}
+        thread.join(timeout=10)
+        assert seen.get("v") is True
+        client.close()
+    finally:
+        server.stop()

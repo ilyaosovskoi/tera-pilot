@@ -373,13 +373,23 @@ class WorkflowCommandsMixin:
                      error=not res.get("ok"))
 
     def _exec_output_style(self, arg: str) -> None:
-        """/output-style [normal|brief|detailed|fast] — output verbosity."""
-        level = arg.strip().lower()
-        if not level:
-            self._wf_say(f"Output style: {self.bridge.get_verbosity()}  (normal/brief/detailed/fast)")
+        """/output-style [name] — list and switch file-based output styles."""
+        name = arg.strip().lower()
+        if not name:
+            res = self.bridge.list_output_styles()
+            if not res.get("ok"):
+                self._wf_say(f"Failed: {res.get('error')}", error=True)
+                return
+            lines = [f"Active style: {res['active']}"]
+            for s in res.get("styles", []):
+                mark = "→" if s["id"] == res["active"] else " "
+                desc = f" — {s['description'][:60]}" if s.get("description") else ""
+                lines.append(f"  {mark} {s['id']} ({s['source']}){desc}")
+            lines.append("Custom styles: ~/.tera_pilot/styles/<name>.md or <project>/.tera_pilot/styles/<name>.md")
+            self._wf_say("\n".join(lines))
             return
-        res = self.bridge.set_verbosity(level)
-        self._wf_say(f"Output style → {level}" if res.get("ok")
+        res = self.bridge.set_output_style(name)
+        self._wf_say(f"Output style → {name}" if res.get("ok")
                      else f"Failed: {res.get('error')}", error=not res.get("ok"))
 
     def _exec_permissions(self, arg: str) -> None:
@@ -595,3 +605,163 @@ class WorkflowCommandsMixin:
         self._wf_say("\n".join(
             f"  [{t['id']}] ({t['status']}) {t['label']}: {t['command']}" for t in tasks)
             + "\n/tasks <id> shows the output.")
+
+    def _exec_add_dir(self, arg: str) -> None:
+        """/add-dir <path> | list | rm <path> — extra context dirs outside the workspace."""
+        parts = arg.strip().split(None, 1)
+        sub = parts[0].lower() if parts else "list"
+        rest = parts[1] if len(parts) > 1 else ""
+        if sub == "list":
+            res = self.bridge.list_extra_dirs()
+            if not res.get("ok"):
+                self._wf_say(f"Failed: {res.get('error')}", error=True)
+                return
+            dirs = res.get("dirs", [])
+            lines = [f"Workspace: {res.get('workspace')}"]
+            lines += [f"  · {d}" for d in dirs] or ["  (no extra dirs)"]
+            lines.append("Usage: /add-dir <path> — reads outside the workspace stay sandboxed to this list.")
+            self._wf_say("\n".join(lines))
+        elif sub in ("rm", "remove"):
+            res = self.bridge.remove_extra_dir(rest)
+            self._wf_say("Removed." if res.get("ok") else f"Failed: {res.get('error')}",
+                         error=not res.get("ok"))
+        else:
+            res = self.bridge.add_extra_dir(arg.strip())
+            self._wf_say(f"Added context dir: {res['dir']}" if res.get("ok")
+                         else f"Failed: {res.get('error')}", error=not res.get("ok"))
+
+    def _exec_sandbox(self, arg: str) -> None:
+        """/sandbox [off|auto|on] — OS-level sandbox for commands and code."""
+        mode = arg.strip().lower()
+        if not mode:
+            res = self.bridge.get_sandbox_mode()
+            if not res.get("ok"):
+                self._wf_say(f"Failed: {res.get('error')}", error=True)
+                return
+            self._wf_say(f"Sandbox: {res['mode']}  (off = no OS sandbox, auto = when available, "
+                          "on = fail closed without a backend)")
+            return
+        res = self.bridge.set_sandbox_mode(mode)
+        self._wf_say(f"Sandbox → {mode}" if res.get("ok") else f"Failed: {res.get('error')}",
+                     error=not res.get("ok"))
+
+    def _exec_resume(self, arg: str) -> None:
+        """/resume [id] — restore a saved chat into this session."""
+        from .widgets.chat_log import ChatLog
+        chat_id = arg.strip()
+        if not chat_id:
+            try:
+                chats = self.bridge.list_chats() or []
+            except Exception:
+                chats = []
+            if not chats:
+                self._wf_say("No saved chats. (/chat-export saves this run for another machine.)")
+                return
+            lines = ["Recent chats — /resume <id>:"]
+            lines += [f"  {c['id']} — {c.get('title', '?')} ({c.get('message_count', '?')} msgs)"
+                      for c in chats[:8]]
+            self._wf_say("\n".join(lines))
+            return
+        if self._wf_busy():
+            return
+        res = self.bridge.resume_chat(chat_id)
+        if not res.get("ok"):
+            self._wf_say(f"Resume failed: {res.get('error')}", error=True)
+            return
+        chat = self.query_one(ChatLog)
+        chat.add_system(f"Resumed “{res.get('title', chat_id)}” ({len(res['messages'])} messages replayed).")
+        for m in res["messages"]:
+            try:
+                if m["role"] == "user":
+                    chat.add_user(m["content"][:2000])
+                else:
+                    chat.add_final(m["content"][:4000])
+            except Exception:
+                continue
+
+    def _exec_chat_export(self, arg: str) -> None:
+        """/chat-export [id] [path] — save a chat as a portable file."""
+        parts = arg.strip().split()
+        chats = []
+        try:
+            chats = self.bridge.list_chats() or []
+        except Exception:
+            pass
+        ids = {c["id"] for c in chats}
+        chat_id, dest = "", ""
+        if len(parts) >= 2 and parts[0] in ids:
+            chat_id, dest = parts[0], parts[1]
+        elif len(parts) == 1 and parts[0] in ids:
+            chat_id = parts[0]
+        elif len(parts) >= 1 and not chats:
+            dest = parts[-1]
+            chat_id = self._wf_recent_chat_id() or ""
+        else:
+            chat_id = self._wf_recent_chat_id() or ""
+            if len(parts) == 1:
+                dest = parts[0]
+        if not chat_id:
+            self._wf_say("No saved chats yet — nothing to export.", error=True)
+            return
+        res = self.bridge.export_chat_file(chat_id, dest)
+        self._wf_say(f"Exported chat {chat_id} → {res['path']}" if res.get("ok")
+                     else f"Failed: {res.get('error')}", error=not res.get("ok"))
+
+    def _exec_chat_import(self, arg: str) -> None:
+        """/chat-import <path> — import a portable chat file, then /resume <id>."""
+        if not arg.strip():
+            self._wf_say("Usage: /chat-import <path-to-chat.json>", error=True)
+            return
+        res = self.bridge.import_chat_file(arg.strip())
+        if res.get("ok"):
+            self._wf_say(f"Imported “{res['title']}” as {res['id']} ({res['messages']} msgs). "
+                         f"Restore it with /resume {res['id']}.")
+        else:
+            self._wf_say(f"Failed: {res.get('error')}", error=True)
+
+    def _exec_bridge(self, arg: str) -> None:
+        """/bridge [start [port]|stop|status|context] — IDE bridge server."""
+        parts = arg.strip().split()
+        sub = parts[0].lower() if parts else "status"
+        if sub == "start":
+            port = 0
+            if len(parts) > 1:
+                try:
+                    port = int(parts[1])
+                except ValueError:
+                    self._wf_say("Usage: /bridge start [port]", error=True)
+                    return
+            res = self.bridge.ide_bridge_start(port)
+            if res.get("ok"):
+                self._wf_say(f"IDE bridge on {res['host']}:{res['port']} "
+                             f"(token: config.json bridge_token). "
+                             f"See editors/vscode/README.md to connect.")
+            else:
+                self._wf_say(f"Failed: {res.get('error')}", error=True)
+        elif sub == "stop":
+            self.bridge.ide_bridge_stop()
+            self._wf_say("IDE bridge stopped.")
+        elif sub == "context":
+            res = self.bridge.ide_bridge_context()
+            if not res.get("ok"):
+                self._wf_say(f"Failed: {res.get('error')}", error=True)
+                return
+            ctx = res.get("context", {})
+            sel = ctx.get("selection") or {}
+            lines = ["IDE context:"]
+            if sel:
+                lines.append(f"  selection: {sel.get('path', '?')} "
+                             f"(lines {sel.get('start_line', '?')}-{sel.get('end_line', '?')})")
+                if sel.get("text"):
+                    lines.append("  ---")
+                    lines += [f"  {ln}" for ln in str(sel["text"]).splitlines()[:20]]
+                    lines.append("  ---")
+            for f in (ctx.get("open_files") or [])[:10]:
+                lines.append(f"  open: {f}")
+            self._wf_say("\n".join(lines) if len(lines) > 1 else "IDE context is empty.")
+        else:
+            res = self.bridge.ide_bridge_status()
+            if res.get("running"):
+                self._wf_say(f"IDE bridge running on {res['host']}:{res['port']}")
+            else:
+                self._wf_say("IDE bridge stopped. Start: /bridge start [port]")

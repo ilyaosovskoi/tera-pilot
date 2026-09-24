@@ -407,6 +407,16 @@ Also: project memory (`MEMORY.md`), plugin marketplace
 `DENY <N>`, timeout to deny), auto-checkpoint before risky operations,
 background startup prewarm, 7 new built-in skills, and 3 new eval tasks
 (`tool-repl-persist`, `tool-plan-gate`, `tool-worktree-isolate`).
+
+Second wave (same release): precise LSP navigation (`lsp_definition` /
+`lsp_references` / `lsp_symbols`), interactive `ask_user` dialog,
+live background tasks (`/tasks`), daemon schedule runner, plugin
+`pre/post_tool_use` hooks, file-based output styles (`/output-style`
++ `~/.tera_pilot/styles/`), turn follow-ups + rotating tips, full
+session resume (`/resume`, `/chat-export`, `/chat-import`), an
+embeddable Python SDK (`tera_pilot.sdk`), and an IDE bridge server
+(`tera-pilot-bridge`, `/bridge`, example VS Code extension in
+`editors/vscode/`) with token auth and approval proxy.
 Details per version: [CHANGELOG](CHANGELOG.md).
 
 ---

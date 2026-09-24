@@ -101,6 +101,7 @@ class AgentRuntime:
         compact_prompt: Optional[bool] = None,
         endurance: Optional[EnduranceLimits] = None,
         verbosity: str = "normal",
+        output_style: str = "normal",
     ):
         self._registry = registry
         self.memory = ContextMemory(persist_path=memory_persist_path)
@@ -183,6 +184,10 @@ class AgentRuntime:
         # /output-style) and passed in by the bridge.
         from .prompts import _VALID_VERBOSITIES
         self.verbosity = verbosity if verbosity in _VALID_VERBOSITIES else "normal"
+        # v2.5.0: file-based output style (tera_pilot.output_styles).
+        # A named suffix appended after the verbosity suffix; "normal"
+        # resolves to "" so default prompts are unchanged.
+        self.output_style = (output_style or "normal").strip().lower() or "normal"
         # Agent Profile (v2.4.0): optional system-prompt override (see
         # set_system_prompt_fragment). None = stock section prompt only.
         self._profile_prompt_fragment: Optional[str] = None
@@ -696,10 +701,17 @@ class AgentRuntime:
 
     def _system_prompt(self, section: str = "general") -> str:
         """System prompt for *section*, honoring compact mode + verbosity."""
+        try:
+            from tera_pilot.output_styles import get_style_suffix
+            style_suffix = get_style_suffix(
+                getattr(self, "output_style", "normal"), self.tools.workspace)
+        except Exception:
+            style_suffix = ""
         return PromptBuilder.system(
             section=section,
             compact=self._use_compact_prompt(),
             verbosity=getattr(self, "verbosity", "normal"),
+            style_suffix=style_suffix,
         )
 
     def _native_tools(self) -> Optional[List[dict]]:

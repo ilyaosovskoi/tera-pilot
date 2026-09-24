@@ -122,27 +122,17 @@ _PLAN_ISOLATION_TOOLS = frozenset({
 })
 
 #: v2.5.0: output verbosity suffixes (/effort, /fast, /brief,
-#: /output-style). Appended to the system prompt; "normal" adds
+#: /output-style). Bodies live in tera_pilot.output_styles.BUILTIN_STYLES
+#: (single source of truth, shared with file-based styles); "normal" adds
 #: nothing so default behaviour is byte-identical.
-_VERBOSITY_SUFFIXES = {
-    "brief": (
-        "\n\n## Output style: brief\n"
-        "Be terse. One-line status per action, no preamble, no summaries "
-        "longer than 3 lines. Still emit tool calls and final_answer normally."
-    ),
-    "detailed": (
-        "\n\n## Output style: detailed\n"
-        "Explain your reasoning briefly before each consequential tool call "
-        "(1-2 sentences), and close with a short summary of what changed "
-        "and what to verify next."
-    ),
-    "fast": (
-        "\n\n## Output style: fast\n"
-        "Minimize chatter and minimize tool calls: batch independent reads, "
-        "prefer grep/glob over opening files, skip re-verification reads "
-        "you already have in context."
-    ),
-}
+try:
+    from tera_pilot.output_styles import BUILTIN_STYLES as _BUILTIN_STYLE_SPECS
+    _VERBOSITY_SUFFIXES = {
+        name: spec["suffix"] for name, spec in _BUILTIN_STYLE_SPECS.items()
+        if spec.get("suffix")
+    }
+except Exception:
+    _VERBOSITY_SUFFIXES = {}
 _VALID_VERBOSITIES = frozenset({"normal", "brief", "detailed", "fast"})
 
 
@@ -949,7 +939,7 @@ Safety (enforced by the platform; follow it too):
 class PromptBuilder:
     @staticmethod
     def system(section: str = "general", compact: bool = False,
-               verbosity: str = "normal") -> str:
+               verbosity: str = "normal", style_suffix: str = "") -> str:
         """Build the system prompt for the given section.
 
         ``compact`` — v2.3.5-fix (small-model support): return the lean
@@ -986,6 +976,8 @@ class PromptBuilder:
             )
             if verbosity in _VERBOSITY_SUFFIXES:
                 prompt += _VERBOSITY_SUFFIXES[verbosity]
+            if style_suffix:
+                prompt += style_suffix if style_suffix.startswith("\n") else "\n\n" + style_suffix
             return prompt
         schema = TOOL_SCHEMA
         if section != "heavy_code":
@@ -1036,6 +1028,9 @@ class PromptBuilder:
             prompt = prompt + "\n\n" + _load_office_system_suffix()
         if verbosity in _VERBOSITY_SUFFIXES:
             prompt = prompt + _VERBOSITY_SUFFIXES[verbosity]
+        if style_suffix:
+            prompt = prompt + (style_suffix if style_suffix.startswith("\n")
+                               else "\n\n" + style_suffix)
         return prompt
 
     @staticmethod

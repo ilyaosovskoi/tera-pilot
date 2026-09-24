@@ -534,6 +534,18 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
             self._exec_schedule(arg)
         elif cmd == "/tasks":
             self._exec_tasks(arg)
+        elif cmd == "/add-dir":
+            self._exec_add_dir(arg)
+        elif cmd == "/sandbox":
+            self._exec_sandbox(arg)
+        elif cmd == "/resume":
+            self._exec_resume(arg)
+        elif cmd == "/chat-export":
+            self._exec_chat_export(arg)
+        elif cmd == "/chat-import":
+            self._exec_chat_import(arg)
+        elif cmd == "/bridge":
+            self._exec_bridge(arg)
         else:
             self.query_one(ChatLog).add_system(
                 f"Unknown command: {cmd}. Type /help for available commands."
@@ -2985,6 +2997,15 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
         self._last_event_error = None
         self._turn_running = False
         self._refresh_status("idle")
+        # v2.5.0: heuristic follow-ups + rotating tip after each turn.
+        try:
+            self._turn_count = int(getattr(self, "_turn_count", 0)) + 1
+            from tera_pilot.suggest import turn_footer
+            footer = turn_footer(result, self._turn_count)
+            if footer:
+                chat.add_system(f"[dim]{footer}[/dim]")
+        except Exception:
+            pass
 
     def _show_plan_approval(self, plan_text: str) -> None:
         info = {

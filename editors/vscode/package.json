@@ -1,0 +1,25 @@
+{
+  "name": "tera-pilot-bridge",
+  "displayName": "Tera Pilot Bridge",
+  "description": "Example VS Code client for the Tera Pilot IDE bridge (localhost TCP + token).",
+  "version": "0.1.0",
+  "publisher": "tera-pilot",
+  "license": "MIT",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "teraPilot.sendSelection", "title": "Tera Pilot: Send selection as context" },
+      { "command": "teraPilot.connect", "title": "Tera Pilot: Connect to bridge" }
+    ],
+    "configuration": {
+      "title": "Tera Pilot Bridge",
+      "properties": {
+        "teraPilot.host": { "type": "string", "default": "127.0.0.1" },
+        "teraPilot.port": { "type": "number", "default": 0 },
+        "teraPilot.token": { "type": "string", "default": "" }
+      }
+    }
+  }
+}
