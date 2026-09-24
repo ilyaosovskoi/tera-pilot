@@ -33,6 +33,19 @@ _SPINNER_FRAMES = [
     "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
 ]
 
+#: Model names longer than this are shortened (provider/model ids like
+#: nvidia/nemotron-3-super-120b-a12b:free would otherwise push the hints
+#: row off-screen on narrow terminals).
+_MAX_MODEL_CHARS = 28
+
+
+def shorten_model(name: str, limit: int = _MAX_MODEL_CHARS) -> str:
+    """Shorten a model id for the statusline (pure helper, unit-tested)."""
+    name = name or "?"
+    if len(name) <= limit:
+        return name
+    return name[: max(0, limit - 1)].rstrip("/") + "…"
+
 # v2.1.0 (Loop 3): Terracotta accent color
 _TERRACOTTA = "#d77757"
 _SHIMMER = "#eb9f7f"
@@ -166,7 +179,7 @@ class StatusBar(Static):
         guardian_markup = f"[{g_color}]guardian:{g_label}[/{g_color}]"
 
         left = f" [{section_style}]{section_label}[/{section_style}]  {guardian_markup} "
-        center = f" {state_markup}  |  [b]{self._provider}[/b]/[dim]{self._model}[/dim] "
+        center = f" {state_markup}  |  [b]{self._provider}[/b]/[dim]{shorten_model(self._model)}[/dim] "
         right = f" [{muted}]{self._tokens:,} tok | ${self._cost:.4f}[/{muted}] "
 
         hints = f"[{muted}]Enter=send | /=cmds | Ctrl+C=stop | Ctrl+D=quit[/{muted}]"

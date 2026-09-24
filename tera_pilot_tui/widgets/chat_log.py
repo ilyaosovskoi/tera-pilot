@@ -67,6 +67,11 @@ _PALETTES = {
         "result": "#aaaaaa",
         "label": "#888888",
         "separator": "#505050",
+        "accent": "#d77757",
+        "exec": "#fd5db1",
+        "read": "#b1b9f9",
+        "edit": "#e8b34b",
+        "verify": "#4eba65",
         "error": "bold #ff6b6b",
         "warning": "#ffaa88",
         "warning_bold": "bold #ffaa88",
@@ -82,6 +87,11 @@ _PALETTES = {
         "result": "#55555e",
         "label": "#6e6e78",
         "separator": "#c9c9d2",
+        "accent": "#b34d2e",
+        "exec": "#a4138c",
+        "read": "#4a54c4",
+        "edit": "#9a6700",
+        "verify": "#1a7f37",
         "error": "bold #d1242f",
         "warning": "#9a6700",
         "warning_bold": "bold #9a6700",
@@ -92,6 +102,39 @@ _PALETTES = {
         "code_theme": "ansi_light",
     },
 }
+
+#: Tool families → header accent (mirrors ToolBlock border hues so the
+#: chat rows and any future ToolBlock render agree).
+_TOOL_FAMILY = (
+    (frozenset({"execute_command", "run_code", "task_spawn", "task_stop",
+                "repl_run", "worktree_add", "worktree_remove"}), "exec"),
+    (frozenset({"read_file", "read_binary_file", "list_files", "search_project",
+                "grep", "glob", "get_project_structure", "file_info",
+                "git_status", "git_diff", "code_symbols", "lsp_definition",
+                "lsp_references", "lsp_symbols", "web_fetch", "web_search"}), "read"),
+    (frozenset({"write_file", "str_replace", "apply_diff", "delete_file",
+                "rename_file", "mkdir", "git_stage", "git_commit"}), "edit"),
+    (frozenset({"self_verify", "watchdog_check", "todo_write"}), "verify"),
+)
+
+#: Tool results longer than this are truncated in the chat (the full
+#: text stays in the Activity log) so one pytest dump can't bury the
+#: conversation.
+_RESULT_PREVIEW_LIMIT = 3000
+
+
+def _tool_family(tool: str) -> str:
+    for family, key in _TOOL_FAMILY:
+        if tool in family:
+            return key
+    return "label"
+
+
+def truncate_result_preview(text: str, limit: int = _RESULT_PREVIEW_LIMIT) -> str:
+    """Cap a tool result for chat display (pure helper, unit-tested)."""
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + f"\n… [{len(text) - limit:,} more chars — full output in Activity]"
 
 
 class ChatLog(RichLog):
@@ -140,11 +183,16 @@ class ChatLog(RichLog):
     # ---- user / system ------------------------------------------------------
 
     def add_user(self, text: str) -> None:
-        """Display a user message (no box, plain text)."""
-        # Use Text to avoid markup injection from user content
-        # v2.3.1: animate=True gives new messages a smooth scroll glide
+        """Display a user message: accent marker + plain body text."""
+        # Use Text to avoid markup injection from user content.
+        # v2.4.3: animate=True gives new messages a smooth scroll glide
         # instead of an instant jump (minimal motion language).
-        self.write(Text(f"> {text}", style=self._pal["body"]), animate=True)
+        # v2.5.0: the marker carries the theme accent so user turns are
+        # scannable at a glance in a long log.
+        self.write(Text.assemble(
+            ("❯ ", f"bold {self._pal['accent']}"),
+            (text, self._pal["body"]),
+        ), animate=True)
         self.write(Text(""))
 
     def add_system(self, text: str) -> None:
@@ -170,10 +218,11 @@ class ChatLog(RichLog):
     # ---- model --------------------------------------------------------------
 
     def add_thought(self, text: str) -> None:
-        """Display agent thinking (greyed out)."""
+        """Display agent thinking (greyed out, italic)."""
         if not text:
             return
-        self.write(Text(clean_display_text(text).rstrip(), style=self._pal["thought"]))
+        self.write(Text(clean_display_text(text).rstrip(),
+                        style=f"italic {self._pal['thought']}"))
 
     def append_token_delta(self, chunk: str) -> None:
         """Append a streaming token chunk to the live assistant response.
@@ -299,17 +348,19 @@ class ChatLog(RichLog):
     # ---- tools ───────────────────────────────────────────────────────────
 
     def add_tool_call(self, tool: str, args: Dict[str, Any],
-                      sub_label: Optional[str] = None) -> None:
-        """Display a tool invocation (no panel)."""
+                       sub_label: Optional[str] = None) -> None:
+        """Display a tool invocation: family-colored header + args."""
         body = self._render_tool_args(tool, args)
         label = f"[{sub_label}] {tool}" if sub_label else tool
-        self.write(Text(f"→ {label}", style=f"bold {self._pal['label']}"))
+        color = self._pal[_tool_family(tool)]
+        self.write(Text(f"→ {label}", style=f"bold {color}"))
         self.write(body)
         self.write(Text(""))
 
     def add_tool_result(self, tool: str, result: str) -> None:
-        """Display a tool result (no panel)."""
-        preview = clean_display_text(result or "").rstrip()
+        """Display a tool result (truncated past the preview limit)."""
+        preview = truncate_result_preview(
+            clean_display_text(result or "").rstrip())
         self.write(Text(f"← {tool}", style=f"dim {self._pal['label']}"))
         self.write(Text(preview or "(no output)", style=self._pal["result"]))
         self.write(Text(""))

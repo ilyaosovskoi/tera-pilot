@@ -101,6 +101,22 @@ Second wave (same release):
     workspace (persisted, applied to every agent) and the OS-sandbox
     mode switch (off/auto/on).
 
+UI polish (same release):
+29. **Design tokens** — both TUI themes define the same `$variables`
+    (`$accent`, `$surface`, `$text`, …), so every modal, palette and
+    suggestion popup speaks the terracotta language in dark and light.
+30. **All modals styled** — ask-user, model picker/selector and quick
+    settings now have app-level selectors in both themes (accent
+    borders, focus states); the ask dialog was previously unstyled.
+31. **Chat readability** — accent `❯` user marker, per-family tool
+    header colors (exec/read/edit/verify), italic thoughts, and tool
+    results truncated past 3000 chars (full text stays in Activity).
+32. **Compact chrome** — single-row header (brand · model · provider ·
+    dir) and shortened long model ids on the statusline.
+33. **Web UI polish** — `:focus-visible` rings, brand selection color,
+    themed scrollbars, muted placeholders, disabled states, and a
+    `prefers-reduced-motion` guard (CSS-only, in `design-polish.css`).
+
 ## [Unreleased]
 
 1. **Closing-message parser gaps fixed** — models that finish with a

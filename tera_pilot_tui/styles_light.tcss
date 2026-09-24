@@ -3,6 +3,24 @@
    borders, one warm accent (#d77757) used sparingly, smooth CSS
    transitions and entrance animations. */
 
+/* ── Design tokens ──────────────────────────────────────────────── */
+/* v2.5.0: same token names as the dark theme, light values. */
+$border: #d4d4d8;
+$border-strong: #a1a1aa;
+$surface: #ffffff;
+$surface-deep: #f4f4f5;
+$surface-raised: #fafafa;
+$text: #1a1a1e;
+$text-muted: #6b6b76;
+$accent: #b34d2e;
+$accent-bright: #e2794d;
+$success: #1a7f37;
+$success-dim: #e9f7ee;
+$warning: #9a6700;
+$error: #d1242f;
+$error-dim: #fdeeee;
+$primary: #b34d2e;
+
 /* ── Global ─────────────────────────────────────────────────────── */
 Screen {
     background: #fafafa;
@@ -533,4 +551,93 @@ StatusBar {
 
 #canvas.visible {
     display: block;
+}
+
+/* ── Modal accent pass (v2.5.0) ─────────────────────────────────── */
+/* Widget-level CSS uses default-theme $vars; these app-level rules
+   repaint every modal box + title in the terracotta language. */
+#picker-box, #selector-box, #qs-container {
+    border: round $accent;
+    background: $surface;
+}
+
+#picker-title, #selector-title, #qs-title {
+    color: $accent;
+}
+
+#palette-filter:focus, #selector-filter:focus, #ask-input:focus {
+    border: solid $accent;
+}
+
+/* ── Ask-user modal (v2.5.0) ────────────────────────────────────── */
+AskUserModal {
+    align: center middle;
+}
+
+#ask-box {
+    width: 70%;
+    max-width: 96;
+    height: auto;
+    max-height: 30;
+    padding: 1 2;
+    border: round $accent;
+    background: $surface;
+}
+
+#ask-title {
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+#ask-question {
+    color: $text;
+    margin-bottom: 1;
+}
+
+#ask-box .ask-option {
+    width: 100%;
+    height: auto;
+    min-height: 3;
+    margin: 0 0 1 0;
+    padding: 0 2;
+    border: round $border-strong;
+    background: $surface;
+    color: $text;
+}
+
+#ask-box .ask-option:hover {
+    border: round $accent;
+}
+
+#ask-box .ask-option:focus {
+    border: round $accent-bright;
+    background: $surface-raised;
+}
+
+#ask-input {
+    border: solid $border;
+    margin-bottom: 1;
+    height: 3;
+}
+
+#ask-buttons {
+    height: auto;
+    layout: horizontal;
+    align: center middle;
+    margin-top: 1;
+}
+
+#ask-buttons Button {
+    width: auto;
+    min-width: 20;
+    margin: 0 1;
+}
+
+#ask-send {
+    border: round $success;
+}
+
+#ask-skip {
+    color: $text-muted;
 }

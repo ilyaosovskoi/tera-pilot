@@ -37,7 +37,8 @@ class AskUserModal(ModalScreen[Optional[str]]):
             yield Label("❓ Agent question", id="ask-title")
             yield Static(self._question, id="ask-question")
             for i, opt in enumerate(self._options, start=1):
-                yield Button(f"{i}. {opt}", id=f"ask-opt-{i}", variant="primary")
+                yield Button(f"{i}. {opt}", id=f"ask-opt-{i}",
+                             classes="ask-option", variant="default")
             yield Input(placeholder="Or type your own answer, Enter to send…",
                         id="ask-input")
             with Vertical(id="ask-buttons"):

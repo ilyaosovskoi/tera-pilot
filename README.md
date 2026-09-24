@@ -417,6 +417,9 @@ session resume (`/resume`, `/chat-export`, `/chat-import`), an
 embeddable Python SDK (`tera_pilot.sdk`), and an IDE bridge server
 (`tera-pilot-bridge`, `/bridge`, example VS Code extension in
 `editors/vscode/`) with token auth and approval proxy.
+TUI/GUI polish: theme design tokens, styled modals, scannable chat
+(family-colored tools, truncated results), one-row header, plus web
+focus rings, themed scrollbars and reduced-motion support.
 Details per version: [CHANGELOG](CHANGELOG.md).
 
 ---

@@ -495,3 +495,77 @@ pre{
   color:var(--text-muted);
   text-align:center;
 }
+
+/* ────────────────────────────────────────────────────────────────────
+   v2.5.0 — global polish pass (theme-agnostic, additive)
+   ──────────────────────────────────────────────────────────────────── */
+
+/* Visible keyboard focus everywhere (a11y + orientation). */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible,
+.nav-item:focus-visible,
+.chat-item:focus-visible,
+.msg-action-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* Brand-tinted text selection. */
+::selection {
+  background: var(--accent-dim);
+  color: var(--text-primary);
+}
+
+/* Thin themed scrollbars for overlay/panel scroll regions. */
+.modal::-webkit-scrollbar,
+.cmd-palette::-webkit-scrollbar,
+.chat-view::-webkit-scrollbar,
+.tools-panel::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.modal::-webkit-scrollbar-thumb,
+.cmd-palette::-webkit-scrollbar-thumb,
+.chat-view::-webkit-scrollbar-thumb,
+.tools-panel::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+.modal::-webkit-scrollbar-track,
+.cmd-palette::-webkit-scrollbar-track,
+.chat-view::-webkit-scrollbar-track,
+.tools-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+.modal, .cmd-palette, .chat-view, .tools-panel {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+/* Muted, consistent input placeholders. */
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+/* Disabled controls read as disabled, not broken. */
+button:disabled,
+input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Respect users who ask for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

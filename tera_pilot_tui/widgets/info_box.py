@@ -109,24 +109,23 @@ class InfoBox(Static):
     def _render_text(self) -> Text:
         pal = _PALETTES[bool(self._dark)]
 
-        brand = Text.assemble(
+        # v2.5.0: one header row — brand + meta on a single line so the
+        # conversation gains a row. Words model/provider/dir stay plain
+        # (tests + scanning depend on them).
+        single = Text.assemble(
             (f"{_BRAND} ", f"bold {pal['accent']}"),
             (f"v{self._version}", pal["muted"]),
-        )
-
-        # Meta chips: model / provider / directory, muted labels + values.
-        meta = Text.assemble(
-            ("model  ", pal["muted"]),
+            ("  ·  ", pal["muted"]),
+            ("model ", pal["muted"]),
             (self._model, f"bold {pal['value']}"),
-            ("   ", pal["muted"]),
-            ("provider  ", pal["muted"]),
+            ("  ·  ", pal["muted"]),
+            ("provider ", pal["muted"]),
             (self._provider, f"bold {pal['value']}"),
-            ("   ", pal["muted"]),
-            ("dir  ", pal["muted"]),
+            ("  ·  ", pal["muted"]),
+            ("dir ", pal["muted"]),
             (self._directory, pal["value"]),
         )
-
-        lines: list[Text] = [brand, meta]
+        lines: list[Text] = [single]
         if self._status:
             lines.append(
                 Text.assemble(("  ", pal["muted"]), (self._status, f"bold {pal['accent']}"))

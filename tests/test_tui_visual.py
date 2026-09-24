@@ -155,8 +155,12 @@ def _css_selectors(path: str):
 
     Only the SELECTOR side of each rule counts (text before the first
     "{"), so hex color tokens like #f5f5f7 are never mistaken for ids.
+    v2.5.0: also strip CSS comments and top-level $variable definitions
+    (the design-token blocks hold per-theme hex values — not selectors).
     """
     src = open(path, encoding="utf-8").read()
+    src = re.sub(r"/\*.*?\*/", "", src, flags=re.DOTALL)
+    src = re.sub(r"(?m)^\s*\$[a-zA-Z][a-zA-Z0-9_-]*\s*:.*$", "", src)
     selector_side = "".join(part.split("{", 1)[0] for part in src.split("}"))
     ids = set(re.findall(r"#([a-zA-Z][a-zA-Z0-9_-]*)", selector_side))
     classes = set(re.findall(r"\.([a-zA-Z][a-zA-Z0-9_-]*)", selector_side))
