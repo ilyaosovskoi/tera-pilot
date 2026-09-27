@@ -82,6 +82,15 @@ AI coding agents can already edit repos, run commands and finish multi-step task
 | 🖥️ **Runs anywhere** | terminal TUI, browser, REST/SSE daemon, ACP server, CI job |
 | ✅ **Verifiable** | every change tested, audited, and exportable as signed evidence |
 
+### 🧭 Start here — pick your track (30 seconds)
+
+| You are… | Your first step |
+|---|---|
+| 💻 Solo dev in the terminal | [Quick Start](#-quick-start--pick-your-path) — install, open the TUI, first task in ~5 min |
+| 👥 Team lead / DevOps | [Interfaces](#interfaces) — daemon + GitHub Action with evidence reports; start with read-only review mode |
+| 🧩 Platform engineer | [MCP and ACP](#mcp-acp) — embed the runtime via API/MCP/ACP, ship audit to your log systems |
+| 🏛️ Guarding regulated code | [Security](#-security-posture--verification) — sandbox, approvals, signed audit, published threat model |
+
 <details>
 <summary><b>🤖 Pilot's tip: how to read this README in 3 depths (click)</b></summary>
 
@@ -206,6 +215,10 @@ says (see [Security](#-security-posture--verification)).
 ---
 
 ## 🚀 Quick Start — pick your path
+
+**First time here?** Do Path A below, then run `tera-pilot doctor`, then ask
+the agent a read-only question (e.g. *"explain what this repo does"*).
+Five minutes, nothing can break.
 
 <details open>
 <summary><b>✅ Path A — one-command install (npm), recommended</b></summary>
@@ -649,6 +662,7 @@ runner and review all generated changes before merging.
 
 </details>
 
+<a id="mcp-acp"></a>
 <details>
 <summary><b>🔌 MCP and ACP</b></summary>
 
@@ -829,7 +843,8 @@ starts saving you model spend or catching bugs before review:
 **Early access is open now:** keys are issued manually during the rollout.
 [Open an issue](../../issues) with the title `Pro early access` and tell us
 which plan you want — you'll get payment details (crypto/USDT/TON, no bank
-needed) and your key within a day.
+needed) and your key within a day. Need an invoice, SSO, or a support
+contract? Say so in the same issue — team terms are manual during the rollout.
 
 ---
 
