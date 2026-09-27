@@ -63,3 +63,6 @@ eval/REPORT_*.md
 # Outreach tooling and prospect base (may contain personal contacts) —
 # machine-local by design, never committed.
 outreach/
+
+# Synthetic market research (local working material + generated artifacts).
+research/

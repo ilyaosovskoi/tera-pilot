@@ -19,6 +19,11 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static, Input
 
+try:
+    from textual.widgets import Option as _Option
+except ImportError:  # older textual layouts
+    from textual.widgets._option_list import Option as _Option
+
 from .motion import entrance
 
 
@@ -82,7 +87,7 @@ BUILTIN_COMMANDS: List[CommandEntry] = [
     CommandEntry("commit-push-pr", "/commit-push-pr", "Commit, push and open a PR", "flow", False),
     CommandEntry("pr-comments", "/pr-comments", "Fetch and address PR review comments", "flow", False),
     # ── Provider & Model ──────────────────────────────────────────
-    CommandEntry("model", "/model", "Switch provider / set model (e.g. /model ox-alpha)", "provider", True),
+    CommandEntry("model", "/model", "Switch provider / set model (e.g. /model vscodeapi)", "provider", True),
     CommandEntry("provider", "/provider", "Switch provider (alias of /model)", "provider", True),
     CommandEntry("settings", "/settings", "Quick settings (provider, model, API key)", "provider", False),
     CommandEntry("key", "/key", "Save an API key for a provider", "provider", False),
@@ -98,6 +103,7 @@ BUILTIN_COMMANDS: List[CommandEntry] = [
     CommandEntry("verify", "/verify", "Cross-model verification of the last response", "provider", False),
     CommandEntry("websearch", "/websearch", "Web search backend status", "provider", False),
     CommandEntry("router-mode", "/router-mode", "AutoRouter mode (single / decompose)", "provider", False),
+    CommandEntry("route", "/route", "Smart routing/failover status (local prototype)", "provider", False),
     CommandEntry("consensus", "/consensus", "Run a prompt on 2–3 providers in parallel", "provider", False),
     CommandEntry("mcp-server", "/mcp-server", "Manage MCP server connections", "provider", False),
     # ── Session & Workspace ───────────────────────────────────────
@@ -145,6 +151,7 @@ BUILTIN_COMMANDS: List[CommandEntry] = [
     CommandEntry("theme", "/theme", "Switch theme (dark / light)", "actions", False),
     CommandEntry("plugin", "/plugin", "Install / remove / enable plugins", "actions", False),
     CommandEntry("mascot", "/mascot", "The 8-bit pilot, with a one-liner", "actions", False),
+    CommandEntry("copy", "/copy", "Copy the last AI answer to the clipboard (Ctrl+O)", "actions", False),
     CommandEntry("help", "/help", "Show available slash commands", "actions", False),
 ]
 
@@ -179,7 +186,10 @@ class CommandPalette(ModalScreen):
         background: $surface;
         border: solid $border;
         padding: 0;
-        margin-bottom: 4;
+        /* v2.5.0: no bottom margin — the #palette-spacer reserves the
+           composer space instead (inline margins are ignored on modal
+           children in Textual 8.x). */
+        margin-bottom: 0;
     }
 
     
@@ -215,6 +225,11 @@ class CommandPalette(ModalScreen):
         padding: 0 1;
         text-style: italic;
     }
+
+    #palette-spacer {
+        height: 0;
+        width: 1;
+    }
     """
 
     def __init__(
@@ -223,12 +238,18 @@ class CommandPalette(ModalScreen):
         sub_options: Optional[List[Dict[str, Any]]] = None,
         sub_prompt: Optional[str] = None,
         on_select: Optional[Callable[[str, bool], None]] = None,
+        above_y: Optional[int] = None,
     ) -> None:
         super().__init__()
         self._custom_commands = custom_commands or []
         self._sub_options = sub_options
         self._sub_prompt = sub_prompt
         self._on_select = on_select
+        # v2.5.0: terminal row the palette's bottom edge must not cross
+        # (the composer's top) — the app passes the input's y so the
+        # menu docks directly above the input instead of floating over
+        # the chat AND the typed line.
+        self._above_y = above_y
         self._all_commands: List[CommandEntry] = []
         self._filtered_commands: List[CommandEntry] = []
         # Parallel list mapping OptionList index -> command id (for sub-options)
@@ -250,20 +271,128 @@ class CommandPalette(ModalScreen):
                 "Up/Down navigate, Enter select, Esc close",
                 id="palette-footer"
             )
+        # Bottom spacer — sized in on_mount to the composer+statusline
+        # height so the menu docks directly above the input.
+        yield Static("", id="palette-spacer")
 
     def on_mount(self) -> None:
         try:
             self._populate_list()
+            self._anchor_above_composer()
             # v2.3.1: entrance animation — fade + slight rise.
             entrance(self.query_one("#palette-container"))
             self.query_one("#palette-filter", Input).focus()
         except Exception:
             self.dismiss(result=None)
 
-    def _populate_list(self) -> None:
-        list_widget = self.query_one("#palette-list", OptionList)
+    def _anchor_above_composer(self) -> None:
+        """Reserve the composer+statusline space below the palette.
+
+        v2.5.0: the menu used to float center-bottom over the chat AND
+        the typed line. The app passes the input's y via ``above_y``;
+        a bottom spacer takes exactly that many rows so the menu reads
+        as an extension of the input. NOTE: implemented with a spacer
+        widget (dynamic ``height``), NOT margins — Textual 8.2.8
+        ignores inline margin changes on modal children (verified
+        empirically), while inline height is honored. Falls back to
+        flush-bottom when the geometry is unknown.
+        """
+        if self._above_y is None:
+            return
+        try:
+            gap = max(0, self.size.height - int(self._above_y))
+            self.query_one("#palette-spacer", Static).styles.height = gap
+        except Exception:
+            pass
+
+    def _set_header(self, shown: int, total: int) -> None:
+        try:
+            header = self.query_one("#palette-header", Static)
+            if shown == total:
+                header.update(self._sub_prompt or "Slash Commands")
+            else:
+                header.update(f"{self._sub_prompt or 'Slash Commands'} — {shown}/{total}")
+        except Exception:
+            pass
+
+    def _set_footer(self, shown: int) -> None:
+        try:
+            footer = self.query_one("#palette-footer", Static)
+            footer.update(f"↑↓ navigate · Enter select · Esc close · {shown} matches")
+        except Exception:
+            pass
+
+    def _render_rows(self, list_widget: OptionList, query: str,
+                     entries: List[Any], total: int) -> None:
+        """Render grouped rows with fuzzy match highlighting.
+
+        LOCAL-PROTOTYPE: matched label characters render bold; headers
+        show per-group counts; headers map to "" in _option_ids (kept
+        in lock-step so clicks/Enter resolve correctly).
+        """
+        from rich.text import Text
+        from tera_pilot_tui.fuzzy import highlight_text, subsequence_positions
         list_widget.clear_options()
         self._option_ids = []
+        groups: Dict[str, List[Any]] = {}
+
+        def _cat(entry: Any) -> str:
+            if isinstance(entry, dict):
+                return str(entry.get("category", "custom") or "custom")
+            return str(getattr(entry, "category", "custom") or "custom")
+
+        def _entry_id(entry: Any) -> str:
+            if isinstance(entry, dict):
+                return str(entry.get("id", entry.get("label", "")))
+            return str(getattr(entry, "id", ""))
+
+        def _label(entry: Any) -> str:
+            if isinstance(entry, dict):
+                return str(entry.get("label", ""))
+            return str(getattr(entry, "label", ""))
+
+        def _desc(entry: Any) -> str:
+            if isinstance(entry, dict):
+                return str(entry.get("desc", entry.get("description", "")))
+            return str(getattr(entry, "description", ""))
+
+        for entry in entries:
+            groups.setdefault(_cat(entry), []).append(entry)
+        first_real_index = 0
+        for cat, cmds in groups.items():
+            label = COMMAND_GROUP_LABELS.get(cat, cat.title())
+            self._option_ids.append("")
+            # v2.5.0: headers are DISABLED options — Textual grays them,
+            # skips them in keyboard nav and never fires selection for
+            # them, so a group title can never look (or act) clickable.
+            # The "" _option_ids entry + guards stay as a second layer.
+            try:
+                list_widget.add_option(_Option(f"── {label} ({len(cmds)}) ──",
+                                              disabled=True))
+            except Exception:
+                list_widget.add_option(f"── {label} ({len(cmds)}) ──")
+            for cmd in cmds:
+                if first_real_index == 0:
+                    first_real_index = list_widget.option_count
+                self._option_ids.append(_entry_id(cmd))
+                text_label = _label(cmd)
+                positions = (subsequence_positions(query, text_label) or []
+                             if query else [])
+                highlighted = highlight_text(text_label, positions)
+                row = highlighted if isinstance(highlighted, Text) else Text(text_label)
+                desc = _desc(cmd)
+                if len(desc) > 60:
+                    desc = desc[:60] + "…"
+                row.append(f"  ·  {desc}", style="dim")
+                list_widget.add_option(row)
+        if first_real_index < list_widget.option_count:
+            list_widget.highlighted = first_real_index
+        shown = list_widget.option_count - len(groups) if groups else 0
+        self._set_header(shown, total)
+        self._set_footer(shown)
+
+    def _populate_list(self) -> None:
+        list_widget = self.query_one("#palette-list", OptionList)
 
         if self._sub_options:
             for opt in self._sub_options:
@@ -274,31 +403,14 @@ class CommandPalette(ModalScreen):
                 list_widget.add_option(f"{label}  -  {desc}")
             if list_widget.option_count > 0:
                 list_widget.highlighted = 0
+            self._set_header(list_widget.option_count, len(self._sub_options))
+            self._set_footer(list_widget.option_count)
             return
 
         self._all_commands = list(BUILTIN_COMMANDS) + list(self._custom_commands)
         self._filtered_commands = list(self._all_commands)
-
-        categories: Dict[str, List[CommandEntry]] = {}
-        for cmd in self._filtered_commands:
-            cat = cmd.category
-            if cat not in categories:
-                categories[cat] = []
-            categories[cat].append(cmd)
-
-        first_real_index = 0
-        for cat, cmds in categories.items():
-            label = COMMAND_GROUP_LABELS.get(cat, cat.title())
-            self._option_ids.append("")  # category header - no id
-            list_widget.add_option(f"-- {label} ({len(cmds)}) --")
-            for cmd in cmds:
-                if first_real_index == 0:
-                    first_real_index = list_widget.option_count
-                self._option_ids.append(cmd.id)
-                list_widget.add_option(f"{cmd.label}  -  {cmd.description}")
-
-        if first_real_index < list_widget.option_count:
-            list_widget.highlighted = first_real_index
+        self._render_rows(list_widget, "", self._filtered_commands,
+                          len(self._all_commands))
 
     def on_input_changed(self, event: Input.Changed) -> None:
         try:
@@ -310,57 +422,44 @@ class CommandPalette(ModalScreen):
         query = event.value.lower().strip()
 
         if self._sub_options:
+            from tera_pilot_tui.fuzzy import match_commands
+            from rich.text import Text
+            from tera_pilot_tui.fuzzy import highlight_text, subsequence_positions
             list_widget = self.query_one("#palette-list", OptionList)
             list_widget.clear_options()
             self._option_ids = []
-            for opt in self._sub_options:
-                label = opt.get("label", "").lower()
-                desc = opt.get("desc", "").lower()
-                id_val = opt.get("id", "").lower()
-                if not query or query in label or query in desc or query in id_val:
-                    opt_id = opt.get("id", opt.get("label", ""))
-                    self._option_ids.append(opt_id)
-                    list_widget.add_option(
-                        f"{opt.get('label', '')}  -  {opt.get('desc', '')}"
-                    )
+            matched = match_commands(query, self._sub_options)
+            for opt, _score, _pos in matched:
+                opt_id = opt.get("id", opt.get("label", ""))
+                self._option_ids.append(opt_id)
+                label = str(opt.get("label", ""))
+                positions = (subsequence_positions(query, label) or []
+                             if query else [])
+                highlighted = highlight_text(label, positions)
+                row = highlighted if isinstance(highlighted, Text) else Text(label)
+                desc = str(opt.get("desc", ""))
+                if desc:
+                    row.append(f"  ·  {desc[:60]}", style="dim")
+                list_widget.add_option(row)
             if list_widget.option_count > 0:
                 list_widget.highlighted = 0
+            self._set_header(list_widget.option_count, len(self._sub_options))
+            self._set_footer(list_widget.option_count)
             return
 
         list_widget = self.query_one("#palette-list", OptionList)
         list_widget.clear_options()
         self._option_ids = []
 
+        from tera_pilot_tui.fuzzy import match_commands
         if not query:
             self._filtered_commands = list(self._all_commands)
         else:
             self._filtered_commands = [
-                cmd for cmd in self._all_commands
-                if query in cmd.id.lower()
-                or query in cmd.label.lower()
-                or query in cmd.description.lower()
+                cmd for cmd, _score, _pos in match_commands(query, self._all_commands)
             ]
-
-        categories: Dict[str, List[CommandEntry]] = {}
-        for cmd in self._filtered_commands:
-            cat = cmd.category
-            if cat not in categories:
-                categories[cat] = []
-            categories[cat].append(cmd)
-
-        first_real_index = 0
-        for cat, cmds in categories.items():
-            label = COMMAND_GROUP_LABELS.get(cat, cat.title())
-            self._option_ids.append("")  # header
-            list_widget.add_option(f"-- {label} ({len(cmds)}) --")
-            for cmd in cmds:
-                if first_real_index == 0:
-                    first_real_index = list_widget.option_count
-                self._option_ids.append(cmd.id)
-                list_widget.add_option(f"{cmd.label}  -  {cmd.description}")
-
-        if first_real_index < list_widget.option_count:
-            list_widget.highlighted = first_real_index
+        self._render_rows(list_widget, query, self._filtered_commands,
+                          len(self._all_commands))
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         """Handle mouse click on an option.
@@ -434,7 +533,15 @@ class CommandPalette(ModalScreen):
         try:
             current = list_widget.highlighted
             if current is not None and current > 0:
-                list_widget.highlighted = current - 1
+                nxt = current - 1
+                # Skip group headers ("" in _option_ids); if nothing
+                # real is above, stay where we are.
+                while (nxt >= 0 and nxt < len(self._option_ids)
+                        and not self._option_ids[nxt]):
+                    nxt -= 1
+                if nxt < 0:
+                    return
+                list_widget.highlighted = nxt
         except Exception:
             pass
 
@@ -444,7 +551,15 @@ class CommandPalette(ModalScreen):
             current = list_widget.highlighted
             count = list_widget.option_count
             if current is not None and current < count - 1:
-                list_widget.highlighted = current + 1
+                nxt = current + 1
+                # Skip group headers ("" in _option_ids); if nothing
+                # real is below, stay where we are.
+                while (nxt < count and nxt < len(self._option_ids)
+                        and not self._option_ids[nxt]):
+                    nxt += 1
+                if nxt >= count:
+                    return
+                list_widget.highlighted = nxt
         except Exception:
             pass
 
@@ -459,8 +574,16 @@ class CommandPalette(ModalScreen):
         if highlighted is not None and highlighted < len(self._option_ids):
             selected_id = self._option_ids[highlighted]
             if not selected_id:
-                # Category header - skip to next
-                return
+                # Category header — advance to the next real command.
+                nxt = highlighted + 1
+                while nxt < len(self._option_ids) and not self._option_ids[nxt]:
+                    nxt += 1
+                if nxt < len(self._option_ids):
+                    list_widget.highlighted = nxt
+                    highlighted = nxt
+                    selected_id = self._option_ids[nxt]
+                else:
+                    return
             if self._sub_options:
                 self._on_select_and_close(selected_id)
             else:

@@ -430,6 +430,13 @@ _PROVIDER_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "temperature": 0.2,
         "max_tokens": 4096,
     },
+    "vscodeapi": {
+        "model": "deepseek-v4-pro-0813",
+        "api_key": "",
+        "api_base": "https://vscodeapi.com/v1",
+        "temperature": 0.2,
+        "max_tokens": 4096,
+    },
     "ollama": {
         "model": "llama4",
         "api_key": "",

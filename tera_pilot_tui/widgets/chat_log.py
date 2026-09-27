@@ -153,6 +153,10 @@ class ChatLog(RichLog):
         super().__init__(highlight=True, markup=True, wrap=True, **kwargs)
         self._streaming_text: str = ""
         self._streaming_active: bool = False
+        # v2.5.0: last turn texts in plain form so /copy + Ctrl+O can put
+        # them on the system clipboard (RichLog has no selection API).
+        self._last_answer: str = ""
+        self._last_prompt: str = ""
         # v2.4.2: active theme (True = dark). Set by the app on mount and
         # whenever the user switches theme, so the body palette matches.
         self._dark: bool = True
@@ -180,6 +184,18 @@ class ChatLog(RichLog):
     def _pal(self) -> Dict[str, str]:
         return _PALETTES[bool(self._dark)]
 
+    # ---- clipboard sources --------------------------------------------------
+
+    @property
+    def last_answer(self) -> str:
+        """Plain text of the last assistant answer (for /copy, Ctrl+O)."""
+        return self._last_answer
+
+    @property
+    def last_prompt(self) -> str:
+        """Plain text of the last user prompt (for /copy prompt)."""
+        return self._last_prompt
+
     # ---- user / system ------------------------------------------------------
 
     def add_user(self, text: str) -> None:
@@ -189,6 +205,7 @@ class ChatLog(RichLog):
         # instead of an instant jump (minimal motion language).
         # v2.5.0: the marker carries the theme accent so user turns are
         # scannable at a glance in a long log.
+        self._last_prompt = text or ""
         self.write(Text.assemble(
             ("❯ ", f"bold {self._pal['accent']}"),
             (text, self._pal["body"]),
@@ -294,6 +311,47 @@ class ChatLog(RichLog):
         self._rollback_stream_entry()
         return self.end_streaming()
 
+    # ---- in-place tail replacement (mascot animation) ────────────────────
+
+    def tail_mark(self) -> int:
+        """Line count right now — pass to replace_tail() to redraw after it."""
+        try:
+            return len(self.lines)
+        except Exception:
+            return -1
+
+    def replace_tail(self, baseline: int, renderable: Any) -> bool:
+        """Replace everything written since tail_mark() with *renderable*.
+
+        Used by the /mascot blink animation: frames redraw in place
+        instead of stacking N mascots. Returns False (leaving the log
+        untouched) when the baseline is stale — e.g. new messages
+        arrived mid-animation — so animation can never eat user content.
+        """
+        if baseline is None or baseline < 0:
+            return False
+        try:
+            current = len(self.lines)
+        except Exception:
+            return False
+        expected = getattr(self, "_tail_expected", None)
+        if expected is not None and current != expected:
+            return False  # someone else wrote meanwhile — abort, keep it all
+        try:
+            del self.lines[baseline:]
+        except Exception:
+            return False
+        self._start_line = min(self._start_line, len(self.lines))
+        self._line_cache.clear()
+        self.virtual_size = Size(self._widest_line_width, len(self.lines))
+        self.write(renderable, animate=False)
+        try:
+            self._tail_expected = len(self.lines)
+        except Exception:
+            self._tail_expected = None
+        self.refresh()
+        return True
+
     def add_final(self, text: str) -> None:
         """Display the final assistant response.
 
@@ -309,6 +367,7 @@ class ChatLog(RichLog):
         if self._streaming_active:
             self._rollback_stream_entry()
             self.end_streaming()
+        self._last_answer = text
         # AI responses: plain text, white, no container
         # v2.3.1: smooth scroll so the final answer glides into view.
         self.write(Markdown(clean_display_text(text)), animate=True)

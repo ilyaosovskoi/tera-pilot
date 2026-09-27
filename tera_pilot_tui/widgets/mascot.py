@@ -48,6 +48,14 @@ _FRAME_BLINK[9] = "..ADADKKKADDDDAKKKDADA.."
 
 FRAMES: List[List[str]] = [_FRAME_OPEN, _FRAME_BLINK]
 
+#: Blink cycle for the in-place /mascot animation (open → blink →
+#: open). Short on purpose — the pilot "moves a little", then sits
+#: still so the chat stays readable.
+BLINK_CYCLE: List[int] = [0, 1, 0]
+
+#: Pause between animation frames (seconds).
+FRAME_PAUSE_S = 0.35
+
 WIDTH = 24
 
 _PALETTES: Dict[bool, Dict[str, str]] = {

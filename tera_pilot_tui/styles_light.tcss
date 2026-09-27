@@ -43,11 +43,16 @@ ChatLog {
     height: 1fr;
     background: #fafafa;
     padding: 1 2;
-    scrollbar-size: 1 1;
+    /* v2.5.0: slim quiet scrollbar; horizontal OFF (wrap=True). */
+    scrollbar-size-vertical: 1;
+    scrollbar-size-horizontal: 0;
+    scrollbar-color: #c4c4cc;
+    scrollbar-background: #fafafa;
+    scrollbar-corner-color: #fafafa;
 }
 
 ChatLog:focus {
-    scrollbar-color: #d77757;
+    scrollbar-color: #a1a1aa;
 }
 
 /* ── Input Box (hairline border) ─────────────────── */
@@ -69,7 +74,10 @@ InputBox {
     padding: 0 1;
     background: #ffffff;
     scrollbar-size-vertical: 1;
+    scrollbar-size-horizontal: 0;
     scrollbar-color: #c4c4cc;
+    scrollbar-background: #ffffff;
+    scrollbar-corner-color: #ffffff;
 }
 
 InputBox:focus {
@@ -81,20 +89,17 @@ InputBox:focus-within {
     border: solid #a1a1aa;
 }
 
-/* Working state — the agent is running; a single warm accent line. */
+/* Working state — the agent is running; a single warm accent line.
+   Static on purpose (v2.5.0): the old "breathing" pulse made the
+   composer flicker for the whole turn. */
 InputBox.working {
     border: solid #c75b33;
 }
 
-/* v2.4.1: gentle “breathing” pulse on the working input border. */
-InputBox.working.pulse {
-    border: solid #e2794d;
-    background: #fff7f4;
-}
-
 /* ── Command Suggestions (inline, above input) ──────────────────── */
+/* In normal flow above the composer (NOT docked — same v2.5.0 dock +
+   display-toggle mislay as the approval card had). */
 CommandSuggestions {
-    dock: bottom;
     height: 0;
     margin: 0 2 0 2;
     display: none;
@@ -412,7 +417,9 @@ CommandPalette {
     background: #ffffff;
     border: solid #d4d4d8;
     padding: 0;
-    margin-bottom: 4;
+    /* v2.5.0: no bottom margin — #palette-spacer reserves the composer
+       space (inline margins are ignored on modal children). */
+    margin-bottom: 0;
 }
 
 #palette-header {
@@ -446,6 +453,25 @@ CommandPalette {
     color: #6e6e76;
     padding: 0 1;
     text-style: italic;
+}
+
+/* ── Menu selection (v2.5.0) ──────────────────────────────────────── */
+/* The chosen row carries an accent wash + bold; group headers are
+   disabled options (dim, never clickable); hover is a quiet raise. */
+#palette-list > .option-list--option-highlighted,
+#suggestions-list > .option-list--option-highlighted {
+    background: $accent 18%;
+    text-style: bold;
+}
+
+#palette-list > .option-list--option-hover,
+#suggestions-list > .option-list--option-hover {
+    background: $surface-raised;
+}
+
+#palette-list > .option-list--option-disabled {
+    color: $text-muted;
+    text-style: dim;
 }
 
 /* ── Tool Block Widget ──────────────────────────────────────────── */
@@ -513,7 +539,7 @@ TaskCanvasView {
     margin: 0 2;
     padding: 0 1;
     display: none;
-    color: #b34d2e;
+    color: $accent;
 }
 
 #thinking.visible {
@@ -547,6 +573,7 @@ StatusBar {
     padding: 0 1;
     display: none;
     overflow-y: auto;
+    scrollbar-size-horizontal: 0;
     color: #b34d2e;
 }
 
@@ -644,13 +671,9 @@ AskUserModal {
 }
 
 /* ── Inline approval strip (v2.5.0) ────────────────────────────── */
-/* Confirmation prompt docked directly under the chat, above the
-   composer — no modal overlay, the context stays visible. The free
-   zone above the composer is ~5 rows, so the strip is fixed-height
-   (4 normal / 5 guardian) with truncated single-line rows; anything
-   taller would slide under the composer and eat clicks. */
+/* In normal flow above the composer (NOT docked — dock + display
+   toggle mislayed the card below the input, over the statusline). */
 #approval-card {
-    dock: bottom;
     height: 0;
     margin: 0 2 0 2;
     padding: 0 2;

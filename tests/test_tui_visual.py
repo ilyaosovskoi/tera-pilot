@@ -188,7 +188,13 @@ def test_dark_and_light_css_have_same_selector_set():
 
 
 def test_refresh_selectors_present_in_both_themes():
-    """The v2.4.1 surfaces (InfoBox, working pulse) exist in both themes."""
+    """The v2.4.1 surfaces (InfoBox, working input) exist in both themes.
+
+    v2.5.0: the "breathing" pulse (InputBox.working.pulse) was REMOVED
+    on purpose — it made the composer flicker for the whole turn.
+    Both themes must still carry the static InputBox.working rule and
+    must NOT carry the pulse rule.
+    """
     from pathlib import Path
 
     base = Path(__file__).resolve().parent.parent / "tera_pilot_tui"
@@ -196,8 +202,8 @@ def test_refresh_selectors_present_in_both_themes():
     light = (base / "styles_light.tcss").read_text(encoding="utf-8")
     for css in (dark, light):
         assert "InfoBox {" in css
-        assert "InputBox.working.pulse {" in css
         assert "InputBox.working {" in css
+        assert "InputBox.working.pulse {" not in css
 
 
 def test_info_box_default_version_is_current():

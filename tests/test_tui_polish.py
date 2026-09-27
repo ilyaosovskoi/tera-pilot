@@ -347,7 +347,9 @@ async def test_mascot_command_renders():
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         app._exec_mascot("")
-        await pilot.pause(0.2)
+        # v2.5.0: the mascot blinks in place first (2 × 0.35s frames),
+        # the quip lands after the cycle.
+        await pilot.pause(1.6)
         text = "\n".join(str(line) for line in app.query_one(ChatLog).lines)
         assert "Pilot:" in text
         assert app._exception is None

@@ -21,7 +21,10 @@ class NvidiaNIMProvider(OpenAICompatProvider):
 
     provider_id: str = "nvidia_nim"
     label: str = "Nvidia NIM"
-    default_model: str = "deepseek-ai/deepseek-v4-flash-0731"
+    # Live-probed Sep 2026: deepseek-ai/deepseek-v4-flash-0731 returns
+    # 410 Gone and most catalog IDs 404 for build.nvidia.com keys
+    # (only a subset is deployed per key). Lightning answers in ~1s.
+    default_model: str = "nvidia/nemotron-3.5-lightning-30b-a3b"
     api_base: str = "https://integrate.api.nvidia.com/v1"
     env_var: str = "NVIDIA_API_KEY"
     capabilities: frozenset = frozenset({

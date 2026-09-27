@@ -6,6 +6,8 @@
 
 ### Private, vendor-neutral coding agents — self-hosted, verifiable, and CI-ready.
 
+**Your code never has to leave the machine. Every agent action is provable.** If you can't show *what the agent did and why* — you can't trust it in a real repo. Tera Pilot is built for exactly that trust: local-first models, approvals for every side effect, and a signed audit trail you can hand to anyone.
+
 <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&pause=1000&color=FEBC2E&center=true&vCenter=true&width=650&lines=Textual+TUI+first+%C2%B7+Web+UI+%C2%B7+HTTP+daemon+%C2%B7+MCP%2FACP;17+providers+%C2%B7+Ollama+%2F+LM+Studio+%C2%B7+Guardian+safety;Plan+%E2%86%92+Explore+%E2%86%92+Act+%E2%86%92+Verify+%E2%86%92+Report" alt="Typing animation: TUI first, 17 providers, Plan Explore Act Verify Report"/>
 
 **Textual TUI first · Web UI · HTTP daemon · MCP/ACP · 17 providers · Ollama/LM Studio · Guardian safety · Agent profiles · Fleets**
@@ -44,6 +46,7 @@
 - [🔧 Technical reference](#-technical-reference-click-to-expand) — runtime, trust, interfaces, MCP/ACP, audit, eval
 - [❓ FAQ — objections, answered](#-faq--objections-answered)
 - [🚧 Current limitations (honest)](#-current-limitations-honest)
+- [💎 Tera Pilot Pro](#-tera-pilot-pro) — pricing + early access
 - [📜 License](#-license)
 
 **Repository docs:** [CHANGELOG](CHANGELOG.md) · [THREAT_MODEL](THREAT_MODEL.md) · [SECURITY](SECURITY.md) · [LICENSING](LICENSING.md) · [DEVELOPING](DEVELOPING.md) · [CONTRIBUTING](CONTRIBUTING.md) · [eval/README](eval/README.md)
@@ -51,8 +54,9 @@
 > **Development status: testing phase.** Tera Pilot is being tested with a small
 > group of early users before the public release. Everything here is MIT-licensed
 > and free to use, but you may run into rough edges — especially when installing
-> via npm (see [Quick Start](#-quick-start--pick-your-path) for a reliable fallback). Paid/Pro
-> features are not available yet and will be enabled later; until then the
+> via npm (see [Quick Start](#-quick-start--pick-your-path) for a reliable fallback). Pro
+> features are rolling out: keys are issued manually to early users
+> (see [Tera Pilot Pro](#-tera-pilot-pro)); until your key arrives, the
 > open-source core is the whole product.
 
 ---
@@ -811,6 +815,24 @@ Public `eval/` harness: **58 tasks**, clean-copy fixtures, schema-valid results,
 
 ---
 
+## 💎 Tera Pilot Pro
+
+The core is MIT and stays free forever. **Pro pays for itself** when the agent
+starts saving you model spend or catching bugs before review:
+
+| | Personal | Team |
+|---|---|---|
+| Price | **$10/mo** or **$100/yr** | **$20/mo per seat** |
+| Unlocks | second-opinion reviews, cost-based model routing, spend dashboard | everything in Personal, per-seat keys for the whole team |
+| License | offline Ed25519 key — no account, no telemetry, no phone-home | same, one key per teammate |
+
+**Early access is open now:** keys are issued manually during the rollout.
+[Open an issue](../../issues) with the title `Pro early access` and tell us
+which plan you want — you'll get payment details (crypto/USDT/TON, no bank
+needed) and your key within a day.
+
+---
+
 ## 🎯 Your 60-second challenge
 
 <div align="center">
@@ -825,7 +847,7 @@ npm install -g tera-pilot && tera-pilot-tui
 
 *If it plans, shows its tool calls, asks before anything dangerous, and hands you evidence — welcome aboard, pilot. If not — open an issue, we fix fast.*
 
-⭐ Star the repo if the flight was smooth · 🐛 [Open an issue](../../issues) if it wasn't · 🤝 [Contribute](CONTRIBUTING.md)
+⭐ Star the repo if the flight was smooth · 🐛 [Open an issue](../../issues) if it wasn't · 🤝 [Contribute](CONTRIBUTING.md) · 💎 [Pro early access](#-tera-pilot-pro) — from $10/mo
 
 </div>
 

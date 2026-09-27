@@ -38,6 +38,7 @@ QUICK_PROVIDERS = [
     ("deepseek",   "DeepSeek",       "🟣", True),
     ("groq",       "Groq",           "⚡", True),
     ("openrouter", "OpenRouter",     "🟡", True),
+    ("vscodeapi",  "VSCode API",     "💠", True),
     ("ollama",     "Ollama (local)", "🦙", False),
 ]
 

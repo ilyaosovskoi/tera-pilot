@@ -295,13 +295,13 @@ async def test_model_command_sets_model_on_active_provider():
 
         inp = app.query_one(InputBox)
         inp.focus()
-        inp.value = "/model ox-alpha"
+        inp.value = "/model deepseek-v4-pro-0813"
         await pilot.press("enter")
         await pilot.pause(0.3)
 
         # Provider unchanged, model applied to it.
         assert app.bridge.get_active_provider_id() == active_before
-        assert app.bridge._get_active_model() == "ox-alpha"
+        assert app.bridge._get_active_model() == "deepseek-v4-pro-0813"
 
 
 @pytest.mark.asyncio

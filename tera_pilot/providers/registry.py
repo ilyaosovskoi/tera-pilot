@@ -56,6 +56,7 @@ class ProviderRegistry:
         from .openai_provider import OpenAIProvider
         from .anthropic import AnthropicProvider
         from .openrouter import OpenRouterProvider
+        from .vscodeapi import VSCodeAPIProvider
         from .groq import GroqProvider
         from .deepseek import DeepSeekProvider
         from .zai import ZAIProvider
@@ -71,7 +72,7 @@ class ProviderRegistry:
         from .local import LocalProvider
 
         for cls in (LMStudioProvider, OpenAIProvider, AnthropicProvider,
-                    OpenRouterProvider, GroqProvider, DeepSeekProvider,
+                    OpenRouterProvider, VSCodeAPIProvider, GroqProvider, DeepSeekProvider,
                     ZAIProvider, GeminiProvider, MistralProvider, TogetherProvider,
                     FireworksProvider, XAIProvider, CerebrasProvider,
                     SambaNovaProvider, OllamaProvider, NvidiaNIMProvider,

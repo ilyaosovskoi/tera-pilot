@@ -202,6 +202,7 @@ def get_default_config() -> Dict[str, Any]:
             "openai": {"api_key": None, "base_url": None},
             "anthropic": {"api_key": None, "base_url": None},
             "openrouter": {"api_key": None, "base_url": "https://openrouter.ai/api/v1"},
+            "vscodeapi": {"api_key": None, "base_url": "https://vscodeapi.com/v1"},
         },
         "editor": {
             "tab_size": 4,

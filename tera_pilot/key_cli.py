@@ -147,6 +147,7 @@ def cmd_set(provider_id: str, key: Optional[str], model: Optional[str] = None) -
             "anthropic": "claude-sonnet-4-6",
             "deepseek": "deepseek-chat",
             "openrouter": "openrouter/auto",
+            "vscodeapi": "deepseek-v4-pro-0813",
         }
         entry["model"] = defaults.get(provider_id, "")
     cfg["active_provider"] = provider_id

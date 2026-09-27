@@ -53,6 +53,10 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
         # makes our binding resolve first.
         Binding("ctrl+p", "open_command_palette", "Commands", priority=True, show=True),
         Binding("ctrl+t", "toggle_theme", "Theme", show=True),
+        # v2.5.0: copy the last AI answer to the system clipboard.
+        # (Ctrl+C is the interrupt key with priority, so TextArea's own
+        # copy binding never fires — this is the reliable copy path.)
+        Binding("ctrl+o", "copy_last_answer", "Copy answer", show=True),
     ]
 
     def __init__(self, bridge: Optional[TeraPilotBridge] = None, **kwargs: Any) -> None:
@@ -164,6 +168,7 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
             "Ctrl+G for the web GUI[/dim]\n"
             "[dim]Ctrl+C interrupts · Ctrl+D quits · Ctrl+T switches theme · "
             "Up/Down recall history · Shift+Enter for a new line[/dim]\n"
+            "[dim]Ctrl+O copies the last answer · paste with Cmd/Ctrl+V[/dim]\n"
             "[dim]The composer grows as you type — long requests are fine.[/dim]"
         )
 
@@ -487,6 +492,9 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
         # G20c: router mode
         elif cmd == "/router-mode":
             self._exec_router_mode(arg)
+        # LOCAL-PROTOTYPE: smart routing/failover status
+        elif cmd == "/route":
+            self._exec_route(arg)
         # v2.4.0: agent profiles
         elif cmd == "/agent":
             self._exec_agent(arg)
@@ -559,6 +567,8 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
             self._exec_bridge(arg)
         elif cmd == "/mascot":
             self._exec_mascot(arg)
+        elif cmd == "/copy":
+            self._exec_copy(arg)
         else:
             self.query_one(ChatLog).add_system(
                 f"Unknown command: {cmd}. Type /help for available commands."
@@ -579,7 +589,8 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
                     has_sub_options=False,
                 )
             )
-        palette = CommandPalette(custom_commands=custom_entries)
+        palette = CommandPalette(custom_commands=custom_entries,
+                                   above_y=self._palette_above_y())
 
         def on_result(result: Optional[Tuple[str, bool]]) -> None:
             if result is None:
@@ -600,6 +611,10 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
 
     def action_open_command_palette(self) -> None:
         self.open_command_palette()
+
+    def action_copy_last_answer(self) -> None:
+        """Ctrl+O — copy the last AI answer to the system clipboard."""
+        self._exec_copy("")
 
     # ── Sub-selection palettes ────────────────────────────────────
 
@@ -646,10 +661,23 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
             )
             self.query_one(InputBox).focus()
 
+    def _palette_above_y(self) -> Optional[int]:
+        """Terminal row the command palette must stay above (composer top).
+
+        v2.5.0: menus dock directly above the input instead of floating
+        over the chat and the typed line. None = unknown, the palette
+        keeps its TCSS fallback margin.
+        """
+        try:
+            return self.query_one(InputBox).region.y
+        except Exception:
+            return None
+
     def _open_sub_palette(self, cmd_name: str, options: List[Dict[str, Any]]) -> None:
         palette = CommandPalette(
             sub_options=options,
             sub_prompt=f"Select {cmd_name}...",
+            above_y=self._palette_above_y(),
         )
 
         def on_result(result: Optional[Tuple[str, bool]]) -> None:
@@ -807,6 +835,8 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
             "verify": lambda: self._exec_verify(""),
             "agent": lambda: self._exec_agent(""),
             "key": lambda: self._exec_key(""),
+            "route": lambda: self._exec_route(""),
+            "copy": lambda: self._exec_copy(""),
         }
         handler = dispatch.get(cmd_id)
         if handler:
@@ -894,7 +924,7 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
         /model <provider_id>         — switch provider (keeps its model)
         /model <provider_id> <model> — switch provider AND set the model
         /model <model>               — set the model on the currently
-                                       active provider (e.g. /model ox-alpha)
+                                       active provider (e.g. /model deepseek-v4-pro)
         """
         chat = self.query_one(ChatLog)
 
@@ -1085,7 +1115,7 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
             lines.append("")
 
         lines.append(
-            "Ctrl+C=interrupt | Ctrl+D=quit | Ctrl+G=GUI | Ctrl+P=commands | Ctrl+T=theme"
+            "Ctrl+C=interrupt | Ctrl+D=quit | Ctrl+G=GUI | Ctrl+P=commands | Ctrl+T=theme | Ctrl+O=copy answer"
         )
         lines.append("Type / for inline suggestions, Ctrl+P for the full palette.")
         chat.add_system("\n".join(lines))
@@ -3144,16 +3174,15 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
         except Exception:
             pass
         # v2.3.1: mark the input box with the "working" class while the
-        # agent is running so its border glows with the accent color.
-        # v2.4.1: drop the pulse class when the turn ends (the periodic
-        # tick only re-adds it while working).
+        # agent is running so its border uses the accent color. The
+        # border is STATIC — the old "breathing" pulse (a 0.3s timer
+        # toggling a second class) was removed in v2.5.0: it made the
+        # composer flicker for the whole turn with no information value.
         try:
             box = self.query_one(InputBox)
             working = state in ("thinking", "running")
             if working != box.has_class("working"):
                 box.set_class(working, "working")
-            if not working and box.has_class("pulse"):
-                box.remove_class("pulse")
         except Exception:
             pass
 
@@ -3162,8 +3191,8 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
 
         Runs on a 0.15s timer; no-ops when idle. The word follows the
         current phase (thinking / running) and a braille spinner cycles
-        in front of it (v2.4.1). While the agent is working the input
-        box also gets a gentle "breathing" pulse (``pulse`` class).
+        in front of it (v2.4.1). The composer border stays static while
+        working (v2.5.0: the old "breathing" pulse was removed).
         """
         if not self._turn_running or self._status_state not in ("thinking", "running"):
             return
@@ -3175,14 +3204,6 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
         word = "thinking" if self._status_state == "thinking" else "running"
         spinner = self._spinner_frames[self._status_frame % len(self._spinner_frames)]
         info.update_status(f"{spinner} {word}")
-        # v2.4.1: toggle the pulse class every other tick (~0.3s) so the
-        # working input border "breathes" between the two accent tones.
-        try:
-            box = self.query_one(InputBox)
-            if box.has_class("working"):
-                box.set_class(self._status_frame % 2 == 0, "pulse")
-        except Exception:
-            pass
 
     # ------------------------------------------------------------------ actions
     def action_interrupt(self) -> None:
@@ -4254,6 +4275,7 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
         palette = CommandPalette(
             sub_options=options,
             sub_prompt="Select today's agent…",
+            above_y=self._palette_above_y(),
         )
 
         def on_result(result: Optional[Tuple[str, bool]]) -> None:
@@ -4428,6 +4450,7 @@ class TeraPilotTUIApp(WorkflowCommandsMixin, App):
         palette = CommandPalette(
             sub_options=options,
             sub_prompt="Select provider to set an API key…",
+            above_y=self._palette_above_y(),
         )
 
         def on_result(result: Optional[Tuple[str, bool]]) -> None:

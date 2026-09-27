@@ -5,6 +5,16 @@
   "version": "0.1.0",
   "publisher": "tera-pilot",
   "license": "MIT",
+  "homepage": "https://github.com/ilyaosovskoi/tera-pilot#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ilyaosovskoi/tera-pilot",
+    "directory": "editors/vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/ilyaosovskoi/tera-pilot/issues"
+  },
+  "keywords": ["tera-pilot", "ai", "coding-agent", "privacy", "local-first", "bridge"],
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Other"],
   "main": "./extension.js",

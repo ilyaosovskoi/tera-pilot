@@ -23,7 +23,7 @@ CONFIG = Path.home() / ".tera_pilot" / "config.json"
 VALID = {
     "gemini", "openai", "anthropic", "openrouter", "groq", "deepseek",
     "mistral", "together", "fireworks", "xai", "cerebras", "sambanova",
-    "zai", "ollama", "lmstudio",
+    "zai", "ollama", "lmstudio", "vscodeapi",
 }
 
 

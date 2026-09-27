@@ -188,6 +188,8 @@ class AgentRuntime:
         # A named suffix appended after the verbosity suffix; "normal"
         # resolves to "" so default prompts are unchanged.
         self.output_style = (output_style or "normal").strip().lower() or "normal"
+        # LOCAL-PROTOTYPE: last smart-route decision (for /route display).
+        self._last_route: Optional[Dict[str, Any]] = None
         # Agent Profile (v2.4.0): optional system-prompt override (see
         # set_system_prompt_fragment). None = stock section prompt only.
         self._profile_prompt_fragment: Optional[str] = None
@@ -1008,6 +1010,14 @@ class AgentRuntime:
         if self._on_token_delta is not None and not force_non_streaming:
             return self._generate_streaming_with_retry(provider, messages, tools=tools)
 
+        # LOCAL-PROTOTYPE: smart failover branch (default OFF — zero
+        # behaviour change unless router_smart_failover is set). Replaces
+        # the same-provider retry loop below with an ordered candidate
+        # chain: complexity-routed, local-first for cheap tasks, health
+        # aware, per-call timeout with abandonment.
+        if self._smart_failover_enabled() and not self._model_override:
+            return self._generate_smart(provider, messages, tools)
+
         import random as _random
         last_exc: Optional[Exception] = None
         call_start = time.time()
@@ -1166,6 +1176,104 @@ class AgentRuntime:
             )
         raise last_exc if last_exc is not None else RuntimeError("generate failed")
 
+    # ── LOCAL-PROTOTYPE: smart failover ─────────────────────────────
+    # Not committed. See tera_pilot/smart_route.py for the full design.
+
+    def _smart_cfg(self) -> Dict[str, Any]:
+        try:
+            from tera_pilot.smart_route import load_smart_config
+            return load_smart_config()
+        except Exception:
+            return {}
+
+    def _smart_failover_enabled(self) -> bool:
+        try:
+            return bool(self._smart_cfg().get("router_smart_failover", False))
+        except Exception:
+            return False
+
+    def _smart_record(self, provider_id: str, ok: bool,
+                      latency_s: float = 0.0, kind: str = "error") -> None:
+        """Feed one call outcome into the health store. Never raises."""
+        try:
+            from tera_pilot.smart_route import get_health_store
+            store = get_health_store()
+            if ok:
+                store.record_success(provider_id, latency_s)
+            else:
+                store.record_error(provider_id, kind)
+        except Exception:
+            pass
+
+    def _record_call_success(self, provider_id: str, model: str, resp: Any) -> None:
+        """Token-tracker + quota accounting for one successful call."""
+        try:
+            tracker = getattr(self, "_token_tracker", None)
+            if tracker is not None:
+                tracker.record(
+                    provider=provider_id,
+                    model=model,
+                    tokens_in=int(getattr(resp, "tokens_in", 0) or 0),
+                    tokens_out=int(getattr(resp, "tokens_out", 0) or 0),
+                )
+        except Exception as track_err:
+            logger.debug("[agent] token_tracker.record failed: %s", track_err)
+        try:
+            quota = getattr(self, "_quota_tracker", None)
+            if quota is not None:
+                quota.record(section=self.section, provider=provider_id, model=model)
+        except Exception as quota_err:
+            logger.debug("[agent] quota.record failed: %s", quota_err)
+
+    def _generate_smart(self, provider: Any, messages: Any,
+                        tools: Optional[List[dict]] = None) -> Any:
+        """Ordered candidate chain with per-call timeout (smart branch)."""
+        from tera_pilot.smart_route import (
+            Candidate, generate_with_failover, order_candidates, prompt_text,
+        )
+        cfg = self._smart_cfg()
+        prompt = prompt_text(messages)
+        candidates, decision = order_candidates(prompt, self._registry, cfg=cfg)
+        active_pid = getattr(provider, "provider_id", "")
+        if active_pid and all(c.provider_id != active_pid for c in candidates):
+            # Continuity first: the user's active provider leads, the
+            # router-ordered chain follows for failover.
+            candidates = [Candidate(
+                provider_id=active_pid, model="",
+                reason="active provider (continuity)")] + candidates
+        if not candidates:
+            raise RuntimeError("smart routing found no candidates")
+        switched: List[Dict[str, Any]] = []
+
+        def _on_switch(info: Dict[str, Any]) -> None:
+            switched.append(info)
+            logger.warning("[smart] failed over: %s", info.get("used"))
+
+        resp, report = generate_with_failover(
+            self._registry, messages, candidates, tools=tools,
+            timeout_s=float(cfg.get("router_call_timeout_s", 180.0)),
+            is_retryable=self._is_retryable,
+            cancel_check=(lambda: self.tools.is_cancelled()),
+            on_switch=_on_switch,
+            cfg=cfg,
+        )
+        used = report.get("used", {}) or {}
+        used_model = used.get("model") or getattr(
+            getattr(provider, "config", None), "model", "?")
+        self._record_call_success(str(used.get("provider_id", "")), used_model, resp)
+        # NOTE: health already recorded inside generate_with_failover
+        # (record_success for the winner, record_error per failed
+        # candidate). Recording again here would double-count calls/EMA.
+        self._last_route = {
+            "ts": time.time(),
+            "complexity": decision.get("complexity"),
+            "reasoning": decision.get("reasoning", ""),
+            "local_first_applied": decision.get("local_first_applied", False),
+            "used": used,
+            "attempts": report.get("attempts", []),
+        }
+        return resp
+
     @staticmethod
     def _is_quota_error(exc: Exception) -> bool:
         """True for 429 / RESOURCE_EXHAUSTED / quota-exceeded errors."""
@@ -1288,11 +1396,18 @@ class AgentRuntime:
                         )
                 except Exception as quota_err:
                     logger.debug("[agent] quota.record failed: %s", quota_err)
+                # LOCAL-PROTOTYPE: feed streaming outcomes into the
+                # health store (no mid-stream failover — partial output
+                # was already delivered; only the stats travel).
+                self._smart_record(provider.provider_id, True, elapsed)
                 return resp
 
             except Exception as exc:
                 last_exc = exc
                 elapsed = time.time() - call_start
+                # LOCAL-PROTOTYPE: streaming errors count against the
+                # provider so the next non-streaming turn routes around it.
+                self._smart_record(getattr(provider, "provider_id", "?"), False)
                 # P0.x-fix: NEVER retry a stream that already emitted
                 # chunks. The partial text was already relayed to the
                 # UI / token-delta sink — restarting the stream would

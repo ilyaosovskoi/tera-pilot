@@ -47,7 +47,9 @@ class CommandSuggestions(Widget):
     DEFAULT_CSS = """
     CommandSuggestions {
         height: 0;
-        dock: bottom;
+        /* v2.5.0: in normal flow above the composer (NOT docked —
+           dock:bottom + display:none→block mislays the bar below the
+           input, over the statusline — same bug as the approval card). */
         margin: 0 1 0 1;
     }
 
@@ -81,6 +83,7 @@ class CommandSuggestions(Widget):
         self._all_commands: List[CommandEntry] = []
         self._items: List[SuggestionItem] = []
         self._highlighted: int = -1
+        self._last_query: str = ""
         self._on_select: Any = None  # callback(item: SuggestionItem)
 
     def compose(self) -> ComposeResult:
@@ -104,21 +107,24 @@ class CommandSuggestions(Widget):
             self._all_commands.extend(custom_entries)
 
     def show_suggestions(self, query: str = "") -> None:
-        """Filter and show suggestions matching *query* (without the leading '/')."""
+        """Filter and show suggestions matching *query* (without the leading '/').
+
+        LOCAL-PROTOTYPE: weighted fuzzy matching (name ×3, word parts
+        ×2, description ×0.5) instead of plain substring — "cm" finds
+        /commit and /compact, typos still match.
+        """
+        from tera_pilot_tui.fuzzy import match_commands
         query_lower = query.lower().lstrip("/")
+        self._last_query = query_lower
 
         self._items = []
-        for cmd in self._all_commands:
-            if (not query_lower
-                    or query_lower in cmd.id.lower()
-                    or query_lower in cmd.label.lower()
-                    or query_lower in cmd.description.lower()):
-                self._items.append(SuggestionItem(
-                    id=cmd.id,
-                    label=cmd.label,
-                    description=cmd.description,
-                    needs_sub=cmd.has_sub_options,
-                ))
+        for cmd, _score, _positions in match_commands(query_lower, self._all_commands):
+            self._items.append(SuggestionItem(
+                id=cmd.id,
+                label=cmd.label,
+                description=cmd.description,
+                needs_sub=cmd.has_sub_options,
+            ))
 
         self._highlighted = 0 if self._items else -1
         self._sync_highlight()
@@ -174,20 +180,39 @@ class CommandSuggestions(Widget):
     # ---- internal ------------------------------------------------------
 
     def _sync_highlight(self) -> None:
-        """Rebuild the list with highlight indicator and set highlight."""
+        """Rebuild the list with highlight indicator and set highlight.
+
+        LOCAL-PROTOTYPE: matched characters in the label render bold so
+        the eye lands on why each row matched; descriptions stay dim and
+        truncated. Rows are Rich Text objects (OptionList accepts them).
+        v2.5.0: the highlighted row ALSO gets a ❯ marker + bold label so
+        the choice reads without relying on the list's background tint.
+        """
+        from rich.text import Text
+        from tera_pilot_tui.fuzzy import highlight_text, subsequence_positions
         try:
             list_w = self.query_one("#suggestions-list", OptionList)
         except Exception:
             return
         list_w.clear_options()
+        current_query = getattr(self, "_last_query", "")
         for i, item in enumerate(self._items):
-            if i == self._highlighted:
-                prefix = "> "
-            else:
-                prefix = "  "
-            # Format: > /command  —  description
-            display = f"{prefix}{item.label}  [dim]-[/dim]  {item.description}"
-            list_w.add_option(display)
+            selected = i == self._highlighted
+            prefix = "❯ " if selected else "  "
+            positions = (subsequence_positions(current_query, item.label) or []
+                         if current_query else [])
+            # Bold base for the selected row; matched chars stay bold
+            # via the mark style in both cases.
+            highlighted = highlight_text(item.label, positions,
+                                         plain_style="bold" if selected else "")
+            row = Text(prefix, style="bold" if selected else "")
+            row.append_text(highlighted if isinstance(highlighted, Text)
+                            else Text(item.label))
+            desc = item.description
+            if len(desc) > 60:
+                desc = desc[:60] + "…"
+            row.append(f"  —  {desc}", style="dim")
+            list_w.add_option(row)
         if 0 <= self._highlighted < list_w.option_count:
             list_w.highlighted = self._highlighted
 

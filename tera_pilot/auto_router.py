@@ -85,6 +85,11 @@ DEFAULT_TIERS = {
                  "local, free, private — for offline/short tasks"),
         ModelTier("openrouter", "deepseek/deepseek-v4-flash", 8192, 0.00014, 0.00028, "fast", ["chat"],
                  "cheap and fast for boilerplate/CRUD/formatting"),
+        # vscodeapi.com gateway (free plan: 1M tokens/mo, all models).
+        # Prices are live GET /v1/models data (per-1K tokens) — the
+        # marketing homepage understates them, do NOT copy from there.
+        ModelTier("vscodeapi", "deepseek-v4-flash-0731", 8192, 0.000115, 0.000115, "fast", ["chat"],
+                 "cheapest fast lane for boilerplate/CRUD/formatting"),
     ],
     TaskComplexity.SIMPLE: [
         ModelTier("groq", "llama-3.3-70b-versatile", 16384, 0.00059, 0.00079, "fast", ["chat", "tool_calling"],
@@ -105,6 +110,8 @@ DEFAULT_TIERS = {
                  "open-source fast inference for general coding"),
         ModelTier("mistral", "mistral-large-latest", 16384, 0.002, 0.006, "medium", ["chat", "tool_calling"],
                  "balanced for general coding and tool use"),
+        ModelTier("vscodeapi", "deepseek-v4-pro-0813", 16384, 0.000552, 0.000552, "fast", ["chat", "tool_calling"],
+                 "strong cheap reasoning/coding with 1M context"),
     ],
     TaskComplexity.MODERATE: [
         ModelTier("anthropic", "claude-sonnet-5", 8192, 0.003, 0.015, "medium", ["chat", "tool_calling", "vision"],
@@ -117,6 +124,8 @@ DEFAULT_TIERS = {
                  "balanced for general coding and tool use"),
         ModelTier("openrouter", "anthropic/claude-sonnet-5", 8192, 0.003, 0.015, "medium", ["chat", "tool_calling"],
                  "strong at frontend/visual/design-oriented tasks and large-context codebase navigation"),
+        ModelTier("vscodeapi", "gpt-5.6-sol", 8192, 0.008947, 0.008947, "medium", ["chat", "tool_calling"],
+                 "flagship-tier coding/vision via the gateway"),
     ],
     TaskComplexity.COMPLEX: [
         ModelTier("anthropic", "claude-sonnet-5", 16384, 0.003, 0.015, "medium", ["chat", "tool_calling", "vision"],
@@ -127,6 +136,8 @@ DEFAULT_TIERS = {
                  "strong at long structured document generation and multimodal tasks"),
         ModelTier("anthropic", "claude-opus-5", 16384, 0.003, 0.015, "medium", ["chat", "tool_calling"],
                  "strong at frontend/visual/design-oriented tasks and large-context codebase navigation"),
+        ModelTier("vscodeapi", "claude-fable-5.1", 16384, 0.016606, 0.016606, "medium", ["chat", "tool_calling"],
+                 "flagship agentic coding (pricey — spends free quota fast)"),
     ],
     TaskComplexity.EXPERT: [
         ModelTier("anthropic", "claude-opus-5", 16384, 0.015, 0.075, "slow", ["chat", "tool_calling", "vision"],
@@ -135,6 +146,8 @@ DEFAULT_TIERS = {
                  "strong at algorithmic/mathematical reasoning and complex multi-step planning"),
         ModelTier("anthropic", "claude-sonnet-5", 4096, 0.015, 0.075, "slow", ["chat", "tool_calling"],
                  "strong at algorithmic/mathematical reasoning and complex multi-step planning"),
+        ModelTier("vscodeapi", "claude-opus-4.8", 4096, 0.008303, 0.008303, "slow", ["chat", "tool_calling"],
+                 "heaviest reasoning via the gateway"),
     ],
 }
 

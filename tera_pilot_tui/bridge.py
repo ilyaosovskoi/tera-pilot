@@ -3318,6 +3318,23 @@ class TeraPilotBridge:
         return {"ok": True, "id": chat_id, "title": doc["title"],
                 "messages": len(clean)}
 
+    def get_smart_status(self) -> Dict[str, Any]:
+        """Smart routing/failover state (LOCAL PROTOTYPE): config,
+        last routing decision of this agent, provider health snapshot."""
+        try:
+            from tera_pilot.smart_route import describe_health
+            out = describe_health()
+            try:
+                if self._agent is not None:
+                    out["last_route"] = getattr(self._agent, "_last_route", None)
+                else:
+                    out["last_route"] = None
+            except Exception:
+                out["last_route"] = None
+            return {"ok": True, **out}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     # ── v2.5.0: IDE bridge server (/bridge) ────────────────────────
 
     def ide_bridge_status(self) -> Dict[str, Any]:

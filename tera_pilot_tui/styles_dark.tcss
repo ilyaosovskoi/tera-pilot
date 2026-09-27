@@ -46,11 +46,18 @@ ChatLog {
     height: 1fr;
     background: #0a0a0c;
     padding: 1 2;
-    scrollbar-size: 1 1;
+    /* v2.5.0: slim quiet scrollbar. Horizontal is OFF — wrap=True
+       means the log never scrolls sideways, and the old 1x1 rule
+       painted a useless bottom bar ("убогие кнопки вбок"). */
+    scrollbar-size-vertical: 1;
+    scrollbar-size-horizontal: 0;
+    scrollbar-color: #3a3a41;
+    scrollbar-background: #0a0a0c;
+    scrollbar-corner-color: #0a0a0c;
 }
 
 ChatLog:focus {
-    scrollbar-color: #d77757;
+    scrollbar-color: #6b6b74;
 }
 
 /* ── Input Box (hairline border) ─────────────────── */
@@ -72,7 +79,10 @@ InputBox {
     padding: 0 1;
     background: #131316;
     scrollbar-size-vertical: 1;
+    scrollbar-size-horizontal: 0;
     scrollbar-color: #3a3a41;
+    scrollbar-background: #131316;
+    scrollbar-corner-color: #131316;
 }
 
 InputBox:focus {
@@ -84,20 +94,17 @@ InputBox:focus-within {
     border: solid #4a4a52;
 }
 
-/* Working state — the agent is running; a single warm accent line. */
+/* Working state — the agent is running; a single warm accent line.
+   Static on purpose (v2.5.0): the old "breathing" pulse made the
+   composer flicker for the whole turn. */
 InputBox.working {
     border: solid #d77757;
 }
 
-/* v2.4.1: gentle “breathing” pulse on the working input border. */
-InputBox.working.pulse {
-    border: solid #e8916b;
-    background: #17171b;
-}
-
 /* ── Command Suggestions (inline, above input) ──────────────────── */
+/* In normal flow above the composer (NOT docked — same v2.5.0 dock +
+   display-toggle mislay as the approval card had). */
 CommandSuggestions {
-    dock: bottom;
     height: 0;
     margin: 0 2 0 2;
     display: none;
@@ -415,7 +422,9 @@ CommandPalette {
     background: #111114;
     border: solid #2e2e33;
     padding: 0;
-    margin-bottom: 4;
+    /* v2.5.0: no bottom margin — #palette-spacer reserves the composer
+       space (inline margins are ignored on modal children). */
+    margin-bottom: 0;
 }
 
 #palette-header {
@@ -449,6 +458,25 @@ CommandPalette {
     color: #86868b;
     padding: 0 1;
     text-style: italic;
+}
+
+/* ── Menu selection (v2.5.0) ──────────────────────────────────────── */
+/* The chosen row carries an accent wash + bold; group headers are
+   disabled options (dim, never clickable); hover is a quiet raise. */
+#palette-list > .option-list--option-highlighted,
+#suggestions-list > .option-list--option-highlighted {
+    background: $accent 25%;
+    text-style: bold;
+}
+
+#palette-list > .option-list--option-hover,
+#suggestions-list > .option-list--option-hover {
+    background: $surface-raised;
+}
+
+#palette-list > .option-list--option-disabled {
+    color: $text-muted;
+    text-style: dim;
 }
 
 /* ── Tool Block Widget ──────────────────────────────────────────── */
@@ -516,7 +544,7 @@ TaskCanvasView {
     margin: 0 2;
     padding: 0 1;
     display: none;
-    color: #d77757;
+    color: $accent;
 }
 
 #thinking.visible {
@@ -550,6 +578,7 @@ StatusBar {
     padding: 0 1;
     display: none;
     overflow-y: auto;
+    scrollbar-size-horizontal: 0;
     color: #d77757;
 }
 
@@ -647,13 +676,14 @@ AskUserModal {
 }
 
 /* ── Inline approval strip (v2.5.0) ────────────────────────────── */
-/* Confirmation prompt docked directly under the chat, above the
-   composer — no modal overlay, the context stays visible. The free
-   zone above the composer is ~5 rows, so the strip is fixed-height
-   (4 normal / 5 guardian) with truncated single-line rows; anything
-   taller would slide under the composer and eat clicks. */
+/* Confirmation prompt in the normal flow directly under the chat,
+   above the composer — no modal overlay, the context stays visible.
+   v2.5.0-fix: this MUST NOT be docked. dock:bottom + display:none→
+   block mislays the card: it rendered BELOW the input, overlapping
+   the statusline (buttons on the last screen row). In-flow it sits
+   exactly between the chat and the composer. Fixed height (4 normal
+   / 5 guardian) with truncated single-line rows. */
 #approval-card {
-    dock: bottom;
     height: 0;
     margin: 0 2 0 2;
     padding: 0 2;

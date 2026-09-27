@@ -571,6 +571,16 @@ def _provider_templates(handler, body=None):
             "docs_url": "https://openrouter.ai/keys",
         },
         {
+            "id": "vscodeapi",
+            "name": "VSCode API",
+            "provider_type": "openai_compat",
+            "base_url": "https://vscodeapi.com/v1",
+            "model": "deepseek-v4-pro-0813",
+            "env_var": "VSCODEAPI_API_KEY",
+            "description": "40+ models via one key. 1M free tokens/month, no card required.",
+            "docs_url": "https://vscodeapi.com/docs",
+        },
+        {
             "id": "together",
             "name": "Together AI",
             "provider_type": "openai_compat",

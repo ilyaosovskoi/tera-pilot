@@ -64,9 +64,39 @@ function venvDir() {
 }
 
 function venvPython(dir) {
-  return process.platform === 'win32'
-    ? path.join(dir, 'Scripts', 'python.exe')
-    : path.join(dir, 'bin', 'python3');
+  // Preferred location; some systems only create `bin/python`.
+  // Prefer python3, fall back to python (POSIX). Win32 uses Scripts\python.exe.
+  if (process.platform === 'win32') {
+    return path.join(dir, 'Scripts', 'python.exe');
+  }
+  const p3 = path.join(dir, 'bin', 'python3');
+  if (fs.existsSync(p3)) return p3;
+  return path.join(dir, 'bin', 'python');
+}
+
+function checkPythonVersion(python) {
+  // Require 3.11+. Unparseable output (stubs, wrappers) → warn and continue,
+  // never fail: the pip install below is the real gate.
+  try {
+    const res = spawnSync(python, ['-c', 'import sys; print(sys.version_info[0]*1000+sys.version_info[1])'], {
+      encoding: 'utf8',
+      timeout: 15000,
+    });
+    const v = parseInt(String(res.stdout || '').trim(), 10);
+    if (Number.isNaN(v)) {
+      log(`could not detect Python version from ${python} — continuing anyway.`);
+      return true;
+    }
+    if (v < 3011) {
+      console.error(`[tera-pilot] ERROR: Python 3.11+ is required, but ${python} reports ${Math.floor(v / 1000)}.${v % 1000}.`);
+      console.error('  Fix: install Python 3.11+ and re-run with TERA_PILOT_PYTHON=/path/to/python3 npm install -g tera-pilot');
+      return false;
+    }
+    return true;
+  } catch (_) {
+    log(`could not detect Python version from ${python} — continuing anyway.`);
+    return true;
+  }
 }
 
 function markerPath(dir) {
@@ -114,46 +144,60 @@ function main() {
   }
 
   const vdir = venvDir();
-  const vpy = venvPython(vdir);
   const marker = readMarker(vdir);
 
   // Fast path: same version, venv looks intact → nothing to do.
-  if (!process.env.TERA_PILOT_FORCE && marker && marker.version === VERSION && fs.existsSync(vpy)) {
+  // NOTE: the marker is written only AFTER a successful install (see below),
+  // so a previous failed pip install can never masquerade as "already installed".
+  if (!process.env.TERA_PILOT_FORCE && marker && marker.version === VERSION && fs.existsSync(venvPython(vdir))) {
     log(`already installed (v${VERSION}) — Python venv at ${vdir}`);
     return 0;
   }
 
+  if (!checkPythonVersion(python)) {
+    process.exit(1);
+  }
+
   // Create the venv (reuse an existing one if present).
-  if (!fs.existsSync(vpy)) {
+  if (!fs.existsSync(venvPython(vdir))) {
     log(`creating Python virtualenv at ${vdir} …`);
     fs.mkdirSync(path.dirname(vdir), { recursive: true });
     if (!run(python, ['-m', 'venv', vdir])) {
       console.error('[tera-pilot] ERROR: failed to create the Python virtualenv.');
       console.error(`  target: ${vdir}`);
       console.error('  Fix: create it manually with:  python3 -m venv ' + vdir);
+      console.error('  Debian/Ubuntu note: this usually means the python3-venv package is missing —');
+      console.error('    run:  sudo apt install python3-venv   (or python3.11-venv / python3.12-venv)');
       process.exit(1);
     }
   }
 
-  writeMarker(vdir);
+  if (!fs.existsSync(venvPython(vdir))) {
+    console.error('[tera-pilot] ERROR: virtualenv created but no Python interpreter found inside it.');
+    console.error(`  looked in: ${vdir} (bin/python3, bin/python)`);
+    process.exit(1);
+  }
 
   if (process.env.TERA_PILOT_SKIP_PIP === '1') {
+    writeMarker(vdir);
     log(`venv ready at ${vdir} (pip install skipped — TERA_PILOT_SKIP_PIP=1).`);
     return 0;
   }
 
   log(`installing Tera Pilot v${VERSION} + dependencies into the venv (this downloads packages on first install) …`);
   const pipArgs = buildPipArgs(PKG_DIR, process.env.TERA_PILOT_PIP_EXTRA_ARGS);
-  if (!run(vpy, ['-m', 'pip', ...pipArgs])) {
+  if (!run(venvPython(vdir), ['-m', 'pip', ...pipArgs])) {
     console.error('[tera-pilot] ERROR: pip install failed.');
     console.error('  The npm package is installed, but the Python runtime is not ready.');
+    console.error('  (No success marker was written, so re-running the install will retry cleanly.)');
     console.error('  Fix options:');
     console.error('    1. Re-run:              npm install -g tera-pilot');
     console.error('    2. Install offline:     TERA_PILOT_SKIP_PIP=1 npm install -g tera-pilot');
-    console.error('       then pip install manually:  ' + vpy + ' -m pip install -r ' + path.join(PKG_DIR, 'requirements.txt'));
+    console.error('       then pip install manually:  ' + venvPython(vdir) + ' -m pip install -r ' + path.join(PKG_DIR, 'requirements.txt'));
     process.exit(1);
   }
 
+  writeMarker(vdir);
   log(`done — Python venv at ${vdir} (v${VERSION}). Run: tera-pilot / tera-pilot-tui`);
   return 0;
 }

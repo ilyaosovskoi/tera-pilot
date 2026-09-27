@@ -3,6 +3,7 @@ Tera Pilot v1.0.4 — Unified Provider Interface.
 
 A single abstraction across all model backends:
   - OpenRouterProvider   (any model via openrouter.ai)
+  - VSCodeAPIProvider    (40+ models via vscodeapi.com, 1M free tokens/mo)
   - GroqProvider         (LPU-accelerated Llama / Mixtral)
   - OpenAIProvider       (GPT-4o, o1, …)
   - AnthropicProvider    (Claude family)
@@ -35,6 +36,7 @@ from .registry import ProviderRegistry, get_registry
 from .openai_provider import OpenAIProvider
 from .anthropic import AnthropicProvider
 from .openrouter import OpenRouterProvider
+from .vscodeapi import VSCodeAPIProvider
 from .groq import GroqProvider
 from .deepseek import DeepSeekProvider
 from .zai import ZAIProvider
@@ -61,6 +63,7 @@ __all__ = [
     "OpenAIProvider",
     "AnthropicProvider",
     "OpenRouterProvider",
+    "VSCodeAPIProvider",
     "GroqProvider",
     "DeepSeekProvider",
     "ZAIProvider",

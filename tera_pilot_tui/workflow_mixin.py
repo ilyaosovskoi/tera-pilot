@@ -767,23 +767,121 @@ class WorkflowCommandsMixin:
                 self._wf_say("IDE bridge stopped. Start: /bridge start [port]")
 
     def _exec_mascot(self, arg: str) -> None:
-        """/mascot — the 8-bit pilot, blinking, with a one-liner."""
+        """/mascot — the 8-bit pilot, blinking in place, with a one-liner.
+
+        v2.5.0: short blink cycle (open → blink → open, ~1s total)
+        redrawn over the same lines instead of stacking mascots. The
+        rewrite aborts the moment anything else lands in the log, so a
+        fast user can never lose content to the animation.
+        """
         from .widgets.chat_log import ChatLog
-        from .widgets.mascot import render_mascot, random_quip
-        frame = int(getattr(self, "_mascot_frame", 0)) % 2
-        try:
-            self._mascot_frame = frame + 1
-        except Exception:
-            pass
+        from .widgets.mascot import render_mascot, random_quip, BLINK_CYCLE, FRAME_PAUSE_S
         dark = bool(getattr(self, "_dark_theme", True))
         chat = self.query_one(ChatLog)
         try:
-            chat.write(render_mascot(dark=dark, frame=frame))
+            baseline = chat.tail_mark()
+            chat.write(render_mascot(dark=dark, frame=BLINK_CYCLE[0]), animate=False)
+            chat._tail_expected = len(chat.lines)
         except Exception:
-            pass
-        chat.add_system(f"[dim]Pilot: {random_quip()}[/dim]")
+            baseline = -1
         try:
             from .widgets.input_box import InputBox
+            self.query_one(InputBox).focus()
+        except Exception:
+            pass
+
+        async def _blink() -> None:
+            import asyncio as _asyncio
+            try:
+                for frame in BLINK_CYCLE[1:]:
+                    await _asyncio.sleep(FRAME_PAUSE_S)
+                    if not chat.replace_tail(
+                            baseline, render_mascot(dark=dark, frame=frame)):
+                        return  # new content arrived — keep it, stop blinking
+            except Exception:
+                pass
+            try:
+                chat.add_system(f"[dim]Pilot: {random_quip()}[/dim]")
+            except Exception:
+                pass
+
+        try:
+            self.run_worker(_blink(), exclusive=False)
+        except Exception:
+            # Workers unavailable (odd context) — fall back to static.
+            try:
+                chat.add_system(f"[dim]Pilot: {random_quip()}[/dim]")
+            except Exception:
+                pass
+
+    def _exec_route(self, arg: str) -> None:
+        """/route — smart routing/failover status (local prototype)."""
+        res = self.bridge.get_smart_status()
+        if not res.get("ok"):
+            self._wf_say(f"Failed: {res.get('error')}", error=True)
+            return
+        lines = [f"Smart failover: {'ON' if res.get('enabled') else 'OFF'} "
+                 f"(config: router_smart_failover) · local-first: "
+                 f"{'ON' if res.get('local_first') else 'OFF'} · "
+                 f"call timeout: {res.get('call_timeout_s')}s · "
+                 f"slow after: {res.get('slow_secs')}s EMA"]
+        last = res.get("last_route")
+        if last:
+            used = last.get("used", {}) or {}
+            lines.append(f"Last decision: {last.get('complexity', '?')} → "
+                         f"{used.get('provider_id', '?')}/{used.get('model') or 'default'} "
+                         f"({used.get('latency_s', '?')}s)")
+            for a in (last.get("attempts", []) or []):
+                if a.get("outcome") == "ok":
+                    continue
+                lines.append(f"  ↳ failed over from {a.get('provider_id')} "
+                             f"({a.get('outcome')}: {(a.get('error') or '')[:80]})")
+        else:
+            lines.append("No routed turn yet this session.")
+        health = res.get("health", []) or []
+        if health:
+            lines.append("Provider health:")
+            lines += [f"  {h['provider_id']}: {h['status']} "
+                      f"(EMA {h['ema_latency_s']}s, err×{h['consec_errors']}, n={h['calls']})"
+                      for h in health]
+        else:
+            lines.append("No health data yet — it accumulates as calls run.")
+        self._wf_say("\n".join(lines))
+
+    def _exec_copy(self, arg: str) -> None:
+        """/copy [answer|prompt] — copy the last turn text to the clipboard.
+
+        v2.5.0: RichLog has no text-selection API and Ctrl+C is the
+        interrupt key, so this (+ Ctrl+O) is the copy path out of the
+        chat. Pasting INTO the composer already works (terminal
+        bracketed-paste / Ctrl+V via TextArea)."""
+        from tera_pilot_tui.clipboard import copy_text
+        from tera_pilot_tui.widgets.chat_log import ChatLog
+        from tera_pilot_tui.widgets.input_box import InputBox
+        which = (arg or "answer").strip().lower()
+        chat = self.query_one(ChatLog)
+        if which in ("prompt", "question", "q", "user"):
+            text, what = chat.last_prompt, "prompt"
+        else:
+            text, what = chat.last_answer, "answer"
+        if not text:
+            self._wf_say(f"Nothing to copy yet — no {what} in this session.",
+                         error=True)
+            return
+        try:
+            ok, method = copy_text(text, app=self)
+        except Exception as exc:
+            self._wf_say(f"Copy failed: {exc}", error=True)
+            return
+        if ok:
+            n = len(text)
+            size = f"{n / 1024:.1f}k chars" if n >= 1024 else f"{n} chars"
+            self._wf_say(f"Copied last {what} ({size}) via {method}.")
+        else:
+            self._wf_say("Copy failed: no clipboard tool found "
+                         "(need pbcopy / wl-copy / xclip / xsel / clip).",
+                         error=True)
+        try:
             self.query_one(InputBox).focus()
         except Exception:
             pass
